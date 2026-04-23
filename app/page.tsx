@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
@@ -64,18 +66,19 @@ export default function FashionAIPage() {
     if (!textToSend.trim() && !selectedImage) return;
 
     const currentImageUrl = previewUrl;
+    setIsLoading(true);
 
-    // 添加用户消息到列表并立即渲染
+    // Add user message and AI placeholder in one go
     setMessages(prev => [
-      ...prev, 
-      { role: 'user', content: textToSend, imageUrl: currentImageUrl || undefined }
+      ...prev,
+      { role: 'user', content: textToSend, imageUrl: currentImageUrl || undefined },
+      { role: 'ai', content: '' } // AI placeholder is always the last one
     ]);
 
-    // 清空输入框状态
+    // Clear input state immediately
     setInput("");
     setSelectedImage(null);
     setPreviewUrl(null);
-    setIsLoading(true);
 
     try {
       const formData = new FormData();
@@ -87,18 +90,58 @@ export default function FashionAIPage() {
         body: formData,
       });
 
-      if (!res.ok) {
-        throw new Error(`API request failed: ${res.statusText}`);
+      // Stop loading indicator once stream starts
+      setIsLoading(false);
+
+      if (!res.ok || !res.body) {
+        throw new Error(`API request failed: ${res.statusText || 'No response body'}`);
       }
 
-      const data = await res.json();
-      
-      // 添加 AI 的回复
-      setMessages(prev => [...prev, { role: 'ai', content: data.text }]);
-    } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'ai', content: "抱歉，出错了。请检查网络或 API Key 设置后稍后再试。" }]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // Read the stream and parse SSE
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep the last, possibly incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.substring(6);
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const textChunk = parsed.text;
+              if (textChunk) {
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  const lastMessage = newMessages[newMessages.length - 1];
+                  lastMessage.content += textChunk; // Append only the 'text' content
+                  return newMessages;
+                });
+              }
+            } catch (e) {
+              console.error("Failed to parse JSON from SSE chunk:", jsonStr);
+            }
+          }
+        }
+      }
+
+    } catch (error: any) {
+      console.error("Streaming error:", error);
+      // Update the last message (the AI placeholder) with the error
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        lastMessage.content = error.message || "抱歉，出错了。请检查网络或 API Key 设置后稍后再试。";
+        return newMessages;
+      });
     } finally {
+      // Ensure loading is always stopped
       setIsLoading(false);
     }
   };
@@ -204,11 +247,15 @@ export default function FashionAIPage() {
                       {msg.role === 'user' ? <User className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
                     </div>
                     <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm whitespace-pre-wrap leading-relaxed`}>
+                      <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm ${msg.role === 'ai' ? 'prose prose-sm dark:prose-invert' : 'whitespace-pre-wrap leading-relaxed'}`}>
                         {msg.imageUrl && (
                           <img src={msg.imageUrl} alt="Uploaded" className="max-w-[200px] sm:max-w-xs rounded-xl mb-3 border border-border/10" />
                         )}
-                        {msg.content}
+                        {msg.role === 'ai' ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        ) : (
+                          msg.content
+                        )}
                       </div>
                     </div>
                   </div>
