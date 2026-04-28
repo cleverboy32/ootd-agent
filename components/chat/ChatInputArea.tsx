@@ -46,7 +46,7 @@ export function ChatInputArea({
         )}
 
         <div className="relative group">
-          <div className="flex items-start bg-background border border-border/20 rounded-3xl p-2 pl-4 shadow-md focus-within:ring-2 focus-within:ring-indigo-500/50 hover:ring-2 hover:ring-[var(--gold)]/30 transition-all">
+          <div className="flex items-start bg-background border border-border/20 rounded-3xl p-2 pl-4 shadow-md focus-within:ring-2 focus-within:ring-[var(--gold)]/30 hover:ring-2 hover:ring-[var(--gold)]/20 transition-all">
             <input 
               type="file"
               accept="image/*"
@@ -80,7 +80,7 @@ export function ChatInputArea({
               size="icon" 
               onClick={() => handleSend()}
               disabled={isLoading || (!input.trim() && !selectedImage)}
-              className="h-10 w-10 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full shrink-0 ml-2 disabled:opacity-50"
+              className="h-10 w-10 bg-gradient-to-br from-amber-400 to-yellow-600 hover:brightness-110 text-black rounded-full shrink-0 ml-2 disabled:opacity-50 transition-all"
             >
               {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
             </Button>

@@ -21,7 +21,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
   return (
     <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex items-start gap-3 max-w-[95%] sm:max-w-[90%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-indigo-500 text-white' : 'bg-primary/10 text-primary'}`}>
+        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-pink-300 text-white' : 'bg-primary/10 text-primary'}`}>
           {msg.role === 'user' ? (
             <User className="h-5 w-5" />
           ) : (
@@ -32,7 +32,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
         <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
           {/* 4. 使用上面计算出的条件来决定是否渲染气泡 */}
           {shouldRenderBubble && (
-            <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm ${msg.role === 'ai' ? 'prose prose-sm dark:prose-invert max-w-none' : 'whitespace-pre-wrap leading-relaxed'}`}>
+            <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-gradient-to-br from-amber-400/20 to-yellow-600/10 text-black rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm ${msg.role === 'ai' ? 'prose prose-sm dark:prose-invert max-w-none' : 'whitespace-pre-wrap leading-relaxed'}`}>
               {msg.imageUrl && (
                 <img src={msg.imageUrl} alt="Uploaded" className="max-w-[200px] sm:max-w-xs rounded-xl mb-3 border border-border/10" />
               )}
