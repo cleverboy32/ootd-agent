@@ -81,20 +81,40 @@ export default function FashionAIPage() {
           }
         });
       },
-      onImageGenerated: (data: { imageUrl: string; alt: string }) => {
+      onImagePlaceholder: (data: { id: string; alt: string; }) => {
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
-          // 如果最后一条消息是 AI，则追加内容
+          // 如果最后一条消息是 AI，则追加一个占位符
           if (lastMessage && lastMessage.role === 'ai' && Array.isArray(lastMessage.content)) {
-            const updatedMessage = { ...lastMessage, content: [...lastMessage.content, { type: 'image', content: data.imageUrl, alt: data.alt }] };
+            const updatedMessage = {
+              ...lastMessage,
+              content: [...lastMessage.content, { type: 'image_placeholder', id: data.id, content: data.alt }]
+            };
             return [...prev.slice(0, -1), updatedMessage];
           }
-          // 否则，创建一条新的 AI 消息
+          // 否则，创建一条新的 AI 消息（仅包含占位符）
           else {
-            const newAiMessage: Message = { role: 'ai', content: [{ type: 'image', content: data.imageUrl, alt: data.alt }] };
+            const newAiMessage: Message = { role: 'ai', content: [{ type: 'image_placeholder', id: data.id, content: data.alt }] };
             return [...prev, newAiMessage];
           }
         });
+      },
+      onImageGenerated: (data: { id: string; imageUrl: string; alt: string }) => {
+        setMessages(prev => prev.map(msg => {
+          if (msg.role === 'ai' && Array.isArray(msg.content)) {
+            return {
+              ...msg,
+              content: msg.content.map(part => {
+                // 找到对应的占位符并替换它
+                if (part.type === 'image_placeholder' && part.id === data.id) {
+                  return { ...part, type: 'image', content: data.imageUrl, alt: data.alt };
+                }
+                return part;
+              })
+            };
+          }
+          return msg;
+        }));
       },
       onError: (message: string) => {
         setMessages(prev => {

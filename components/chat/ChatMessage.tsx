@@ -40,15 +40,23 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
               {Array.isArray(msg.content) ? (
                 msg.content.map((part, index) => {
                   if (part.type === 'text') {
-                    return <ReactMarkdown key={index} remarkPlugins={[remarkGfm]}>{part.content}</ReactMarkdown>;
+                    return <ReactMarkdown key={part.id || index} remarkPlugins={[remarkGfm]}>{part.content}</ReactMarkdown>;
                   } else if (part.type === 'image') {
                     return (
                       <img
-                        key={index}
+                        key={part.id || index}
                         src={part.content}
                         alt={part.alt || 'Generated image'}
-                        className="max-w-full rounded-xl my-3 border border-border/10"
+                        className="h-[200px] rounded-xl my-3 border border-border/10"
                       />
+                    );
+                  } else if (part.type === 'image_placeholder') {
+                    return (
+                      <div key={part.id || index} className="h-[200px] w-full max-w-[200px] rounded-xl my-3 border border-border/10 bg-muted/40 flex flex-col items-center justify-center text-center p-2">
+                        <div className="h-8 w-8 border-4 border-dashed rounded-full border-muted-foreground/30 border-t-transparent animate-spin mb-2"></div>
+                        <p className="text-xs text-muted-foreground">正在生成图片：</p>
+                        <p className="text-xs text-muted-foreground truncate w-full">{part.content}</p>
+                      </div>
                     );
                   }
                   return null;

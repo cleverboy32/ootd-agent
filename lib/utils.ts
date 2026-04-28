@@ -17,7 +17,8 @@ export const fileToBase64 = (file: File): Promise<string> => {
 
 export interface StreamHandlers {
   onTextChunk: (text: string) => void;
-  onImageGenerated: (data: { imageUrl: string; alt: string }) => void;
+  onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
+  onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
   onError: (message: string) => void;
   onStreamEnd: (message: string) => void;
 }
@@ -83,6 +84,9 @@ export const streamResponse = async (
           switch (eventName) {
             case 'text_chunk':
               handlers.onTextChunk(data.text);
+              break;
+            case 'image_placeholder':
+              handlers.onImagePlaceholder(data);
               break;
             case 'image_generated':
               handlers.onImageGenerated(data);
