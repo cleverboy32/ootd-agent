@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
 
 interface ChatInputAreaProps {
@@ -30,7 +30,7 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   return (
     <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-20">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {previewUrl && (
           <div className="mb-3 relative inline-block">
             <div className="p-1 bg-background border border-border rounded-xl shadow-sm">
@@ -46,7 +46,7 @@ export function ChatInputArea({
         )}
 
         <div className="relative group">
-          <div className="flex items-center bg-background border border-border rounded-[2rem] p-2 pl-4 shadow-md focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 transition-all">
+          <div className="flex items-start bg-background border border-border/20 rounded-3xl p-2 pl-4 shadow-md focus-within:ring-2 focus-within:ring-indigo-500/50 hover:ring-2 hover:ring-[var(--gold)]/30 transition-all">
             <input 
               type="file"
               accept="image/*"
@@ -62,8 +62,9 @@ export function ChatInputArea({
             >
               <Upload className="h-5 w-5" />
             </Button>
-            <input 
-              type="text"
+            <TextareaAutosize
+              rows={1}
+              maxRows={5}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -73,7 +74,7 @@ export function ChatInputArea({
                 }
               }}
               placeholder="上传衣服照片，获取搭配建议..."
-              className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg min-w-0"
+              className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg resize-none min-h-[40px]"
             />
             <Button 
               size="icon" 

@@ -35,8 +35,25 @@ export const streamResponse = async (
     });
 
     if (!res.ok || !res.body) {
+      // --- 新的、更智能的错误处理 ---
       const errorText = await res.text();
-      throw new Error(`API request failed: ${res.statusText} - ${errorText}`);
+      let errorMessage = `API request failed: ${res.statusText}`;
+      try {
+        // 尝试解析后端返回的JSON错误信息
+        const errorJson = JSON.parse(errorText);
+        // 如果有 message 字段，就用它作为更友好的错误信息
+        if (errorJson.message) {
+          errorMessage = errorJson.message;
+        } else if (errorJson.error) {
+          errorMessage = errorJson.error;
+        }
+        } catch (e) {
+        // 如果解析JSON失败，errorText 本身可能就是有用的信息
+        if (errorText.trim().length > 0) {
+          errorMessage = errorText;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const reader = res.body.getReader();
@@ -83,7 +100,7 @@ export const streamResponse = async (
       }
     }
   } catch (error: any) {
-    console.error("Fetch or streaming error:", error);
-    handlers.onError(error.message || "An unknown streaming error occurred.");
+    handlers.onError("An unknown streaming error occurred.");
   }
 };
+

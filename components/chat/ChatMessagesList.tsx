@@ -1,6 +1,6 @@
 import React from 'react';
-import { Sparkles } from 'lucide-react'; // 引入 Sparkles 图标
 import { Message } from '@/app/page';
+import Image from 'next/image';
 import { ChatMessage } from './ChatMessage';
 
 interface ChatMessagesListProps {
@@ -26,7 +26,7 @@ export function ChatMessagesList({ messages, isLoading, messagesEndRef }: ChatMe
         <div className="flex justify-start">
           <div className="flex items-start gap-3">
             <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <Sparkles className="h-5 w-5 animate-spin" />
+              <Image src="/logo.png" alt="Fashion AI Logo" width={48} height={48} className='animate-spin' />
             </div>
             {/* 在旋转头像旁边，添加一个空的、样式化的气泡 */}
             <div className="flex flex-col gap-1 items-start">

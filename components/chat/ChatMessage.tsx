@@ -1,7 +1,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import Image from 'next/image';
 import remarkGfm from 'remark-gfm';
-import { User, Sparkles } from 'lucide-react';
+import { User } from 'lucide-react';
 import { Message } from '@/lib/types';
 
 // 1. 更新 props 接口以接收 isLoading
@@ -25,7 +26,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
             <User className="h-5 w-5" />
           ) : (
             // 3. 如果是 AI 消息且正在加载，让图标旋转
-            <Sparkles className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+            <Image src="/logo.png" alt="Fashion AI Logo" width={48} height={48} className={`rounded-full ${isLoading ? 'animate-spin' : ''}`} />
           )}
         </div>
         <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>

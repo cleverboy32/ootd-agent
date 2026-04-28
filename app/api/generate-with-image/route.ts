@@ -43,9 +43,16 @@ export async function POST(req: NextRequest) { // 1. Changed back to POST
 
     // If base64Image is provided, convert it to a Part and add to contents
     if (base64Image && mimeType) {
+
+      let cleanBase64 = base64Image.includes(",") 
+      ? base64Image.split(",")[1] 
+      : base64Image;
+
+      cleanBase64 = cleanBase64.replace(/["\s]/g, "");
+
       contentsParts.push({
         inlineData: {
-          data: base64Image,
+          data: cleanBase64,
           mimeType: mimeType,
         },
       });
@@ -81,7 +88,7 @@ export async function POST(req: NextRequest) { // 1. Changed back to POST
             for (const call of functionCalls) {
               if (call.name === 'image_generator') {
                 const imgPrompt = call.args?.prompt as string;
-                console.log("后端日志：开始调用画图工具，Prompt:", imgPrompt);
+                console.log("后端日志：开始调用画图工具，Prompt:");
                 
                 try {
                   // 4. 调用生成图片的模型（同样使用 client.models）
@@ -124,7 +131,7 @@ export async function POST(req: NextRequest) { // 1. Changed back to POST
     });
 
   } catch (error: any) {
-    console.error("混合流式API错误:", error);
+    console.error("混合流式API错误:");
     return new Response(JSON.stringify({ error: "服务器内部错误", message: error.message }), { status: 500 });
   }
 }
