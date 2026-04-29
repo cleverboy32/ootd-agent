@@ -19,6 +19,7 @@ export interface StreamHandlers {
   onTextChunk: (text: string) => void;
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
+  onImageGenerationFailed: (data: { id: string; message: string; alt: string }) => void;
   onError: (message: string) => void;
   onStreamEnd: (message: string) => void;
 }
@@ -90,6 +91,9 @@ export const streamResponse = async (
               break;
             case 'image_generated':
               handlers.onImageGenerated(data);
+              break;
+            case 'image_generation_failed':
+              (handlers as any).onImageGenerationFailed(data);
               break;
             case 'error':
               handlers.onError(data.message);

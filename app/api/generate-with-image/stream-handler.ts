@@ -51,11 +51,21 @@ async function generateAndSendImageInBackground(
     } else {
       console.warn("后端日志：[后台任务] 图片API调用成功，但未返回图片数据。");
       console.log("[IMAGE_DEBUG] 模型返回的完整内容:", JSON.stringify(parts, null, 2));
-      sendEvent(controller, 'error', { message: `画图失败：模型未按预期返回图片数据。Prompt: "${imgPrompt.substring(0, 20)}..."` });
+      // 改为发送特定的图片生成失败事件
+      sendEvent(controller, 'image_generation_failed', {
+        id: imageId,
+        message: `画图失败：模型未按预期返回图片数据。`,
+        alt: imgPrompt
+      });
     }
   } catch (e) {
     console.error("后端日志：[后台任务] !!! 调用图片生成模型时发生严重错误:", e);
-    sendEvent(controller, 'error', { message: `画图失败：调用图片模型API时出错。Prompt: "${imgPrompt.substring(0, 20)}..."` });
+    // 改为发送特定的图片生成失败事件
+    sendEvent(controller, 'image_generation_failed', {
+      id: imageId,
+      message: `画图失败：调用图片模型API时出错。`,
+      alt: imgPrompt
+    });
   }
 }
 

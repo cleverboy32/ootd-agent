@@ -1,0 +1,22 @@
+{
+    "systemMessage": "file://.agents/project-context.prompt",
+    "rules": [
+      "file://.agents/rules/project-guidelines.md"
+    ],
+    "contextProviders": [
+      {
+        "name": "codebase",
+        "params": {}
+      }
+    ],
+    "docs": [
+      {
+        "title": "Google Gen AI SDK",
+        "startUrl": "https://googleapis.github.io/js-genai/release_docs"
+      },
+      {
+        "title": " Google Gen AI SDK 快速上手",
+        "startUrl": "https://ai.google.dev/gemini-api/docs/quickstart?hl=zh-cn"
+      }
+    ]
+  }

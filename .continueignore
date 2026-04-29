@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+.next/
+out/
+
+# Lockfiles
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Version control
+.git/
+
+# System files
+.DS_Store

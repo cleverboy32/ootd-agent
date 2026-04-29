@@ -58,6 +58,14 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
                         <p className="text-xs text-muted-foreground truncate w-full">{part.content}</p>
                       </div>
                     );
+                  } else if (part.type === 'image_failed') {
+                    return (
+                      <div key={part.id || index} className="h-[200px] w-full max-w-[200px] rounded-xl my-3 border border-destructive/50 bg-destructive/10 flex flex-col items-center justify-center text-center p-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-destructive mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <p className="text-xs font-semibold text-destructive">图片生成失败</p>
+                        <p className="text-xs text-destructive/80 mt-1 line-clamp-3" title={part.content}>{part.content}</p>
+                      </div>
+                    );
                   }
                   return null;
                 })

@@ -14,6 +14,8 @@ interface ChatInputAreaProps {
   handleSend: () => void;
   handleImageSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
+  uploadError: string | null; // 新增：接收上传错误信息
+  setUploadError: (error: string | null) => void; // 新增：用于清除错误
 }
 
 export function ChatInputArea({ 
@@ -26,18 +28,32 @@ export function ChatInputArea({
   isLoading, 
   handleSend, 
   handleImageSelect, 
-  fileInputRef 
+  fileInputRef,
+  uploadError,      // 新增
+  setUploadError    // 新增
 }: ChatInputAreaProps) {
   return (
     <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-20">
       <div className="max-w-5xl mx-auto">
+        {/* 当有上传错误时显示错误信息 */}
+        {uploadError && (
+          <div className="mb-3 p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive text-sm flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            {uploadError}
+          </div>
+        )}
+
         {previewUrl && (
           <div className="mb-3 relative inline-block">
             <div className="p-1 bg-background border border-border rounded-xl shadow-sm">
               <img src={previewUrl} alt="Preview" className="h-20 w-20 object-cover rounded-lg" />
             </div>
             <button
-              onClick={() => { setSelectedImage(null); setPreviewUrl(null); }}
+              onClick={() => {
+                setSelectedImage(null);
+                setPreviewUrl(null);
+                setUploadError(null); // 清除图片时也清除错误
+              }}
               className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm hover:scale-105 transition-transform"
             >
               <X className="h-3 w-3" />
@@ -54,9 +70,9 @@ export function ChatInputArea({
               ref={fileInputRef}
               onChange={handleImageSelect}
             />
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="h-10 w-10 text-muted-foreground hover:text-foreground rounded-full shrink-0"
               onClick={() => fileInputRef.current?.click()}
             >
@@ -66,7 +82,10 @@ export function ChatInputArea({
               rows={1}
               maxRows={5}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                if (uploadError) setUploadError(null); // 用户开始输入时清除错误
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -76,8 +95,8 @@ export function ChatInputArea({
               placeholder="上传衣服照片，获取搭配建议..."
               className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg resize-none min-h-[40px]"
             />
-            <Button 
-              size="icon" 
+            <Button
+              size="icon"
               onClick={() => handleSend()}
               disabled={isLoading || (!input.trim() && !selectedImage)}
               className="h-10 w-10 bg-gradient-to-br from-amber-400 to-yellow-600 hover:brightness-110 text-black rounded-full shrink-0 ml-2 disabled:opacity-50 transition-all"
