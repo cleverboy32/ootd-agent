@@ -1,0 +1,38 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+datasource db {
+  provider     = "postgresql"
+  relationMode = "prisma"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  title     String
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // 1. Add the new clientId field as OPTIONAL for now
+  clientId  String?
+
+  // 2. Add an index for faster lookups
+  @@index([clientId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  role           String // "user" or "ai"
+  content        Json // 使用 Json 类型来存储复杂的 content 结构
+  timestamp      DateTime
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId])
+}

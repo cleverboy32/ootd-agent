@@ -1,33 +1,44 @@
+"use client";
+
 import Image from "next/image";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, Trash2 } from "lucide-react"; // Import Trash2
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import React from "react";
-import { Conversation } from "@/lib/types"; // 1. 导入 Conversation 类型
+import { useChatStore } from "@/store/chat";
 
-// 2. 更新 Props 接口
+// The Conversation type is no longer needed here as it's managed by the store
+// import { Conversation } from "@/lib/types";
+
+// Update Props interface - remove props that are now managed by the store
 interface SidebarLeftProps {
   onNewChat: () => void;
-  conversations: Conversation[];
-  activeConversationId: string | null;
-  setActiveConversationId: (id: string) => void;
 }
 
 export function SidebarLeft({ 
   onNewChat,
-  conversations,
-  activeConversationId,
-  setActiveConversationId
 }: SidebarLeftProps) {
+  // Get state and actions directly from the store
+  const { conversations, activeConversationId, setActiveConversationId, deleteConversation } = useChatStore();
+
+  // Handler for the delete button click
+  const handleDelete = (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation(); // Prevents the click from also triggering the setActiveConversationId
+    // Optional: You could add a confirmation dialog here
+    // if (window.confirm('Are you sure you want to delete this chat?')) {
+      deleteConversation(conversationId);
+    // }
+  };
+
   return (
     <aside className="w-72 flex flex-col bg-muted/30 border-r border-border shrink-0">
-      {/* --- 顶部 Logo 和标题 (无变化) --- */}
+      {/* --- Top Logo and Title (unchanged) --- */}
       <div className="p-4 flex items-center gap-3">
         <Image src="/logo.png" alt="Fashion AI Logo" width={32} height={32} className="rounded-md" />
         <span className="font-semibold text-lg tracking-tight">Fashion AI</span>
       </div>
 
-      {/* --- 搜索框 (无变化) --- */}
+      {/* --- Search Box (unchanged) --- */}
       <div className="px-4 mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -38,7 +49,7 @@ export function SidebarLeft({
         </div>
       </div>
 
-      {/* --- 新建对话按钮 (无变化) --- */}
+      {/* --- New Chat Button (unchanged) --- */}
       <div className="px-4 mb-6">
         <Button
           variant="outline"
@@ -52,24 +63,33 @@ export function SidebarLeft({
         </Button>
       </div>
 
-      {/* --- 3. 会话历史记录列表 --- */}
+      {/* --- Conversation History List (Updated) --- */}
       <div className="flex-1 overflow-y-auto px-4">
         <div className="flex flex-col gap-2">
           {conversations.length > 0 ? (
             conversations.map((convo) => (
-              <Button
+              <div
                 key={convo.id}
-                variant="ghost"
                 onClick={() => setActiveConversationId(convo.id)}
-                className={`w-full justify-start truncate px-3 py-5 text-sm h-auto transition-colors
-                  ${activeConversationId === convo.id 
-                    ? 'bg-accent text-accent-foreground' // 激活状态的样式
-                    : 'hover:bg-accent/50'               // 未激活状态的样式
+                className={`group relative flex w-full items-center justify-between rounded-lg p-3 text-sm font-medium transition-colors cursor-pointer
+                  ${
+                    activeConversationId === convo.id
+                      ? 'bg-accent text-accent-foreground'
+                      : 'hover:bg-accent/50'
                   }`
                 }
               >
-                {convo.title}
-              </Button>
+                <span className="truncate pr-2">{convo.title}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => handleDelete(e, convo.id)}
+                  className="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="sr-only">Delete Conversation</span>
+                </Button>
+              </div>
             ))
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm">
