@@ -2,9 +2,11 @@ import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
 import { createOotdStream } from "./stream-handler";
 
+
 export async function POST(req: NextRequest) {
   try {
     const { prompt, base64Image, mimeType } = await req.json();
+    const clientId = req.headers.get('X-Client-ID'); 
 
     if (!prompt && !base64Image) {
       return new Response(JSON.stringify({ error: "Prompt or image is required" }), { status: 400 });
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
 
     // All complex logic is now in createOotdStream
-    const readableStream = createOotdStream(initialParts);
+    const readableStream = createOotdStream(initialParts, clientId!);
     return new Response(readableStream, {
       headers: {
         'Content-Type': 'text/event-stream',

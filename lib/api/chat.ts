@@ -1,55 +1,37 @@
-import { Conversation, Message } from '@/lib/types';
+import { apiClient } from "@/lib/api-client"; // 1. 导入我们新的 apiClient
+import { Conversation, Message } from "@/lib/types";
 
 const API_BASE = '/api';
 
 /**
- * Fetches all conversations for a given client ID.
- * @param clientId The ID of the client.
+ * Fetches all conversations for the current client.
+ * clientId is automatically handled by apiClient.
  * @returns A promise that resolves to an array of conversations.
  */
-export const getConversations = async (clientId: string): Promise<Conversation[]> => {
-  const response = await fetch(`${API_BASE}/conversations?clientId=${clientId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch conversations');
-  }
-  return response.json();
+export const getConversations = async (): Promise<Conversation[]> => {
+  // 2. 使用 apiClient.get，不再需要手动处理 response 和 error
+  // 注意：我们还需要修改后端的 GET /api/conversations 接口，让它从请求头读取 clientId
+  return apiClient.get(`${API_BASE}/conversations`);
 };
 
 /**
  * Creates a new conversation.
+ * clientId is automatically handled by apiClient.
  * @param title The title of the new conversation.
- * @param clientId The ID of the client creating the conversation.
  * @returns A promise that resolves to the newly created conversation.
  */
-export const createConversation = async (title: string, clientId: string): Promise<Conversation> => {
-  const response = await fetch(`${API_BASE}/conversations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, clientId }),
-  });
-  if (!response.ok) {
-    throw new Error('Failed to create conversation');
-  }
-  return response.json();
+export const createConversation = async (title: string): Promise<Conversation> => {
+  // 3. 使用 apiClient.post，body 里只需要核心数据
+  return apiClient.post(`${API_BASE}/conversations`, { title });
 };
 
 /**
  * Deletes a specific conversation.
  * @param conversationId The ID of the conversation to delete.
- * @returns A promise that resolves when the conversation is successfully deleted.
  */
 export const deleteConversation = async (conversationId: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/conversations/${conversationId}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    // Even if the body is empty on a 204, a failed response will likely have a body
-    const errorBody = await response.json().catch(() => ({ message: 'Failed to delete conversation' }));
-    throw new Error(errorBody.message || 'Failed to delete conversation');
-  }
-
-  // No need to return a body for a successful DELETE request
+  // 4. DELETE 请求通常没有返回值，所以我们只调用它
+  await apiClient.delete(`${API_BASE}/conversations/${conversationId}`);
 };
 
 /**
@@ -58,11 +40,7 @@ export const deleteConversation = async (conversationId: string): Promise<void> 
  * @returns A promise that resolves to an array of messages.
  */
 export const getMessages = async (conversationId: string): Promise<Message[]> => {
-  const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch messages');
-  }
-  return response.json();
+  return apiClient.get(`${API_BASE}/conversations/${conversationId}/messages`);
 };
 
 /**
@@ -72,14 +50,5 @@ export const getMessages = async (conversationId: string): Promise<Message[]> =>
  * @returns A promise that resolves to the newly created message.
  */
 export const postMessage = async (conversationId: string, message: { role: string; content: any }): Promise<Message> => {
-  const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(message),
-  });
-  if (!response.ok) {
-    throw new Error('Failed to post message');
-  }
-  return response.json();
+  return apiClient.post(`${API_BASE}/conversations/${conversationId}/messages`, message);
 };
-

@@ -7,12 +7,11 @@ interface ChatState {
   activeConversationId: string | null;
   messages: Message[];
   isLoading: boolean;
-  clientId: string | null;
+  waitReply: boolean;
 }
 
 interface ChatActions {
   // --- 基础 Actions ---
-  setClientId: (clientId: string) => void;
   fetchConversations: () => Promise<void>;
   setActiveConversationId: (id: string | null) => void;
   
@@ -22,6 +21,7 @@ interface ChatActions {
   updateMessages: (updater: (messages: Message[]) => Message[]) => void; // The new powerful action
   saveFinalAiMessage: () => Promise<void>;
   setLoading: (isLoading: boolean) => void;
+  setWaitReply: (waiting: boolean) => void;
   deleteConversation: (conversationId: string) => Promise<void>;
 }
 
@@ -31,19 +31,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   activeConversationId: null,
   messages: [],
   isLoading: false,
-  clientId: null,
+  waitReply: false,
   
   // --- Actions 实现 ---
-  setClientId: (clientId) => set({ clientId }),
   setLoading: (isLoading) => set({ isLoading }),
+  setWaitReply: (waiting) => set({ waitReply: waiting }),
 
   fetchConversations: async () => {
-    const { clientId } = get();
-    if (!clientId) return;
-
     set({ isLoading: true });
     try {
-      const conversations = await chatApi.getConversations(clientId);
+      const conversations = await chatApi.getConversations();
       set({ conversations });
     } catch (error) {
       console.error("Error fetching conversations:", error);
@@ -99,11 +96,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   },
 
   startNewConversation: async (userMessage) => {
-    const { clientId, conversations } = get();
-    if (!clientId) return;
+    const { conversations } = get();
     
     try {
-      const newConversation = await chatApi.createConversation(userMessage.content, clientId);
+      const newConversation = await chatApi.createConversation(userMessage.content);
       await chatApi.postMessage(newConversation.id, { role: userMessage.role, content: userMessage.content });
       
       set({

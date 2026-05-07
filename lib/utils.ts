@@ -1,8 +1,21 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { v4 as uuidv4 } from 'uuid';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+export function getClientId ()  {
+  const CLIENT_ID_STORAGE_KEY = 'ootd-agent-client-id'; // It's a good practice to define the key as a constant
+  let clientId = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+
+  if (!clientId) {
+    clientId = uuidv4();
+    localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
+  }
+
+  return clientId;
 }
 
 // Utility 1: Convert a File to a Base64 string
@@ -30,9 +43,10 @@ export const streamResponse = async (
   handlers: StreamHandlers
 ) => {
   try {
+    const clientId = getClientId();
     const res = await fetch("/api/generate-with-image", {
       method: "POST",
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Client-ID': clientId },
       body: JSON.stringify(payload),
     });
 

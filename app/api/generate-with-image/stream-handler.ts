@@ -1,5 +1,6 @@
 import { Part } from "@google/genai";
 import { genAI, mainModelConfig } from "@/app/lib/google-ai";
+import prismadb from '@/lib/prisma';
 
 // --- 辅助函数定义在外部 ---
 
@@ -118,16 +119,46 @@ function handleStreamError(
  * @param initialParts - 用户初始输入的内容（文本和/或图片）。
  * @returns 一个 ReadableStream 实例。
  */
-export function createOotdStream(initialParts: Part[]): ReadableStream {
+export function createOotdStream(initialParts: Part[], clientId?: string): ReadableStream {
   
   return new ReadableStream({
     async start(controller) {
       console.log("[CONTROLLER_LOG] --- 新的 ReadableStream 已创建 ---");
       const pendingImageTasks: Promise<void>[] = [];
 
+      // --- [新增] --- 获取个性化配置的逻辑
+      let personalizedConfig = mainModelConfig;
+      if (clientId) {
+        try {
+          const clientProfile = await prismadb.clientProfile.findUnique({
+            where: { id: clientId },
+          });
+
+          if (clientProfile && clientProfile.profileData) {
+            const profile = clientProfile.profileData as Record<string, any>;
+            let userContext = "关于当前用户，我们有以下已知信息，请在你的回复中酌情参考：\\n";
+            
+            if (profile.name) userContext += `- 姓名: ${profile.name}\\n`;
+            if (profile.location) userContext += `- 位置: ${profile.location}\\n`;
+            if (profile.preferences) userContext += `- 偏好: ${Array.isArray(profile.preferences) ? profile.preferences.join(', ') : profile.preferences}\\n`;
+            
+            const dynamicSystemInstruction = `${mainModelConfig.systemInstruction}\\n\\n${userContext}`;
+            
+            personalizedConfig = {
+              ...mainModelConfig,
+              systemInstruction: dynamicSystemInstruction,
+            };
+            console.log(`[USER_CONTEXT] 已为 Client ${clientId} 加载个性化配置。`);
+          }
+        } catch (e) {
+          console.error(`[USER_CONTEXT] 为 Client ${clientId} 获取用户信息失败:`, e);
+          // 如果获取失败，继续使用默认配置，不中断流程
+        }
+      }
+
       const chat = genAI.chats.create({
         model: 'gemini-2.5-pro',
-        config: mainModelConfig,
+        config: personalizedConfig,
       });
 
       // 核心递归函数，处理与模型的每一轮对话

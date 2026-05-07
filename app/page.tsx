@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
 import { useChatHandler } from "@/hooks/useChatHandler";
-import { useClientId } from "@/hooks/use-client-id";   // <-- 添加这行
 import { useImageHandler } from "@/hooks/useImageHandler";
 
 
@@ -22,13 +21,11 @@ export default function FashionAIPage() {
     messages,
     isLoading,
     activeConversationId,
-    setClientId,
     fetchConversations,
     setActiveConversationId,
   } = useChatStore();
 
   const { handleSend } = useChatHandler();
-  const clientId = useClientId();
 
   const { 
     selectedImage, 
@@ -39,11 +36,8 @@ export default function FashionAIPage() {
   } = useImageHandler(fileInputRef); // <-- 调用新 hook
  
   useEffect(() => {
-    if (clientId) {
-      setClientId(clientId);
-      fetchConversations();
-    }
-  }, [clientId, setClientId, fetchConversations]);
+    fetchConversations();
+  }, [fetchConversations]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

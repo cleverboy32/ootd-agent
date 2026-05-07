@@ -11,6 +11,7 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
   const {
     messages,
     isLoading,
+    waitReply
   } = useChatStore();
 
   const lastMessage = messages[messages.length - 1];
@@ -42,7 +43,7 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
       ))}
 
       {/* Existing: "AI is typing" indicator */}
-      {isLoading && lastMessage?.role === 'user' && (
+      {waitReply && lastMessage?.role === 'user' && (
         <div className="flex justify-start">
           <div className="flex items-start gap-3">
             <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">

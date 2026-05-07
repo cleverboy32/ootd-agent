@@ -8,8 +8,7 @@ import prismadb from '@/lib/prisma';
  * @returns A JSON response with the list of conversations or an error.
  */
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const clientId = searchParams.get('clientId');
+  const clientId = req.headers.get('X-Client-ID');
 
   if (!clientId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
@@ -40,7 +39,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { title, clientId } = body;
+    const { title } = body;
+    const clientId = req.headers.get('X-Client-ID');
+    
 
     if (!clientId) {
       return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });

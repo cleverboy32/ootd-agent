@@ -9,14 +9,14 @@ export const useChatHandler = () => {
     startNewConversation,
     addUserMessage,
     saveFinalAiMessage,
-    setLoading,
+    setWaitReply,
     updateMessages, // Get the new powerful action
   } = useChatStore();
 
   const handleSend = useCallback(async (prompt: string, imageFile?: File | null) => {
     if (!prompt.trim() && !imageFile) return;
 
-    setLoading(true);
+    setWaitReply(true);
 
     const userMessage: Message = { role: 'user', content: prompt, timestamp: Date.now() };
     let conversationId = activeConversationId;
@@ -29,7 +29,7 @@ export const useChatHandler = () => {
 
     if (!conversationId) {
       console.error("无法获取有效的会话ID。");
-      setLoading(false);
+      setWaitReply(false);
       return;
     }
 
@@ -108,11 +108,11 @@ export const useChatHandler = () => {
             const newAiMessage: Message = { role: 'ai', content: [{ type: 'text', content: errorContent }], timestamp: Date.now() };
             return [...messages, newAiMessage];
         });
-        setLoading(false);
+        setWaitReply(false);
       },
       onStreamEnd: async () => {
         await saveFinalAiMessage();
-        setLoading(false);
+        setWaitReply(false);
       },
     };
 
@@ -129,7 +129,7 @@ export const useChatHandler = () => {
     startNewConversation, 
     addUserMessage, 
     saveFinalAiMessage, 
-    setLoading, 
+    setWaitReply, 
     updateMessages
   ]);
 
