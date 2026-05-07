@@ -21,7 +21,7 @@ export default function FashionAIPage() {
   const {
     messages,
     isLoading,
-    activeConversationId, // GreetingSection 可能仍需要它来判断是否显示
+    activeConversationId,
     setClientId,
     fetchConversations,
     setActiveConversationId,
@@ -68,10 +68,10 @@ export default function FashionAIPage() {
       <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
         <ChatHeader />
         <div className="flex-1 overflow-y-auto no-scrollbar pb-32">
-          {messages.length === 0 ? ( 
+          {!activeConversationId ? ( 
             <GreetingSection handleSend={handleSend} />
           ) : (
-            <ChatMessagesList messages={messages} isLoading={isLoading} messagesEndRef={messagesEndRef} /> // <--- 修改这里
+            <ChatMessagesList messagesEndRef={messagesEndRef} /> // <--- 修改这里
           )}
         </div>
 
@@ -82,6 +82,7 @@ export default function FashionAIPage() {
           previewUrl={previewUrl}
           handleImageSelect={handleImageSelect}
           handleSend={onSend}
+          resetImageState={resetImageState}
           isLoading={isLoading}
           fileInputRef={fileInputRef}
           uploadError={uploadError}      // 新增：传递错误状态

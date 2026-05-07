@@ -1,16 +1,36 @@
-import React from 'react';
-import { Message } from '@/app/page';
+import React, { useEffect } from 'react';
 import Image from 'next/image';
 import { ChatMessage } from './ChatMessage';
-
+import { useChatStore } from '@/store/chat';
 interface ChatMessagesListProps {
-  messages: Message[];
-  isLoading: boolean;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
 
-export function ChatMessagesList({ messages, isLoading, messagesEndRef }: ChatMessagesListProps) {
+export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
+
+  const {
+    messages,
+    isLoading,
+  } = useChatStore();
+
   const lastMessage = messages[messages.length - 1];
+
+  useEffect(() => {
+    console.log(isLoading, messages);
+  }, [isLoading, messages])
+
+  // New: Show a loading state for the entire chat history
+  // This triggers when isLoading is true but there are no messages to display yet.
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex h-full items-center justify-center text-muted-foreground">
+        <div className="flex items-center gap-3 animate-pulse">
+          <Image src="/logo.png" alt="Loading..." width={24} height={24} className='animate-spin' />
+          <span>正在加载历史消息...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-8 px-6 sm:px-12 flex flex-col gap-6">
@@ -21,7 +41,7 @@ export function ChatMessagesList({ messages, isLoading, messagesEndRef }: ChatMe
         />
       ))}
 
-      {/* 新的、独立的加载指示器 */}
+      {/* Existing: "AI is typing" indicator */}
       {isLoading && lastMessage?.role === 'user' && (
         <div className="flex justify-start">
           <div className="flex items-start gap-3">

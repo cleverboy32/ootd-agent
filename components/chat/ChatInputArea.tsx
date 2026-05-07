@@ -7,9 +7,8 @@ interface ChatInputAreaProps {
   input: string;
   setInput: (value: string) => void;
   selectedImage: File | null;
-  setSelectedImage: (file: File | null) => void;
+  resetImageState: () => void;
   previewUrl: string | null;
-  setPreviewUrl: (url: string | null) => void;
   isLoading: boolean;
   handleSend: () => void;
   handleImageSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -22,9 +21,8 @@ export function ChatInputArea({
   input, 
   setInput, 
   selectedImage,
-  setSelectedImage,
   previewUrl,
-  setPreviewUrl,
+  resetImageState,
   isLoading, 
   handleSend, 
   handleImageSelect, 
@@ -49,11 +47,7 @@ export function ChatInputArea({
               <img src={previewUrl} alt="Preview" className="h-20 w-20 object-cover rounded-lg" />
             </div>
             <button
-              onClick={() => {
-                setSelectedImage(null);
-                setPreviewUrl(null);
-                setUploadError(null); // 清除图片时也清除错误
-              }}
+              onClick={resetImageState}
               className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm hover:scale-105 transition-transform"
             >
               <X className="h-3 w-3" />

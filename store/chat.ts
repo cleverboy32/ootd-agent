@@ -80,17 +80,21 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     }
   },
   
+  // ... inside the create<ChatState & ChatActions>((set, get) => ({ ...
+
+  // Find your existing setActiveConversationId and replace it with this:
   setActiveConversationId: async (id) => {
-    set({ activeConversationId: id });
-    if (id) {
-      set({ isLoading: true, messages: [] });
-      try {
-        const messages = await chatApi.getMessages(id);
-        set({ messages });
-      } catch (error) { console.error(error); } 
-      finally { set({ isLoading: false }); }
-    } else {
-      set({ messages: [] });
+    if (id === get().activeConversationId) return;
+
+    if (!id) {
+      set({ activeConversationId: null, messages: [], isLoading: false });
+      return;
+    }
+
+    set({ activeConversationId: id, messages: [], isLoading: true });
+    const messages = await chatApi.getMessages(id);
+    if (get().activeConversationId === id) {
+      set({ messages, isLoading: false });
     }
   },
 
