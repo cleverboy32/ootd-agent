@@ -187,6 +187,30 @@ export function createOotdStream(initialParts: Part[], clientId?: string): Reada
 
           if (calls && calls.length > 0) {
             const functionResponsesForModel: Part[] = [];
+
+
+            // 1. 检查是否存在 gatekeeper_check 调用
+            const gatekeeperCall = calls.find(call => call!.name === 'gatekeeper_check');
+            if (gatekeeperCall) {
+              const { is_ready, questions } = gatekeeperCall.args;
+              if (is_ready === false && Array.isArray(questions) && questions.length > 0) {
+                // AI 决定提问，发送问题并结束流程
+                const combinedQuestions = questions.join(' ');
+                sendEvent(controller, 'text_chunk', { text: combinedQuestions });
+                await handleStreamCompletion(controller, pendingImageTasks);
+                return; 
+              } else {
+                // AI 认为信息已就绪，准备一个"假"回复让它继续
+                functionResponsesForModel.push({
+                  functionResponse: {
+                    name: 'gatekeeper_check',
+                    response: { content: "OK, prerequisite check passed. You can proceed." },
+                  },
+                });
+              }
+            }
+
+
             for (const call of calls) {
               if (call!.name === 'image_generator' && call!.args?.prompt) {
                 const imgPrompt = call!.args.prompt as string;
