@@ -33,7 +33,7 @@ export const tools: FunctionDeclaration[] = [
           description: "如果所有必要信息都已齐全，可以开始执行主要任务，则设置为 true。",
         },
         questions: {
-          description: "如果缺少信息，需要向用户提出的问题列表。",
+          description: "如果缺少信息，需要向用户提出缺少的问题列表。",
         },
       },
       required: ["is_ready"],

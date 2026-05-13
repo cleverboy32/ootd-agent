@@ -117,6 +117,7 @@ export const useChatHandler = () => {
     };
 
     const payload = {
+      conversationId,
       prompt,
       base64Image: imageFile ? await fileToBase64(imageFile) : undefined,
       mimeType: imageFile ? imageFile.type : undefined,

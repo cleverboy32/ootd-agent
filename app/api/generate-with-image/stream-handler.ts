@@ -1,6 +1,8 @@
-import { Part } from "@google/genai";
+import { Content, Part } from "@google/genai";
 import { genAI, mainModelConfig } from "@/app/lib/google-ai";
 import prismadb from '@/lib/prisma';
+import { uploadImageToGCS } from "@/app/services/gcs-service"
+import { Message as PrismaMessage } from '@prisma/client';
 
 // --- 辅助函数定义在外部 ---
 
@@ -22,7 +24,8 @@ function sendEvent(controller: ReadableStreamDefaultController, eventName: strin
 }
 
 /**
- * 在后台异步生成图片并发送相应事件。
+ * --- [核心修改] ---
+ * 在后台异步生成图片，上传到 GCS，并发送图片 URL 事件。
  * @param controller - ReadableStream 的控制器。
  * @param imgPrompt - 用于生成图片的提示词。
  * @param imageId - 该图片的唯一标识符。
@@ -35,7 +38,7 @@ async function generateAndSendImageInBackground(
   try {
     console.log("后端日志：[后台任务] 开始调用画图工具, Prompt:", imgPrompt);
     const imageResponse = await genAI.models.generateContent({
-      model: "gemini-2.5-flash-image",
+      model: "gemini-2.5-flash-image", // 假设这是您的图片生成模型
       contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
     });
 
@@ -43,16 +46,26 @@ async function generateAndSendImageInBackground(
     const imagePart = parts?.find(p => p.inlineData);
 
     if (imagePart?.inlineData) {
-      console.log("后端日志：[后台任务] 图片生成成功，发送 'image_generated' 事件。");
+      const base64Data = imagePart.inlineData.data;
+      const mimeType = imagePart.inlineData.mimeType;
+
+      // 2. 为上传到 GCS 的文件生成一个唯一的文件名
+      const destinationFileName = `outfits/${Date.now()}-${imageId}.png`;
+
+      // 3. 调用 GCS 服务上传图片
+      console.log(`后端日志：[后台任务] 开始上传图片到 GCS: ${destinationFileName}`);
+      const publicUrl = await uploadImageToGCS(base64Data, mimeType, destinationFileName);
+      console.log(`后端日志：[后台任务] 图片上传成功，URL: ${publicUrl}`);
+
+      // 4. 将获取到的公开 URL 发送给前端
       sendEvent(controller, 'image_generated', {
         id: imageId,
-        imageUrl: `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`,
+        imageUrl: publicUrl, // <-- **关键改变**：发送的是 URL，而不是 Base64
         alt: imgPrompt
       });
+
     } else {
       console.warn("后端日志：[后台任务] 图片API调用成功，但未返回图片数据。");
-      console.log("[IMAGE_DEBUG] 模型返回的完整内容:", JSON.stringify(parts, null, 2));
-      // 改为发送特定的图片生成失败事件
       sendEvent(controller, 'image_generation_failed', {
         id: imageId,
         message: `画图失败：模型未按预期返回图片数据。`,
@@ -60,11 +73,10 @@ async function generateAndSendImageInBackground(
       });
     }
   } catch (e) {
-    console.error("后端日志：[后台任务] !!! 调用图片生成模型时发生严重错误:", e);
-    // 改为发送特定的图片生成失败事件
+    console.error("后端日志：[后台任务] !!! 图片生成或上传过程中发生严重错误:", e);
     sendEvent(controller, 'image_generation_failed', {
       id: imageId,
-      message: `画图失败：调用图片模型API时出错。`,
+      message: `画图失败：调用服务时出错。`,
       alt: imgPrompt
     });
   }
@@ -112,6 +124,72 @@ function handleStreamError(
 }
 
 
+// --- [新增] --- 辅助函数，用于将数据库消息格式化为 Google AI 的 History 格式
+// ... (其他导入保持不变) ...
+
+// --- [最终修正版] ---
+function formatHistory(messages: PrismaMessage[]): Content[] {
+  const history: Content[] = [];
+
+  for (const msg of messages) {
+    let role = msg.role;
+    // 1. 标准化角色
+    if (role !== 'user' && role !== 'model' && role !== 'ai') {
+      continue;
+    }
+    if (role === 'ai') {
+      role = 'model';
+    }
+
+    // 2. [核心修正] 解包并标准化 Parts
+    let parts: Part[] = [];
+    try {
+      const content = msg.content as any;
+      if (Array.isArray(content)) {
+        // content 已经是 Part[] 数组
+        parts = content;
+      } else if (typeof content === 'string') {
+        // content 是简单字符串
+        parts = [{ text: content }];
+      } else if (content && Array.isArray(content.parts)) {
+        // 处理 content 是 { parts: [...] } 的情况
+        parts = content.parts;
+      } else if (content && content.text && typeof content.text === 'string') {
+        // 处理 content 是 { text: "..." } 的情况
+        parts = [content];
+      }
+      
+      // [关键] 检查并解开您日志中出现的特定错误结构
+      parts = parts.map(part => {
+        if (part.text && Array.isArray(part.text) && part.text[0] && typeof part.text[0].content === 'string') {
+          return { text: part.text[0].content };
+        }
+        return part;
+      });
+
+    } catch (e) {
+      console.error("Failed to parse message content:", msg.content, e);
+      continue; // 跳过格式错误的消息
+    }
+    
+    // 3. 避免连续的角色（简单策略：如果与上一个相同，则跳过）
+    if (history.length > 0 && history[history.length - 1].role === role) {
+      // 在更复杂的场景中，这里应该是合并逻辑，但为避免错误，先跳过
+      console.warn(`Skipping consecutive message from role: ${role}`);
+      continue;
+    }
+
+    history.push({ role, parts });
+  }
+  
+  // --- [最终校验] ---
+  if (history.length > 0 && history[0].role === 'model') {
+    history.shift();
+  }
+
+  return history;
+}
+
 // --- 主流创建函数 ---
 
 /**
@@ -119,7 +197,7 @@ function handleStreamError(
  * @param initialParts - 用户初始输入的内容（文本和/或图片）。
  * @returns 一个 ReadableStream 实例。
  */
-export function createOotdStream(initialParts: Part[], clientId?: string): ReadableStream {
+export function createOotdStream(initialParts: Part[], clientId?: string, conversationId?: string): ReadableStream {
   
   return new ReadableStream({
     async start(controller) {
@@ -128,6 +206,22 @@ export function createOotdStream(initialParts: Part[], clientId?: string): Reada
 
       // --- [新增] --- 获取个性化配置的逻辑
       let personalizedConfig = mainModelConfig;
+      let history: Content[] = [];
+
+      if (conversationId) {
+        try {
+          // 1. 获取历史消息
+          const messages = await prismadb.message.findMany({
+            where: { conversationId: conversationId },
+            orderBy: { createdAt: 'asc' },
+          });
+          history = formatHistory(messages); // 格式化历史记录
+          console.log(`[HISTORY] 已加载 ${history.length} 条历史消息。`);
+        } catch(e) {
+          console.error(`[HISTORY] 加载历史消息失败:`, e);
+        }
+      }
+
       if (clientId) {
         try {
           const clientProfile = await prismadb.clientProfile.findUnique({
@@ -139,7 +233,8 @@ export function createOotdStream(initialParts: Part[], clientId?: string): Reada
             let userContext = "关于当前用户，我们有以下已知信息，请在你的回复中酌情参考：\\n";
             
             if (profile.name) userContext += `- 姓名: ${profile.name}\\n`;
-            if (profile.location) userContext += `- 位置: ${profile.location}\\n`;
+            if (profile.height) userContext += `- 身高: ${profile.height}\\n`;
+            if (profile.weight) userContext += `- 体重: ${profile.weight}\\n`;
             if (profile.preferences) userContext += `- 偏好: ${Array.isArray(profile.preferences) ? profile.preferences.join(', ') : profile.preferences}\\n`;
             
             const dynamicSystemInstruction = `${mainModelConfig.systemInstruction}\\n\\n${userContext}`;
@@ -148,7 +243,7 @@ export function createOotdStream(initialParts: Part[], clientId?: string): Reada
               ...mainModelConfig,
               systemInstruction: dynamicSystemInstruction,
             };
-            console.log(`[USER_CONTEXT] 已为 Client ${clientId} 加载个性化配置。`);
+            console.log(`[USER_CONTEXT] 已为 Client ${clientId} 加载个性化配置。 ${JSON.stringify(profile)}`);
           }
         } catch (e) {
           console.error(`[USER_CONTEXT] 为 Client ${clientId} 获取用户信息失败:`, e);
@@ -159,6 +254,7 @@ export function createOotdStream(initialParts: Part[], clientId?: string): Reada
       const chat = genAI.chats.create({
         model: 'gemini-2.5-pro',
         config: personalizedConfig,
+        history: history,
       });
 
       // 核心递归函数，处理与模型的每一轮对话

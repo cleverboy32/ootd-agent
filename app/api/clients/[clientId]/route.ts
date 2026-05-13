@@ -6,9 +6,38 @@ type RouteParams = {
   params: Promise<{ clientId: string }>;
 };
 
+// --- [新增] --- 智能合并辅助函数
+/**
+ * Intelligently merges new profile data into the current profile.
+ * - For arrays, it concatenates and removes duplicates.
+ * - For other types, it overwrites.
+ * @param currentProfile The existing profile data from the database.
+ * @param newData The newly extracted data from the AI.
+ * @returns The new, merged profile data object.
+ */
+function mergeProfileData(currentProfile: Record<string, any>, newData: Record<string, any>): Record<string, any> {
+  const merged = { ...currentProfile };
+
+  for (const key in newData) {
+    if (Object.prototype.hasOwnProperty.call(newData, key)) {
+      const newValue = newData[key];
+      const oldValue = merged[key];
+
+      // 如果新旧值都是数组，则合并并去重
+      if (Array.isArray(oldValue) && Array.isArray(newValue)) {
+        merged[key] = [...new Set([...oldValue, ...newValue])];
+      } else {
+        // 否则，直接用新值覆盖
+        merged[key] = newValue;
+      }
+    }
+  }
+  return merged;
+}
+
 /**
  * Handles PATCH requests to update a client's profile data.
- * It merges the new data from the request body with the existing data.
+ * It intelligently merges the new data with the existing data.
  */
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const { clientId } = await params;
@@ -23,23 +52,20 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'A valid JSON object is required' }, { status: 400 });
     }
 
-    // First, ensure the client profile exists using an upsert operation.
     const client = await prismadb.clientProfile.upsert({
       where: { id: clientId },
-      update: {}, // We don't update here, we merge below.
+      update: {},
       create: {
         id: clientId,
-        profileData: {}, // Initialize with an empty JSON object.
+        profileData: {},
       },
     });
 
-    // Fetch the current profile data to perform a merge.
     const currentProfile = (client.profileData as Prisma.JsonObject) || {};
 
-    // Merge the existing data with the new data from the request body.
-    const updatedProfileData = { ...currentProfile, ...body };
+    // --- [核心修改] --- 使用新的智能合并函数
+    const updatedProfileData = mergeProfileData(currentProfile, body);
 
-    // Save the merged data back to the database.
     const updatedClient = await prismadb.clientProfile.update({
       where: { id: clientId },
       data: {
@@ -55,8 +81,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 }
 
+
 /**
  * Handles GET requests to retrieve a client's profile data.
+ * (此函数保持不变)
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
     const { clientId } = await params;
@@ -69,9 +97,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         const clientProfile = await prismadb.clientProfile.findUnique({
             where: { id: clientId },
         });
-
-        // If no profile exists, return a default empty profile.
-        // This can simplify frontend logic, as it won't have to handle null.
+        
         if (!clientProfile) {
             return NextResponse.json({ id: clientId, profileData: {} });
         }

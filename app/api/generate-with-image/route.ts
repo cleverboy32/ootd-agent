@@ -5,7 +5,7 @@ import { createOotdStream } from "./stream-handler";
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, base64Image, mimeType } = await req.json();
+    const { prompt, base64Image, mimeType, conversationId } = await req.json();
     const clientId = req.headers.get('X-Client-ID'); 
 
     if (!prompt && !base64Image) {
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
 
     // All complex logic is now in createOotdStream
-    const readableStream = createOotdStream(initialParts, clientId!);
+    const readableStream = createOotdStream(initialParts, clientId!, conversationId);
     return new Response(readableStream, {
       headers: {
         'Content-Type': 'text/event-stream',

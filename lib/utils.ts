@@ -39,7 +39,7 @@ export interface StreamHandlers {
 
 // Utility 2: The complete API call and stream processing logic
 export const streamResponse = async (
-  payload: { prompt: string; base64Image?: string; mimeType?: string },
+  payload: { prompt: string; base64Image?: string; mimeType?: string,conversationId?: string | null;  },
   handlers: StreamHandlers
 ) => {
   try {
