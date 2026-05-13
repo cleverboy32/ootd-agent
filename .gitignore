@@ -40,4 +40,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 \n# local env files\n.env.local
-.gcs-service-account.json
+gcs-service-account.json
