@@ -17,6 +17,7 @@
     "@prisma/client": "^7.8.0",
     "@types/node-fetch": "2",
     "@types/uuid": "^11.0.0",
+    "async-retry": "^1.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",

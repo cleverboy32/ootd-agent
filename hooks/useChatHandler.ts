@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
-import { streamResponse, fileToBase64 } from '@/lib/utils';
-import { Message } from '@/lib/types';
+import { streamResponse } from '@/lib/utils';
+import { Message, MessageContentPart } from '@/lib/types';
+import {  } from '@/lib/types';
 
 export const useChatHandler = () => {
   const {
@@ -13,14 +14,23 @@ export const useChatHandler = () => {
     updateMessages, // Get the new powerful action
   } = useChatStore();
 
-  const handleSend = useCallback(async (prompt: string, imageFile?: File | null) => {
-    if (!prompt.trim() && !imageFile) return;
-
+  const handleSend = useCallback(async (prompt: string, imageUrl?: string | null) => {
+    if (!prompt.trim() && !imageUrl) return;
     setWaitReply(true);
 
-    const userMessage: Message = { role: 'user', content: prompt, timestamp: Date.now() };
-    let conversationId = activeConversationId;
+    // 1. 构造 content
+    const userMessageContent: MessageContentPart[] = [];
+    if (prompt.trim()) {
+      userMessageContent.push({ type: 'text', content: prompt });
+    }
+    if (imageUrl) {
+      userMessageContent.push({ type: 'image', content: imageUrl });
+    }
 
+    const userMessage = { role: 'user' as const, content: userMessageContent, timestamp: Date.now() };
+
+    // 2. 处理新对话或现有对话
+    let conversationId = activeConversationId;
     if (!conversationId) {
       conversationId = await startNewConversation(userMessage);
     } else {
@@ -118,9 +128,10 @@ export const useChatHandler = () => {
 
     const payload = {
       conversationId,
-      prompt,
-      base64Image: imageFile ? await fileToBase64(imageFile) : undefined,
-      mimeType: imageFile ? imageFile.type : undefined,
+      content: {
+        text: prompt,
+        imageUrl: imageUrl,
+      },
     };
 
     await streamResponse(payload, handlers as any);

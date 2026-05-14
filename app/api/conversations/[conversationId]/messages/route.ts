@@ -96,6 +96,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Role and content are required' }, { status: 400 });
     }
 
+    console.log('接收到的消息', JSON.stringify(content))
+
     // 2. Create the new message and associate it with the conversation
     const newMessage = await prismadb.message.create({
       data: {
@@ -107,9 +109,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     });
 
     // 3. If the message is from the user, trigger the analysis in the background
+    const textToAnalyze = content.map((item) => item.text).join(';')
     if (role === 'user' && typeof content === 'string') {
       // We don't await this, so it doesn't block the response.
-      triggerAnalysis(content, conversationId);
+      triggerAnalysis(textToAnalyze, conversationId);
     }
 
     return NextResponse.json(newMessage, { status: 201 });

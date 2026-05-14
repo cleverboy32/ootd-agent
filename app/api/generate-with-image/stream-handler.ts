@@ -3,8 +3,27 @@ import { genAI, mainModelConfig } from "@/app/lib/google-ai";
 import prismadb from '@/lib/prisma';
 import { uploadImageToGCS } from "@/app/services/gcs-service"
 import { Message as PrismaMessage } from '@prisma/client';
+import retry from 'async-retry'; // 1. 导入 retry 库
+import { generateSummary } from "@/lib/services/summarization-service";
+import { urlToGenerativePart } from '@/app/lib/image';
 
 // --- 辅助函数定义在外部 ---
+
+const CONTEXT_TOKEN_LIMIT = 1000; // 为模型最大值留出一些余地
+
+function estimateTokenCount(history: Content[]): number {
+  let totalToken = 0;
+  for (const message of history) {
+    for (const part of message.parts) {
+      if (part.text) {
+        totalToken += Math.floor(part.text.length / 2);
+      } else if (part.inlineData) {
+        totalToken += 250; // 为每张图片估算一个固定的 token 值
+      }
+    }
+  }
+  return totalToken;
+}
 
 /**
  * 向客户端发送一个 Server-Sent Event (SSE)。
@@ -25,10 +44,7 @@ function sendEvent(controller: ReadableStreamDefaultController, eventName: strin
 
 /**
  * --- [核心修改] ---
- * 在后台异步生成图片，上传到 GCS，并发送图片 URL 事件。
- * @param controller - ReadableStream 的控制器。
- * @param imgPrompt - 用于生成图片的提示词。
- * @param imageId - 该图片的唯一标识符。
+ * 在后台异步生成图片，包含重试逻辑，上传到 GCS，并发送图片 URL 事件。
  */
 async function generateAndSendImageInBackground(
   controller: ReadableStreamDefaultController,
@@ -36,51 +52,64 @@ async function generateAndSendImageInBackground(
   imageId: string
 ) {
   try {
-    console.log("后端日志：[后台任务] 开始调用画图工具, Prompt:", imgPrompt);
-    const imageResponse = await genAI.models.generateContent({
-      model: "gemini-2.5-flash-image", // 假设这是您的图片生成模型
-      contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
-    });
-
-    const parts = imageResponse?.candidates?.[0]?.content?.parts;
-    const imagePart = parts?.find(p => p.inlineData);
-
-    if (imagePart?.inlineData) {
-      const base64Data = imagePart.inlineData.data;
-      const mimeType = imagePart.inlineData.mimeType;
-
-      // 2. 为上传到 GCS 的文件生成一个唯一的文件名
-      const destinationFileName = `outfits/${Date.now()}-${imageId}.png`;
-
-      // 3. 调用 GCS 服务上传图片
-      console.log(`后端日志：[后台任务] 开始上传图片到 GCS: ${destinationFileName}`);
-      const publicUrl = await uploadImageToGCS(base64Data, mimeType, destinationFileName);
-      console.log(`后端日志：[后台任务] 图片上传成功，URL: ${publicUrl}`);
-
-      // 4. 将获取到的公开 URL 发送给前端
-      sendEvent(controller, 'image_generated', {
-        id: imageId,
-        imageUrl: publicUrl, // <-- **关键改变**：发送的是 URL，而不是 Base64
-        alt: imgPrompt
+    // 2. 使用 retry 包裹图片生成和上传的整个过程
+    const publicUrl = await retry(async (bail, attemptNumber) => {
+      console.log(`后端日志：[后台任务][尝试 ${attemptNumber}] 开始调用画图工具, Prompt:`, imgPrompt);
+      
+      const imageResponse = await genAI.models.generateContent({
+        model: "gemini-2.5-flash-image", // 您的图片生成模型
+        contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
       });
 
-    } else {
-      console.warn("后端日志：[后台任务] 图片API调用成功，但未返回图片数据。");
-      sendEvent(controller, 'image_generation_failed', {
+      const parts = imageResponse?.candidates?.[0]?.content?.parts;
+      const imagePart = parts?.find(p => p.inlineData);
+
+      if (imagePart?.inlineData) {
+        const base64Data = imagePart.inlineData.data;
+        const mimeType = imagePart.inlineData.mimeType;
+
+        const destinationFileName = `outfits/${Date.now()}-${imageId}.png`;
+        
+        console.log(`后端日志：[后台任务][尝试 ${attemptNumber}] 开始上传图片到 GCS: ${destinationFileName}`);
+        const url = await uploadImageToGCS(base64Data, mimeType, destinationFileName);
+        console.log(`后端日志：[后台任务][尝试 ${attemptNumber}] 图片上传成功，URL: ${url}`);
+        return url; // 成功时返回 URL
+      } else {
+        // 如果 API 调用成功但没有返回图片数据，这是一个不应重试的错误
+        console.warn("后端日志：[后台任务] 图片API调用成功，但未返回图片数据。将不会重试。");
+        // bail 会阻止 async-retry 继续重试
+        bail(new Error("模型未按预期返回图片数据。"));
+        return ''; // 这里需要返回一个值以满足 TypeScript，但它不会被使用
+      }
+    }, {
+      retries: 2,       // 最多重试 2 次
+      factor: 2,        // 每次等待时间乘以 2
+      minTimeout: 2000, // 第一次等待 2 秒
+      onRetry: (e, attempt) => {
+        console.warn(`后端日志：[后台任务] 图片生成尝试 ${attempt} 失败 (错误: ${e.message})。正在重试...`);
+      }
+    });
+
+    // 如果重试成功，publicUrl 会有值，发送事件
+    if (publicUrl) {
+      sendEvent(controller, 'image_generated', {
         id: imageId,
-        message: `画图失败：模型未按预期返回图片数据。`,
+        imageUrl: publicUrl,
         alt: imgPrompt
       });
     }
-  } catch (e) {
-    console.error("后端日志：[后台任务] !!! 图片生成或上传过程中发生严重错误:", e);
+
+  } catch (e: any) {
+    // 如果 retry 最终失败，会在这里捕获到错误
+    console.error("后端日志：[后台任务] !!! 图片生成在所有重试后仍然失败:", e);
     sendEvent(controller, 'image_generation_failed', {
       id: imageId,
-      message: `画图失败：调用服务时出错。`,
+      message: `画图失败：${e.message}`,
       alt: imgPrompt
     });
   }
 }
+
 
 /**
  * 安全地完成并关闭数据流。
@@ -125,68 +154,65 @@ function handleStreamError(
 
 
 // --- [新增] --- 辅助函数，用于将数据库消息格式化为 Google AI 的 History 格式
-// ... (其他导入保持不变) ...
 
-// --- [最终修正版] ---
-function formatHistory(messages: PrismaMessage[]): Content[] {
+async function formatHistoryAsync(messages: PrismaMessage[]): Promise<Content[]> {
+  if (!messages || messages.length === 0) {
+    return [];
+  }
   const history: Content[] = [];
 
   for (const msg of messages) {
     let role = msg.role;
-    // 1. 标准化角色
-    if (role !== 'user' && role !== 'model' && role !== 'ai') {
-      continue;
-    }
-    if (role === 'ai') {
-      role = 'model';
-    }
+    if (role !== 'user' && role !== 'model' && role !== 'ai') continue;
+    if (role === 'ai') role = 'model';
 
-    // 2. [核心修正] 解包并标准化 Parts
-    let parts: Part[] = [];
+    // 1. 从数据库解析出我们的自定义 Part 数组
+    let dbParts: { type: string, content: any }[] = [];
     try {
       const content = msg.content as any;
       if (Array.isArray(content)) {
-        // content 已经是 Part[] 数组
-        parts = content;
+        dbParts = content;
       } else if (typeof content === 'string') {
-        // content 是简单字符串
-        parts = [{ text: content }];
-      } else if (content && Array.isArray(content.parts)) {
-        // 处理 content 是 { parts: [...] } 的情况
-        parts = content.parts;
-      } else if (content && content.text && typeof content.text === 'string') {
-        // 处理 content 是 { text: "..." } 的情况
-        parts = [content];
+        dbParts = [{ type: 'text', content: content }];
+      } else if (content && content.text) { // 兼容旧的简单文本格式
+        dbParts = [{ type: 'text', content: content.text }];
       }
-      
-      // [关键] 检查并解开您日志中出现的特定错误结构
-      parts = parts.map(part => {
-        if (part.text && Array.isArray(part.text) && part.text[0] && typeof part.text[0].content === 'string') {
-          return { text: part.text[0].content };
-        }
-        return part;
-      });
-
     } catch (e) {
-      console.error("Failed to parse message content:", msg.content, e);
-      continue; // 跳过格式错误的消息
-    }
-    
-    // 3. 避免连续的角色（简单策略：如果与上一个相同，则跳过）
-    if (history.length > 0 && history[history.length - 1].role === role) {
-      // 在更复杂的场景中，这里应该是合并逻辑，但为避免错误，先跳过
-      console.warn(`Skipping consecutive message from role: ${role}`);
+      console.error("无法解析数据库中的消息 content:", msg.content, e);
       continue;
     }
+    
+    // 2. 将自定义 dbParts 数组转换成官方的 SDK Part[] 数组
+    const sdkParts: Part[] = [];
+    for (const dbPart of dbParts) {
+      if (dbPart.type === 'text' && typeof dbPart.content === 'string') {
+        // 创建一个只包含 `text` 属性的有效 Part
+        sdkParts.push({ text: dbPart.content });
+      } else if (dbPart.type === 'image' && typeof dbPart.content === 'string' && dbPart.content.startsWith('http')) {
+        try {
+          // 调用工具函数，它会返回一个只包含 `inlineData` 属性的有效 Part
+          const imagePart = await urlToGenerativePart(dbPart.content);
+          sdkParts.push(imagePart);
+        } catch (e) {
+          console.error(`无法处理历史图片URL: ${dbPart.content}`, e);
+          // 这里可以选择跳过这个坏掉的图片，或者添加一个错误提示文本
+          sdkParts.push({ text: `[图片加载失败: ${dbPart.content}]` });
+        }
+      }
+      // 在这里可以扩展以处理其他类型的 dbPart
+    }
 
-    history.push({ role, parts });
+    if (sdkParts.length === 0) continue;
+
+    // 3. 合并或添加到最终的 history 数组中
+    if (history.length > 0 && history[history.length - 1].role === role) {
+      history[history.length - 1].parts.push(...sdkParts);
+    } else {
+      history.push({ role, parts: sdkParts });
+    }
   }
   
-  // --- [最终校验] ---
-  if (history.length > 0 && history[0].role === 'model') {
-    history.shift();
-  }
-
+  if (history.length > 0 && history[0].role === 'model') history.shift();
   return history;
 }
 
@@ -206,17 +232,86 @@ export function createOotdStream(initialParts: Part[], clientId?: string, conver
 
       // --- [新增] --- 获取个性化配置的逻辑
       let personalizedConfig = mainModelConfig;
-      let history: Content[] = [];
+      let historyForAI: Content[] = [];
+
+       // --- 增加调试日志 ---
+       console.log(`\n[CONTEXT_DEBUG] --- 开始为会话构建上下文 ---`);
+       console.log(`[CONTEXT_DEBUG] 传入的 conversationId: ${conversationId}`);
 
       if (conversationId) {
         try {
-          // 1. 获取历史消息
-          const messages = await prismadb.message.findMany({
-            where: { conversationId: conversationId },
+
+           // 1. 加载最新的摘要和未被摘要的新消息
+           const latestSummary = await prismadb.summary.findFirst({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (latestSummary) {
+            console.log(`[CONTEXT_DEBUG] 找到最新摘要，创建于: ${latestSummary.createdAt}`);
+            console.log(`[CONTEXT_DEBUG] 摘要内容: "${latestSummary.content.substring(0, 100)}..."`);
+          } else {
+            console.log(`[CONTEXT_DEBUG] 未找到任何摘要。`);
+          }
+
+          const newMessages = await prismadb.message.findMany({
+            where: {
+              conversationId,
+              createdAt: {
+                // 只获取在最新摘要之后创建的消息
+                gt: latestSummary?.summarizedUntil,
+              },
+            },
             orderBy: { createdAt: 'asc' },
           });
-          history = formatHistory(messages); // 格式化历史记录
-          console.log(`[HISTORY] 已加载 ${history.length} 条历史消息。`);
+
+          console.log(`有新对话${newMessages.length}条`)
+
+          const unsummarizedHistory = await formatHistoryAsync(newMessages);
+          const summaryContent = latestSummary?.content || null;
+
+          // 2. 估算 Token
+          const summaryToken = summaryContent ? Math.floor(summaryContent.length / 2) : 0;
+          const historyToken = estimateTokenCount(unsummarizedHistory);
+          const totalToken = summaryToken + historyToken;
+          console.log(`[CONTEXT] 预估 Token: 摘要(${summaryToken}) + 新消息(${historyToken}) = ${totalToken}`);
+
+            // 3. 决策与压缩
+            if (totalToken > CONTEXT_TOKEN_LIMIT) {
+              console.log(`[CONTEXT] Token 超出限制 (${totalToken})，开始生成新摘要...`);
+              
+              // 调用服务生成新摘要
+              const newSummaryContent = await generateSummary(summaryContent, unsummarizedHistory);
+  
+              if (newSummaryContent) {
+                const lastMessageSummarized = newMessages[newMessages.length - 1];
+                
+                // 异步保存新摘要，不阻塞主流程
+                prismadb.summary.create({
+                  data: {
+                    conversationId,
+                    content: newSummaryContent,
+                    summarizedUntil: lastMessageSummarized.createdAt,
+                  }
+                }).then(() => {
+                  console.log(`[CONTEXT] 新摘要已成功保存到数据库。`);
+                }).catch(e => {
+                  console.error(`[CONTEXT] 保存新摘要失败:`, e);
+                });
+  
+                // 构建用于本次请求的 AI 历史
+                historyForAI = [{ role: 'user', parts: [{ text: `--- 前情提要 ---\\n${newSummaryContent}` }] }];
+              } else {
+                // 如果摘要生成失败，则只使用最新的消息作为回退
+                historyForAI = unsummarizedHistory.slice(-20); // 保留最后20条
+              }
+            } else {
+              // Token 未超限，正常组合历史
+              if (summaryContent) {
+                historyForAI.push({ role: 'user', parts: [{ text: `--- 前情提要 ---\\n${summaryContent}` }] });
+              }
+              historyForAI.push(...unsummarizedHistory);
+            }
         } catch(e) {
           console.error(`[HISTORY] 加载历史消息失败:`, e);
         }
@@ -254,7 +349,7 @@ export function createOotdStream(initialParts: Part[], clientId?: string, conver
       const chat = genAI.chats.create({
         model: 'gemini-2.5-pro',
         config: personalizedConfig,
-        history: history,
+        history: historyForAI,
       });
 
       // 核心递归函数，处理与模型的每一轮对话

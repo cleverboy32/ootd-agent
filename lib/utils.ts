@@ -18,16 +18,42 @@ export function getClientId ()  {
   return clientId;
 }
 
-// Utility 1: Convert a File to a Base64 string
-export const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
-  });
-};
+/**
+ * [NEW] Handles the direct upload of a file from the client to Google Cloud Storage.
+ * 1. Fetches a signed URL from our backend.
+ * 2. Uploads the file to GCS using the signed URL.
+ * 3. Returns the public URL of the uploaded file.
+ * @param file The file object to upload.
+ * @param conversationId The current conversation ID.
+ * @returns A promise that resolves to the public URL of the file.
+ */
+export async function uploadFileToGCS(file: File): Promise<string> {
+  const clientId = getClientId(); 
 
+  // 1. 从我们的后端获取签名 URL
+  const response = await fetch(`/api/upload-url?fileType=${encodeURIComponent(file.type)}&clientId=${clientId}`);
+  if (!response.ok) {
+    throw new Error('Failed to get signed URL.');
+  }
+  const { signedUrl, publicUrl } = await response.json();
+
+  // 2. 使用 PUT 方法将文件直接上传到 GCS
+  const uploadResponse = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': file.type,
+    },
+    body: file,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error('Failed to upload file to GCS.');
+  }
+
+  // 3. 上传成功，返回公开 URL
+  console.log('File uploaded successfully:', publicUrl);
+  return publicUrl;
+}
 export interface StreamHandlers {
   onTextChunk: (text: string) => void;
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
@@ -39,7 +65,13 @@ export interface StreamHandlers {
 
 // Utility 2: The complete API call and stream processing logic
 export const streamResponse = async (
-  payload: { prompt: string; base64Image?: string; mimeType?: string,conversationId?: string | null;  },
+  payload: {
+    content: {
+      text?: string,
+      imageUrl?: string,
+    },
+    conversationId?: string | null; 
+  },
   handlers: StreamHandlers
 ) => {
   try {

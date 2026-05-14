@@ -42,6 +42,7 @@ model Conversation {
   clientId  String
   client    ClientProfile @relation(fields: [clientId], references: [id]) // 外键关联到 ClientProfile.id
 
+  summaries Summary[] 
   // 3. 确保 clientId 字段上有索引
   @@index([clientId])
 }
@@ -57,4 +58,17 @@ model Message {
   updatedAt      DateTime     @updatedAt
 
   @@index([conversationId])
+}
+
+// --- [新增] --- 全新的 Summary 模型
+model Summary {
+  id              String    @id @default(cuid())
+  content         String    @db.Text
+  createdAt       DateTime  @default(now())
+  
+  // 记录这个摘要涵盖了此时间戳之前的所有消息
+  summarizedUntil DateTime  
+
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }

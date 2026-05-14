@@ -1,55 +1,87 @@
-import { useState, useCallback, RefObject } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { uploadFileToGCS } from '@/lib/utils';
 
-// 这个 hook 依赖于 fileInputRef 来清空文件输入
-export const useImageHandler = (fileInputRef: RefObject<HTMLInputElement>) => {
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+export const useImageHandler = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null); // 存储上传后的 URL
 
-  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // 当用户选择新文件时触发
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    // 重置所有旧状态
     setUploadError(null);
+    setUploadedImageUrl(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+
     const file = e.target.files?.[0];
 
     if (file) {
+      // 文件大小验证
       const MAX_FILE_SIZE_MB = 5;
-      const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-
-      if (file.size > MAX_FILE_SIZE_BYTES) {
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
         setUploadError(`图片大小不能超过 ${MAX_FILE_SIZE_MB}MB。`);
-        setSelectedImage(null);
+        setSelectedFile(null);
         setPreviewUrl(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
         return;
       }
 
-      setSelectedImage(file);
-      // 创建一个新的 URL 用于预览
+      // 设置新文件和预览
+      setSelectedFile(file);
       const objectUrl = URL.createObjectURL(file);
       setPreviewUrl(objectUrl);
-
-      // 清理：当组件卸载时，我们需要释放这个 URL
-      // React 的 useEffect 清理函数是处理这个问题的最佳方式
-      // 但在一个 hook 中，最好是返回一个清理函数让调用者处理
-      // 这里为了简单，我们先忽略它，但在生产应用中需要注意内存泄漏
+    } else {
+      setSelectedFile(null);
+      setPreviewUrl(null);
     }
-  }, [fileInputRef]);
+  }, [previewUrl]);
 
+  // [核心逻辑] 使用 useEffect 监听 selectedFile 的变化，自动开始上传
+  useEffect(() => {
+    // 定义一个异步函数来执行上传
+    const performUpload = async () => {
+      if (!selectedFile) return;
+
+      setIsUploading(true);
+      setUploadError(null);
+      
+      try {
+        const imageUrl = await uploadFileToGCS(selectedFile);
+        setUploadedImageUrl(imageUrl);
+      } catch (error: any) {
+        console.error('Upload failed in useEffect:', error);
+        setUploadError(error.message || '上传失败，请重新选择图片。');
+        // 上传失败时，清除选择，让用户可以重试
+        setSelectedFile(null);
+        setPreviewUrl(null);
+      } finally {
+        setIsUploading(false);
+      }
+    };
+
+    performUpload();
+
+    // 清理函数，在组件卸载或 selectedFile 变化时运行
+    // 这里我们不需要特别的清理，因为上传是异步的
+  }, [selectedFile]);
+
+  // 重置所有状态的函数
   const resetImageState = useCallback(() => {
-    setSelectedImage(null);
+    setSelectedFile(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setUploadError(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }, [fileInputRef]);
+    setIsUploading(false);
+    setUploadedImageUrl(null);
+  }, [previewUrl]);
 
   return {
-    selectedImage,
     previewUrl,
     uploadError,
-    handleImageSelect,
+    isUploading,
+    uploadedImageUrl, // 导出上传后的 URL
+    handleFileSelect,
     resetImageState,
   };
 };

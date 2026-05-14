@@ -9,12 +9,10 @@ import { Button } from "@/components/ui/button";
 import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
 import { useChatHandler } from "@/hooks/useChatHandler";
-import { useImageHandler } from "@/hooks/useImageHandler";
 
 
 export default function FashionAIPage() {
   const [input, setInput] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -27,14 +25,6 @@ export default function FashionAIPage() {
 
   const { handleSend } = useChatHandler();
 
-  const { 
-    selectedImage, 
-    previewUrl, 
-    uploadError, 
-    handleImageSelect, 
-    resetImageState 
-  } = useImageHandler(fileInputRef); // <-- 调用新 hook
- 
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
@@ -46,13 +36,6 @@ export default function FashionAIPage() {
   const handleNewChat = () => {
     setActiveConversationId(null);
   };
-
-   // === 新增：一个简单的包裹函数，用于在发送后清空输入框 ===
-   const onSend = () => {
-    handleSend(input, selectedImage);
-    setInput("");
-    resetImageState();
-  }
 
   return (
     <div className="flex h-screen bg-background text-foreground font-sans overflow-hidden">
@@ -72,14 +55,8 @@ export default function FashionAIPage() {
         <ChatInputArea
           input={input}
           setInput={setInput}
-          selectedImage={selectedImage}
-          previewUrl={previewUrl}
-          handleImageSelect={handleImageSelect}
-          handleSend={onSend}
-          resetImageState={resetImageState}
+          handleSend={handleSend}
           isLoading={isLoading}
-          fileInputRef={fileInputRef}
-          uploadError={uploadError}      // 新增：传递错误状态
         />
       </main>
 
