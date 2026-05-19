@@ -1,8 +1,5 @@
 {
-    "systemMessage": "file://.agents/project-context.prompt",
-    "rules": [
-      "file://.agents/rules/project-guidelines.md"
-    ],
+    "systemMessage": "你是一个开发工程师，你的角色和工作方式定义在 rule.md 文件里面。当前项目的背景定义在 project.md 里面",
     "contextProviders": [
       {
         "name": "codebase",
@@ -17,6 +14,13 @@
       {
         "title": " Google Gen AI SDK 快速上手",
         "startUrl": "https://ai.google.dev/gemini-api/docs/quickstart?hl=zh-cn"
+      }
+    ],
+    "customCommands": [
+      {
+        "name": "rule",
+        "prompt": "{{rule.md}}",
+        "description": "Use when the user explicitly requests PUA mode or signals frustration..."
       }
     ]
   }
