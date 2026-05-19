@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prismadb from '@/lib/prisma';
+import prismadb from '@/server/db';
 
 // Define the type for the route parameters, accommodating Next.js 15's promise-based params
 type RouteParams = {

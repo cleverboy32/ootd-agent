@@ -58,7 +58,7 @@ export interface StreamHandlers {
   onTextChunk: (text: string) => void;
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
-  onImageGenerationFailed: (data: { id: string; message: string; alt: string }) => void;
+  onImageGenerationFailed: (data: { id: string; message: string; alt: string; }) => void;
   onError: (message: string) => void;
   onStreamEnd: (message: string) => void;
 }
@@ -95,7 +95,7 @@ export const streamResponse = async (
         } else if (errorJson.error) {
           errorMessage = errorJson.error;
         }
-        } catch (e) {
+        } catch (_e) {
         // 如果解析JSON失败，errorText 本身可能就是有用的信息
         if (errorText.trim().length > 0) {
           errorMessage = errorText;
@@ -139,7 +139,7 @@ export const streamResponse = async (
               handlers.onImageGenerated(data);
               break;
             case 'image_generation_failed':
-              (handlers as any).onImageGenerationFailed(data);
+              handlers.onImageGenerationFailed(data);
               break;
             case 'error':
               handlers.onError(data.message);
@@ -153,7 +153,7 @@ export const streamResponse = async (
         }
       }
     }
-  } catch (error: any) {
+  } catch (_error) {
     handlers.onError("An unknown streaming error occurred.");
   }
 };

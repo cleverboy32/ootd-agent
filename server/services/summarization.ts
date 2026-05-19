@@ -1,4 +1,4 @@
-import { genAI } from '@/app/lib/google-ai';
+import { genAI } from 'server/services/ai';
 import { Content } from '@google/genai';
 
 const summarizationInstruction = `你是一个对话摘要机器人。
@@ -29,7 +29,7 @@ export async function generateSummary(
     
     const newMessagesText = newMessages
       .map(msg => {
-        const textParts = msg.parts.map(part => part.text || '').join(' ');
+        const textParts = (msg.parts ?? []).map(part => part.text || '').join(' ');
         return `${msg.role}: ${textParts}`;
       })
       .join('\n');

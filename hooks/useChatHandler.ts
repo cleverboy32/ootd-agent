@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
-import { streamResponse } from '@/lib/utils';
+import { streamResponse, StreamHandlers } from '@/lib/utils';
 import { Message, MessageContentPart } from '@/lib/types';
 import {  } from '@/lib/types';
 
@@ -27,7 +27,7 @@ export const useChatHandler = () => {
       userMessageContent.push({ type: 'image', content: imageUrl });
     }
 
-    const userMessage = { role: 'user' as const, content: userMessageContent, timestamp: Date.now() };
+    const userMessage: Message = { role: 'user' as const, content: userMessageContent, timestamp: Date.now(), imageUrl: imageUrl ?? undefined };
 
     // 2. 处理新对话或现有对话
     let conversationId = activeConversationId;
@@ -48,12 +48,12 @@ export const useChatHandler = () => {
     };
     
     // --- The complete, robust handlers logic, migrated from page.tsx ---
-    const handlers = {
+    const handlers: StreamHandlers = {
       onTextChunk: (text: string) => {
         updateConversation(currentMessages => {
           const lastMessage = currentMessages.at(-1);
           if (!lastMessage || lastMessage.role !== 'ai' || !Array.isArray(lastMessage.content)) {
-            const newAiMessage: Message = { role: 'ai', content: [{ type: 'text', content: text }], timestamp: Date.now() };
+            const newAiMessage = { role: 'ai', content: [{ type: 'text', content: text }], timestamp: Date.now() } as Message;
             return [...currentMessages, newAiMessage];
           }
           const lastPart = lastMessage.content.at(-1);
@@ -64,7 +64,7 @@ export const useChatHandler = () => {
           } else {
             newContent = [...lastMessage.content, { type: 'text', content: text }];
           }
-          const newLastMessage = { ...lastMessage, content: newContent };
+          const newLastMessage = { ...lastMessage, content: newContent } as Message;
           return [...currentMessages.slice(0, -1), newLastMessage];
         });
       },
@@ -72,9 +72,9 @@ export const useChatHandler = () => {
         updateConversation(messages => {
           const lastMessage = messages.at(-1);
           if (lastMessage?.role === 'ai' && Array.isArray(lastMessage.content)) {
-            return [...messages.slice(0, -1), { ...lastMessage, content: [...lastMessage.content, { type: 'image_placeholder', id: data.id, content: data.alt }] }];
+            return [...messages.slice(0, -1), { ...lastMessage, content: [...lastMessage.content, { type: 'image_placeholder', id: data.id, content: data.alt }] } as Message];
           }
-          const newAiMessage: Message = { role: 'ai', content: [{ type: 'image_placeholder', id: data.id, content: data.alt }], timestamp: Date.now() };
+          const newAiMessage = { role: 'ai', content: [{ type: 'image_placeholder', id: data.id, content: data.alt }], timestamp: Date.now() } as Message;
           return [...messages, newAiMessage];
         });
       },
@@ -113,9 +113,9 @@ export const useChatHandler = () => {
         updateConversation(messages => {
             const lastMessage = messages.at(-1);
             if (lastMessage?.role === 'ai' && Array.isArray(lastMessage.content)) {
-              return [...messages.slice(0, -1), { ...lastMessage, content: [...lastMessage.content, { type: 'text', content: errorContent }] }];
+              return [...messages.slice(0, -1), { ...lastMessage, content: [...lastMessage.content, { type: 'text', content: errorContent }] } as Message];
             }
-            const newAiMessage: Message = { role: 'ai', content: [{ type: 'text', content: errorContent }], timestamp: Date.now() };
+            const newAiMessage = { role: 'ai', content: [{ type: 'text', content: errorContent }], timestamp: Date.now() } as Message;
             return [...messages, newAiMessage];
         });
         setWaitReply(false);
@@ -130,11 +130,11 @@ export const useChatHandler = () => {
       conversationId,
       content: {
         text: prompt,
-        imageUrl: imageUrl,
+        imageUrl: imageUrl || undefined,
       },
     };
 
-    await streamResponse(payload, handlers as any);
+    await streamResponse(payload, handlers);
 
   }, [
     activeConversationId, 

@@ -1,7 +1,7 @@
 import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
 import { createOotdStream } from "./stream-handler";
-import {  urlToGenerativePart } from '@/app/lib/image';
+import {  urlToGenerativePart } from '@/server/utils/image';
 
 
 export async function POST(req: NextRequest) {
@@ -42,7 +42,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (error: any) {
+  } catch (e) {
+    const error = e as Error;
     console.error("混合流式API顶层错误:", error);
     return new Response(JSON.stringify({ error: "服务器内部错误", message: error.message }), { status: 500 });
   }

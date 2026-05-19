@@ -123,9 +123,9 @@ export { ComponentName, componentNameVariants }
 2.  **函数调用 (Function Calling)**: 这是我们项目架构的核心。我们不直接让 AI 生成所有内容，而是让 AI (`gemini-2.5-pro`) 作为“调度中心”，调用我们为它定义的工具（如 `image_generator`）。`@google/genai` 对此提供了原生和强大的支持。
 
 ### 标准用法
-所有与 Gemini 模型的交互都必须通过 `app/lib/google-ai.ts` 中初始化的单例客户端 `genAI`。此客户端已为 Vertex AI 和函数调用进行配置。
+所有与 Gemini 模型的交互都必须通过 `server/service/ai.ts` 中初始化的单例客户端 `genAI`。此客户端已为 Vertex AI 和函数调用进行配置。
 
-**标准初始化示例 (`app/lib/google-ai.ts`):**
+**标准初始化示例 (`server/service/ai.ts`):**
 ```typescript
 import { GoogleGenAI, FunctionDeclaration } from "@google/genai";
 

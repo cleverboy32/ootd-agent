@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    if (!bucketName) {
+      // This check satisfies TypeScript and is a good runtime safeguard.
+      return NextResponse.json({ error: 'GCS bucket name is not configured on the server.' }, { status: 500 });
+    }
     const extension = fileType.split('/')[1] || 'bin';
     const fileName = `user-uploads/${clientId}/${uuidv4()}.${extension}`; 
 

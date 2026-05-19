@@ -34,7 +34,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
           {shouldRenderBubble && (
             <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-gradient-to-br from-amber-400/20 to-yellow-600/10 text-black rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm ${msg.role === 'ai' ? 'prose prose-sm dark:prose-invert max-w-none' : 'whitespace-pre-wrap leading-relaxed'}`}>
               {msg.imageUrl && (
-                <img src={msg.imageUrl} alt="Uploaded" className="max-w-[200px] sm:max-w-xs rounded-xl mb-3 border border-border/10" />
+                <Image src={msg.imageUrl} alt="Uploaded" width={200} height={200} className="max-w-[200px] sm:max-w-xs h-auto rounded-xl mb-3 border border-border/10" />
               )}
 
               {Array.isArray(msg.content) ? (
@@ -43,11 +43,13 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
                     return <ReactMarkdown key={part.id || index} remarkPlugins={[remarkGfm]}>{part.content}</ReactMarkdown>;
                   } else if (part.type === 'image') {
                     return (
-                      <img
+                      <Image
                         key={part.id || index}
                         src={part.content}
                         alt={part.alt || 'Generated image'}
-                        className="h-[200px] rounded-xl my-3 border border-border/10"
+                        width={200}
+                        height={200}
+                        className="h-auto w-full max-w-[200px] rounded-xl my-3 border border-border/10"
                       />
                     );
                   } else if (part.type === 'image_placeholder') {

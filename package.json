@@ -6,8 +6,11 @@
     "dev": "NODE_OPTIONS='--max-old-space-size=8192' next dev",
     "build": "NODE_OPTIONS='--max-old-space-size=8192' next build",
     "start": "next start",
-    "lint": "eslint",
-    "db:push": "dotenv -- prisma db push"
+    "lint": "eslint && tsc --noEmit",
+    "db:generate": "pnpm npx prisma generate --schema=./server/db/schema.prisma",
+    "db:push": "dotenv -- prisma db push",
+    "db:data": "pnpm prisma studio",
+    "prepare": "husky"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
@@ -43,6 +46,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/async-retry": "^1.4.9",
     "@types/global-agent": "^3.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -51,10 +55,18 @@
     "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.5",
     "postcss": "^8.5.10",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "bash -c 'tsc -p tsconfig.json --noEmit'"
+    ]
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prismadb from '@/lib/prisma';
+import prismadb from '@/server/db';
 import { Prisma } from '@prisma/client';
 
 type RouteParams = {
@@ -15,7 +15,7 @@ type RouteParams = {
  * @param newData The newly extracted data from the AI.
  * @returns The new, merged profile data object.
  */
-function mergeProfileData(currentProfile: Record<string, any>, newData: Record<string, any>): Record<string, any> {
+function mergeProfileData(currentProfile: Prisma.JsonObject, newData: Prisma.JsonObject): Prisma.JsonObject {
   const merged = { ...currentProfile };
 
   for (const key in newData) {

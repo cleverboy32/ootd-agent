@@ -49,7 +49,8 @@ export const useImageHandler = () => {
       try {
         const imageUrl = await uploadFileToGCS(selectedFile);
         setUploadedImageUrl(imageUrl);
-      } catch (error: any) {
+      } catch (e) {
+        const error = e as Error;
         console.error('Upload failed in useEffect:', error);
         setUploadError(error.message || '上传失败，请重新选择图片。');
         // 上传失败时，清除选择，让用户可以重试

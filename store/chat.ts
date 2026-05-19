@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Conversation, Message } from '@/lib/types';
+import { Conversation, Message, MessageContentPart } from '@/lib/types';
 import * as chatApi from '@/lib/api/chat';
 
 interface ChatState {
@@ -16,7 +16,7 @@ interface ChatActions {
   setActiveConversationId: (id: string | null) => void;
   
   // --- 原子化的消息 Actions (供编排者调用) ---
-  startNewConversation: (userMessage: Message) => Promise<string | undefined>;
+  startNewConversation: (userMessage: Message) => Promise<string>;
   addUserMessage: (userMessage: Message) => Promise<void>;
   updateMessages: (updater: (messages: Message[]) => Message[]) => void; // The new powerful action
   saveFinalAiMessage: () => Promise<void>;
@@ -98,8 +98,19 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   startNewConversation: async (userMessage) => {
     const { conversations } = get();
     
+    // 从消息内容创建标题的辅助函数
+    const createTitleFromContent = (content: string | MessageContentPart[]): string => {
+      if (typeof content === 'string') {
+        return content.substring(0, 50); // Use first 50 chars of string content
+      }
+      const textPart = content.find(part => part.type === 'text');
+      return textPart ? textPart.content.substring(0, 50) : 'New Conversation';
+    };
+
+    const title = createTitleFromContent(userMessage.content);
+
     try {
-      const newConversation = await chatApi.createConversation(userMessage.content);
+      const newConversation = await chatApi.createConversation(title);
       await chatApi.postMessage(newConversation.id, { role: userMessage.role, content: userMessage.content });
       
       set({
@@ -110,6 +121,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       return newConversation.id;
     } catch (error) {
       console.error("Failed to start new conversation", error);
+      return '';
     }
   },
   
@@ -144,3 +156,4 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     }
   }
 }));
+

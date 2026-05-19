@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prismadb from '@/lib/prisma';
-import { extractUserInfoFromText } from '@/app/services/analysis-service'; // 1. Import our new service
+import prismadb from '@/server/db';
+import { MessageContentPart } from '@/lib/types';
+import { extractUserInfoFromText } from '@/server/services/analysis-profile'; // 1. Import our new service
 
 type RouteParams = {
   params: Promise<{
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const body = await req.json();
+    const body: { role: 'user' | 'ai', content: MessageContentPart[] } = await req.json();
     const { role, content } = body;
 
     if (!role || !content) {
@@ -109,8 +110,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     });
 
     // 3. If the message is from the user, trigger the analysis in the background
-    const textToAnalyze = content.map((item) => item.text).join(';')
-    if (role === 'user' && typeof content === 'string') {
+    const textToAnalyze = content
+      .filter(part => part.type === 'text')
+      .map(part => part.content)
+      .join(';');
+    if (role === 'user' && textToAnalyze) {
       // We don't await this, so it doesn't block the response.
       triggerAnalysis(textToAnalyze, conversationId);
     }

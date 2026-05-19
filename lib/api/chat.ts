@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api-client"; // 1. 导入我们新的 apiClient
-import { Conversation, Message } from "@/lib/types";
+import { Conversation, Message, MessageContentPart } from "@/lib/types";
 
 const API_BASE = '/api';
 
@@ -49,6 +49,6 @@ export const getMessages = async (conversationId: string): Promise<Message[]> =>
  * @param message The message object to post.
  * @returns A promise that resolves to the newly created message.
  */
-export const postMessage = async (conversationId: string, message: { role: string; content: any }): Promise<Message> => {
+export const postMessage = async (conversationId: string, message: { role: 'user' | 'ai'; content: string | MessageContentPart[] }): Promise<Message> => {
   return apiClient.post(`${API_BASE}/conversations/${conversationId}/messages`, message);
 };

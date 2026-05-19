@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
@@ -39,7 +40,7 @@ export function ChatInputArea({
     };
 
     // 调用从父组件传入的 handleSend，并传递最终的图片 URL
-    handleSend(input, uploadedImageUrl);
+    handleSend(input, uploadedImageUrl || undefined);
 
     // 发送后清空输入框和图片状态
     setInput('');
@@ -78,7 +79,7 @@ export function ChatInputArea({
         {previewUrl && (
           <div className="mb-3 relative inline-block">
             <div className="relative p-1 bg-background border border-border rounded-xl shadow-sm">
-              <img src={previewUrl} alt="Preview" className="h-20 w-20 object-cover rounded-lg" />
+              <Image src={previewUrl} alt="Preview" width={80} height={80} className="h-20 w-20 object-cover rounded-lg" />
               {isUploading && (
                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
                   <Loader2 className="h-6 w-6 text-white animate-spin" />

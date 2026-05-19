@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { ChatMessage } from './ChatMessage';
 import { useChatStore } from '@/store/chat';
 interface ChatMessagesListProps {
-  messagesEndRef: React.RefObject<HTMLDivElement>;
+  messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
 
 export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {

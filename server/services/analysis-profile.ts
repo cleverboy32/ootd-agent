@@ -1,4 +1,5 @@
-import { genAI } from "@/app/lib/google-ai";
+import { genAI } from "server/services/ai";
+import { Prisma } from '@prisma/client';
 import { GenerateContentConfig } from "@google/genai";
 
 
@@ -50,7 +51,7 @@ const extractionModelConfig: GenerateContentConfig = {
  * @param text The text content to analyze.
  * @returns A promise that resolves to a JSON object with the extracted information, or null if extraction fails or yields no data.
  */
-export async function extractUserInfoFromText(text: string): Promise<Record<string, any> | null> {
+export async function extractUserInfoFromText(text: string): Promise<Prisma.JsonObject | null> {
   // Prevent analyzing very short or meaningless text
   if (!text || text.trim().length < 5) {
     return null;

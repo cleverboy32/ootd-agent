@@ -48,12 +48,12 @@ export const apiClient = {
     return response.json(); // Automatically parse JSON
   },
 
-  post: async (url: string, body: any, options: RequestInit = {}) => {
+  post: async <T>(url: string, body: T, options: RequestInit = {}) => {
     const response = await fetchWithClient(url, { ...options, method: 'POST', body: JSON.stringify(body) });
     return response.json();
   },
 
-  patch: async (url: string, body: any, options: RequestInit = {}) => {
+  patch: async <T>(url: string, body: T, options: RequestInit = {}) => {
     const response = await fetchWithClient(url, { ...options, method: 'PATCH', body: JSON.stringify(body) });
     return response.json();
   },
@@ -65,7 +65,7 @@ export const apiClient = {
   },
   
   // For streaming responses, we can't auto-parse JSON, so we need a special method
-  postAndGetStream: (url:string, body: any, options: RequestInit = {}) => {
+  postAndGetStream: <T>(url:string, body: T, options: RequestInit = {}) => {
     return fetchWithClient(url, { ...options, method: 'POST', body: JSON.stringify(body) });
   }
 };

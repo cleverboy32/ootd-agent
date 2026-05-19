@@ -1,11 +1,5 @@
-import { GoogleGenAI, FunctionDeclaration, GenerateContentConfig } from "@google/genai";
+import { FunctionDeclaration, GenerateContentConfig, Type } from "@google/genai";
 
-// Initialize Google AI client
-export const genAI = new GoogleGenAI({
-  vertexai: true,
-  project: process.env.PROJECT_ID || "",
-  location: process.env.LOCATION || "",
-});
 
 // --- [修改] --- 定义所有 AI 可以使用的工具
 export const tools: FunctionDeclaration[] = [
@@ -13,7 +7,7 @@ export const tools: FunctionDeclaration[] = [
     name: "image_generator",
     description: "当需要根据文本描述生成一张效果图或可视化图片时调用此工具。",
     parameters: {
-      type: "object",
+      type: Type.OBJECT,
       properties: {
         prompt: {
           description: "用于生成图片的、详细的、具有画面感的英文描述。",
@@ -27,7 +21,7 @@ export const tools: FunctionDeclaration[] = [
     name: "gatekeeper_check",
     description: "在执行主要任务（如服装搭配）之前，调用此工具来检查是否缺少必要的用户信息（如身高、体重、风格偏好等）。",
     parameters: {
-      type: "object",
+      type: Type.OBJECT,
       properties: {
         is_ready: {
           description: "如果所有必要信息都已齐全，可以开始执行主要任务，则设置为 true。",

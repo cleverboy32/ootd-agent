@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prismadb from '@/lib/prisma';
+import prismadb from '@/server/db';
 
 /**
  * Handles GET requests to fetch conversations for a specific client.
