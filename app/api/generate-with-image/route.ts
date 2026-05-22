@@ -6,10 +6,12 @@ import {  urlToGenerativePart } from '@/server/utils/image';
 
 export async function POST(req: NextRequest) {
   try {
-    const { content, conversationId } = await req.json();
+    const { content, conversationId, messageId } = await req.json();
     const { text, imageUrl } = content;
 
     const clientId = req.headers.get('X-Client-ID'); 
+
+    console.log(`[API_ROUTE] POST request received. Conv ID: ${conversationId}, Client ID: ${clientId}`);
 
     if (!text && !imageUrl) {
       return new Response(JSON.stringify({ error: "Text or image URL is required" }), { status: 400 });
@@ -33,7 +35,7 @@ export async function POST(req: NextRequest) {
     console.log(`[API_ROUTE] 准备调用 createOotdStream，包含 ${initialParts.length} 个 part(s)。`);
 
     // All complex logic is now in createOotdStream
-    const readableStream = createOotdStream(initialParts, clientId!, conversationId);
+    const readableStream = createOotdStream(initialParts, clientId!, conversationId, messageId);
     return new Response(readableStream, {
       headers: {
         'Content-Type': 'text/event-stream',

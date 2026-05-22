@@ -1,5 +1,4 @@
 import { Content, Part } from "@google/genai";
-import { urlToGenerativePart } from "./image";
 import { Message } from '../types/message';
 
 
@@ -20,67 +19,47 @@ export function estimateTokenCount(history: Content[]): number {
 }
 
 export async function formatHistoryAsync(messages: Message[]): Promise<Content[]> {
-    if (!messages || messages.length === 0) {
-      return [];
+  const historyForAI: Content[] = [];
+
+  for (const message of messages) {
+    // 1. 角色映射：将数据库角色 ('USER', 'ASSISTANT') 映射到 API 角色 ('user', 'model')
+    const role = message.role === 'user' ? 'user' : 'model';
+    // 如果 content 为空或不是一个数组，则跳过此消息
+    if (!Array.isArray(message.content) || message.content.length === 0) {
+      continue;
     }
-    const history: Content[] = [];
-  
-    for (const msg of messages) {
-      let role = msg.role;
-      if (role !== 'user' && role !== 'model' && role !== 'ai') continue;
-      if (role === 'ai') role = 'model';
-  
-      // 1. 从数据库解析出我们的自定义 Part 数组
-      let dbParts: { type: string, content: string }[] = [];
-      try {
-        const content = msg.content;
-        if (Array.isArray(content)) {
-          dbParts = content.filter(
-            (p) => p && typeof p.type === 'string' && typeof p.content === 'string'
-          ) as { type: string; content: string }[];
-        } else if (typeof content === 'string') {
-          dbParts = [{ type: 'text', content: content }];
-        }
-      } catch (e) {
-        console.error("无法解析数据库中的消息 content:", msg.content, e);
-        continue;
+
+    const apiParts: Part[] = [];
+
+    // 2. 内容部分（Parts）转换：遍历消息中的每个内容部分
+    for (const part of message.content) {
+      if (part.type === 'text') {
+        // 如果是文本部分，创建 text part
+        apiParts.push({ text: part.content });
+      } else if (part.type.startsWith('image/')) {
+        // 如果是图片部分（假设 type 是 mimeType，如 'image/jpeg'）
+        // 则创建 inlineData part，其中 content 是 Base64 编码的图片数据
+        apiParts.push({
+          inlineData: {
+            mimeType: part.type,
+            data: part.content,
+          },
+        });
       }
-      
-      // 2. 将自定义 dbParts 数组转换成官方的 SDK Part[] 数组
-      const sdkParts: Part[] = [];
-      for (const dbPart of dbParts) {
-        if (dbPart.type === 'text' && typeof dbPart.content === 'string') {
-          // 创建一个只包含 `text` 属性的有效 Part
-          sdkParts.push({ text: dbPart.content });
-        } else if (dbPart.type === 'image' && typeof dbPart.content === 'string' && dbPart.content.startsWith('http')) {
-          try {
-            // 调用工具函数，它会返回一个只包含 `inlineData` 属性的有效 Part
-            const imagePart = await urlToGenerativePart(dbPart.content);
-            sdkParts.push(imagePart);
-          } catch (e) {
-            console.error(`无法处理历史图片URL: ${dbPart.content}`, e);
-            // 这里可以选择跳过这个坏掉的图片，或者添加一个错误提示文本
-            sdkParts.push({ text: `[图片加载失败: ${dbPart.content}]` });
-          }
-        }
-        // 在这里可以扩展以处理其他类型的 dbPart
-      }
-  
-      if (sdkParts.length === 0) continue;
-  
-      // 3. 合并或添加到最终的 history 数组中
-      if (history.length > 0 && history[history.length - 1].role === role) {
-        const lastMessage = history[history.length - 1];
-        if (lastMessage && lastMessage.parts) {
-          lastMessage.parts.push(...sdkParts);
-        } else if (lastMessage) {
-          lastMessage.parts = sdkParts;
-        }
-      } else {
-        history.push({ role, parts: sdkParts });
-      }
+      // 你可以在这里添加对其他 type 的处理，例如 'video' 等
     }
-    
-    if (history.length > 0 && history[0].role === 'model') history.shift();
-    return history;
+
+    // 3. 只有在成功转换出内容部分后，才将该条消息添加到历史记录中
+    if (apiParts.length > 0) {
+      historyForAI.push({
+        role: role,
+        parts: apiParts,
+      });
+    }
   }
+
+  // 打印日志以供调试，检查转换后的结构是否正确
+  // console.log('[FORMAT_DEBUG] Formatted History:', JSON.stringify(historyForAI, null, 2));
+
+  return historyForAI;
+}

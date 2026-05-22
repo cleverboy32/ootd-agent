@@ -7,5 +7,6 @@ type contentItem = {
 }
 
 export type Message = Omit<PrismaMessage, 'content'> & {
-    content: contentItem[]
+    content: contentItem[],
+    imageUrl?: string;
 }

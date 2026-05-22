@@ -55,22 +55,26 @@ export async function uploadFileToGCS(file: File): Promise<string> {
   return publicUrl;
 }
 export interface StreamHandlers {
+  onMetadata: (data: { messageId: string }) => void;
   onTextChunk: (text: string) => void;
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
   onImageGenerationFailed: (data: { id: string; message: string; alt: string; }) => void;
   onError: (message: string) => void;
-  onStreamEnd: (message: string) => void;
+  onStreamEnd: () => void;
 }
 
 // Utility 2: The complete API call and stream processing logic
+// 将整个函数替换为这个版本
 export const streamResponse = async (
   payload: {
     content: {
       text?: string,
       imageUrl?: string,
     },
-    conversationId?: string | null; 
+    conversationId?: string | null;
+    // 新增可选的 messageId
+    messageId?: string;
   },
   handlers: StreamHandlers
 ) => {
@@ -79,27 +83,18 @@ export const streamResponse = async (
     const res = await fetch("/api/generate-with-image", {
       method: "POST",
       headers: { 'Content-Type': 'application/json', 'X-Client-ID': clientId },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), // payload 现在可能包含 messageId
     });
 
     if (!res.ok || !res.body) {
-      // --- 新的、更智能的错误处理 ---
       const errorText = await res.text();
       let errorMessage = `API request failed: ${res.statusText}`;
       try {
-        // 尝试解析后端返回的JSON错误信息
         const errorJson = JSON.parse(errorText);
-        // 如果有 message 字段，就用它作为更友好的错误信息
-        if (errorJson.message) {
-          errorMessage = errorJson.message;
-        } else if (errorJson.error) {
-          errorMessage = errorJson.error;
-        }
-        } catch (_e) {
-        // 如果解析JSON失败，errorText 本身可能就是有用的信息
-        if (errorText.trim().length > 0) {
-          errorMessage = errorText;
-        }
+        if (errorJson.message) errorMessage = errorJson.message;
+        else if (errorJson.error) errorMessage = errorJson.error;
+      } catch (_e) {
+        if (errorText.trim().length > 0) errorMessage = errorText;
       }
       throw new Error(errorMessage);
     }
@@ -111,7 +106,7 @@ export const streamResponse = async (
     while (true) {
       const { value, done } = await reader.read();
       if (done) {
-        handlers.onStreamEnd("Stream finished by server connection close.");
+        handlers.onStreamEnd(); // 调用无参数的 onStreamEnd
         break;
       }
 
@@ -122,13 +117,22 @@ export const streamResponse = async (
       for (const line of lines) {
         if (!line.startsWith('event:')) continue;
 
-        const eventName = line.substring(7, line.indexOf('\n'));
-        const dataString = line.substring(line.indexOf('\n') + 6);
+        const eventNameMatch = line.match(/event:\s*(.*)/);
+        const dataStringMatch = line.match(/data:\s*(.*)/);
+
+        if (!eventNameMatch || !dataStringMatch) continue;
+        
+        const eventName = eventNameMatch[1];
+        const dataString = dataStringMatch[1];
 
         try {
           const data = JSON.parse(dataString);
 
+          // 核心改动：新的 switch 语句
           switch (eventName) {
+            case 'metadata': // <-- 新增 case
+              handlers.onMetadata(data);
+              break;
             case 'text_chunk':
               handlers.onTextChunk(data.text);
               break;
@@ -145,16 +149,21 @@ export const streamResponse = async (
               handlers.onError(data.message);
               break;
             case 'stream_end':
-              handlers.onStreamEnd(data.message);
-              return; // End the loop
+              // 后端发送 stream_end 时，我们认为是正常结束
+              handlers.onStreamEnd();
+              return; // 明确结束
           }
         } catch (e) {
           console.error("Failed to parse SSE JSON:", dataString, e);
         }
       }
     }
-  } catch (_error) {
-    handlers.onError("An unknown streaming error occurred.");
+  } catch (error) {
+    console.error("Streaming error caught in streamResponse:", error);
+    if (error instanceof Error) {
+        handlers.onError(error.message);
+    } else {
+        handlers.onError("An unknown streaming error occurred.");
+    }
   }
 };
-

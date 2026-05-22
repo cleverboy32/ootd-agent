@@ -37,7 +37,7 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
     <div className="pt-8 px-6 sm:px-12 flex flex-col gap-6">
       {messages.map((msg, idx) => (
         <ChatMessage
-          key={idx}
+          key={idx} // <-- 使用唯一的 message.id 作为 key！
           msg={msg}
         />
       ))}

@@ -63,6 +63,14 @@ export function handleStreamError(
 ) {
   console.error(`后端日志：在 [${context}] 中发生错误:`, error);
   sendEvent(controller, 'error', { message: `处理您的请求时发生意外错误: ${context}` });
-  // 发生错误时，也尝试安全地关闭流
-  handleStreamCompletion(controller, pendingImageTasks);
+  
+  // 3. 直接、安全地关闭控制器，不再调用 handleStreamCompletion
+  if (controller.desiredSize !== null) {
+    try {
+      controller.close();
+      console.log(`[CONTROLLER_LOG] 在错误处理后关闭控制器。`);
+    } catch (e) {
+      console.warn("[CONTROLLER_LOG] 在错误处理中关闭控制器失败（可能已被关闭）:", e);
+    }
+  }
 }

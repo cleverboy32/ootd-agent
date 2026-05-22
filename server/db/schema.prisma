@@ -7,7 +7,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
+  output   = "../../../node_modules/.prisma/client"
 }
 
 // 1. 新建 ClientProfile 模型来存储与客户端相关的提取信息
@@ -50,7 +50,8 @@ model Conversation {
 model Message {
   id             String       @id @default(cuid())
   role           String // "user" or "ai"
-  content        Json // 使用 Json 类型来存储复杂的 content 结构
+  content        Json         @default("{}") // 使用 Json 类型来存储复杂的 content 结构
+  status         String       @default("completed") // "generating", "completed", "failed"
   timestamp      DateTime
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
@@ -72,3 +73,4 @@ model Summary {
   conversationId  String
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
+

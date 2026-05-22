@@ -2,8 +2,11 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import Image from 'next/image';
 import remarkGfm from 'remark-gfm';
-import { User } from 'lucide-react';
 import { Message } from '@/lib/types';
+import { User, AlertTriangle, RefreshCw } from 'lucide-react'; // <-- 引入图标
+import { useChatHandler } from '@/hooks/useChatHandler'; // <-- 引入我们的核心 hook
+import { Button } from '@/components/ui/button'; // <-- 引入按钮
+
 
 // 1. 更新 props 接口以接收 isLoading
 interface ChatMessageProps {
@@ -11,12 +14,17 @@ interface ChatMessageProps {
   isLoading?: boolean;
 }
 export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
+
+  const { handleSend } = useChatHandler(); 
+
   // 2. 决定是否应该渲染气泡的条件
   const shouldRenderBubble = (
     (Array.isArray(msg.content) && msg.content.length > 0) || // AI消息有内容
-    (typeof msg.content === 'string' && msg.content.trim() !== '') || // 用户消息有内容
+    (typeof msg.content === 'string' && msg.content !== '') || // 用户消息有内容
     msg.imageUrl // 用户上传了图片
   );
+
+  const isGenerating = msg.role === 'ai' && msg.status === 'generating' && msg.content.length === 0;
 
   return (
     <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -33,10 +41,6 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
           {/* 4. 使用上面计算出的条件来决定是否渲染气泡 */}
           {shouldRenderBubble && (
             <div className={`rounded-2xl px-5 py-3.5 ${msg.role === 'user' ? 'bg-gradient-to-br from-amber-400/20 to-yellow-600/10 text-black rounded-tr-sm' : 'bg-muted/40 border border-border/50 text-foreground rounded-tl-sm'} shadow-sm ${msg.role === 'ai' ? 'prose prose-sm dark:prose-invert max-w-none' : 'whitespace-pre-wrap leading-relaxed'}`}>
-              {msg.imageUrl && (
-                <Image src={msg.imageUrl} alt="Uploaded" width={200} height={200} className="max-w-[200px] sm:max-w-xs h-auto rounded-xl mb-3 border border-border/10" />
-              )}
-
               {Array.isArray(msg.content) ? (
                 msg.content.map((part, index) => {
                   if (part.type === 'text') {
@@ -49,6 +53,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
                         alt={part.alt || 'Generated image'}
                         width={200}
                         height={200}
+                        unoptimized
                         className="h-auto w-full max-w-[200px] rounded-xl my-3 border border-border/10"
                       />
                     );
@@ -78,6 +83,32 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
                   msg.content
                 )
               )}
+            </div>
+          )}
+
+          {isGenerating && !shouldRenderBubble && (
+            <div className="rounded-2xl px-5 py-3.5 bg-muted/40 border border-border/50 rounded-tl-sm shadow-sm">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 animate-pulse"></span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 animate-pulse delay-150"></span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 animate-pulse delay-300"></span>
+                </div>
+            </div>
+          )}
+
+          {msg.role === 'ai' && msg.status === 'failed' && (
+            <div className="flex items-center gap-2 mt-2 text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <span className="text-xs">消息生成失败</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex items-center gap-1.5 text-xs h-auto px-2 py-1"
+                onClick={() => handleSend(msg)} // <-- 核心！点击时调用重试逻辑
+              >
+                <RefreshCw className="h-3 w-3" />
+                重试
+              </Button>
             </div>
           )}
         </div>

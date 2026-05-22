@@ -6,15 +6,15 @@ export type MessageContentPart = {
   alt?: string;     // 图片的描述
 };
 
+export type MessageStatus = 'generating' | 'completed' | 'failed';
+
 export type Message = {
-  id?: string; // 从数据库返回时会有
-  conversationId?: string; // 从数据库返回时会有
+  id: string;
+  status: 'generating' | 'completed' | 'failed';
   role: 'user' | 'ai';
-  // 核心改动：content 现在可以是简单的字符串，也可以是代表丰富内容的“部分”数组
-  content: string | MessageContentPart[];
-  timestamp: number; // 新增：消息创建时的时间戳
-  imageUrl?: string | null; // 这个字段可以继续用来显示用户上传的图片
-  createdAt?: Date; // 从数据库返回时会有
+  content: MessageContentPart[];
+  timestamp: number;
+  imageUrl?: string; // Add optional imageUrl for client-side rendering
 };
 
 export type Conversation = {

@@ -1,238 +1,160 @@
 import { Content, Part } from "@google/genai";
-import { genAI } from "server/services/ai";
-import prismadb from 'server/db';
-import { Prisma } from '@prisma/client';
-import { generateSummary } from "@/server/services/summarization";
-import { CONTEXT_TOKEN_LIMIT, estimateTokenCount, formatHistoryAsync } from "@/server/utils/estimate-token";
+import prismadb from "server/db";
 import { mainModelConfig } from "@/server/utils/ootd-ai-config";
-import { handleStreamCompletion, handleStreamError, sendEvent } from "@/server/utils/stream-helpers";
-import { generateAndSendImageInBackground } from "@/server/services/generateImage";
-import { Message } from "@/server/types/message";
+import { handleStreamError, sendEvent } from "@/server/utils/stream-helpers";
 
-
-
+// Import the newly created handlers
+import { buildContext } from "./handlers/buildContext";
+import { loadPersonalization } from "./handlers/loadPersonalization";
+import { processAiInteraction } from "./handlers/processAiInteraction";
 /**
- * 创建一个用于处理OOTD（今日穿搭）请求的 ReadableStream。
- * @param initialParts - 用户初始输入的内容（文本和/或图片）。
- * @returns 一个 ReadableStream 实例。
+ * Creates a readable stream for handling OOTD requests.
+ * This function orchestrates the entire process, including state management for retries.
+ * @param initialParts - User's initial input (text and/or image).
+ * @param messageId - Optional ID of the message to retry.
+ * @returns A ReadableStream instance.
  */
-export function createOotdStream(initialParts: Part[], clientId?: string, conversationId?: string): ReadableStream {
-  
+export function createOotdStream(
+  initialParts: Part[],
+  clientId?: string,
+  conversationId?: string,
+  messageId?: string, // For retry
+): ReadableStream {
   return new ReadableStream({
     async start(controller) {
       console.log("[CONTROLLER_LOG] --- 新的 ReadableStream 已创建 ---");
-      const pendingImageTasks: Promise<void>[] = [];
+      let finalMessageId = messageId;
+      let accumulatedContent = "";
+      try {
+        const effectiveInitialParts = initialParts;
+        const historyForAI: Content[] = await buildContext(conversationId); // 把 historyForAI 的定义提前
 
-      // --- [新增] --- 获取个性化配置的逻辑
-      let personalizedConfig = mainModelConfig;
-      let historyForAI: Content[] = [];
+        if (finalMessageId) {
+          // --- 断点续传逻辑 ---
+          // 1. 从历史记录中找到并移除上一次AI失败的、不完整的回复
+          let partialContent = "";
+          if (
+            historyForAI.length > 0 &&
+            historyForAI[historyForAI.length - 1].role === "model"
+          ) {
+            const lastAiMessage = historyForAI.pop(); // 移除失败的model消息
+            if (lastAiMessage?.parts) {
+              // 2. 提取不完整的文本内容
+              const textPart = lastAiMessage.parts.find((p) => "text" in p) as
+                | { text: string }
+                | undefined;
+              if (textPart) {
+                partialContent = textPart.text;
+                console.log(
+                  `[RETRY_LOGIC] 提取到中断内容: \"${partialContent.slice(0, 100)}...\"`,
+                );
+              }
+            }
+          }
 
-       // --- 增加调试日志 ---
-       console.log(`[CONTEXT_DEBUG] --- 开始为会话构建上下文 ---`);
-       console.log(`[CONTEXT_DEBUG] 传入的 conversationId: ${conversationId}`);
+          // 3. 构建一个精确的“续写”指令
+          const continuePrompt = `你上一次的回复因为意外中断了。请从以下内容的结尾处无缝衔接，继续生成，不要重复已经说过的话，也不要加上“好的，继续”等多余的开场白。中断的内容如下：\n\n---
+${partialContent}
+---`;
 
-      if (conversationId) {
-        try {
-
-           // 1. 加载最新的摘要和未被摘要的新消息
-           const latestSummary = await prismadb.summary.findFirst({
-            where: { conversationId },
-            orderBy: { createdAt: 'desc' },
+          historyForAI.push({
+            role: "user",
+            parts: [{ text: continuePrompt }],
           });
-
-          const newMessages = await prismadb.message.findMany({
-            where: {
-              conversationId,
-              createdAt: {
-                // 只获取在最新摘要之后创建的消息
-                gt: latestSummary?.summarizedUntil,
-              },
+        } else {
+          if (!conversationId) {
+            throw new Error(
+              "conversationId is required for creating a new message.",
+            );
+          }
+          console.log(
+            "[STATEFUL_STREAM] New request, creating placeholder message...",
+          );
+          const placeholderMessage = await prismadb.message.create({
+            data: {
+              conversationId: conversationId,
+              role: "assistant",
+              content: {}, // Default empty content
+              status: "generating",
+              timestamp: new Date(),
             },
-            orderBy: { createdAt: 'asc' },
+            select: { id: true },
           });
+          finalMessageId = placeholderMessage.id;
 
-          console.log(`有新对话${newMessages.length}条`)
-
-          const unsummarizedHistory = await formatHistoryAsync(newMessages as Message[]);
-          const summaryContent = latestSummary?.content || null;
-
-          // 2. 估算 Token
-          const summaryToken = summaryContent ? Math.floor(summaryContent.length / 2) : 0;
-          const historyToken = estimateTokenCount(unsummarizedHistory);
-          const totalToken = summaryToken + historyToken;
-          console.log(`[CONTEXT] 预估 Token: 摘要(${summaryToken}) + 新消息(${historyToken}) = ${totalToken}`);
-
-            // 3. 决策与压缩
-            if (totalToken > CONTEXT_TOKEN_LIMIT) {
-              console.log(`[CONTEXT] Token 超出限制 (${totalToken})，开始生成新摘要...`);
-              
-              // 调用服务生成新摘要
-              const newSummaryContent = await generateSummary(summaryContent, unsummarizedHistory);
-  
-              if (newSummaryContent) {
-                const lastMessageSummarized = newMessages[newMessages.length - 1];
-                
-                // 异步保存新摘要，不阻塞主流程
-                prismadb.summary.create({
-                  data: {
-                    conversationId,
-                    content: newSummaryContent,
-                    summarizedUntil: lastMessageSummarized.createdAt,
-                  }
-                }).then(() => {
-                  console.log(`[CONTEXT] 新摘要已成功保存到数据库。`);
-                }).catch(e => {
-                  console.error(`[CONTEXT] 保存新摘要失败:`, e);
-                });
-  
-                // 构建用于本次请求的 AI 历史
-                historyForAI = [{ role: 'user', parts: [{ text: `--- 前情提要 ---\\n${newSummaryContent}` }] }];
-              } else {
-                // 如果摘要生成失败，则只使用最新的消息作为回退
-                historyForAI = unsummarizedHistory.slice(-20); // 保留最后20条
-              }
-            } else {
-              // Token 未超限，正常组合历史
-              if (summaryContent) {
-                historyForAI.push({ role: 'user', parts: [{ text: `--- 前情提要 ---\\n${summaryContent}` }] });
-              }
-              historyForAI.push(...unsummarizedHistory);
-            }
-        } catch(e) {
-          console.error(`[HISTORY] 加载历史消息失败:`, e);
+          sendEvent(controller, "metadata", { messageId: finalMessageId });
+          console.log(
+            `[STATEFUL_STREAM] Metadata sent with Message ID: ${finalMessageId}`,
+          );
         }
-      }
 
-      if (clientId) {
-        try {
-          const clientProfile = await prismadb.clientProfile.findUnique({
-            where: { id: clientId },
+        // Step 2: Load personalization settings
+        const personalizedConfig = await loadPersonalization(
+          clientId,
+          mainModelConfig,
+        );
+        // Step 3: Process the core AI interaction
+        console.log(JSON.stringify(historyForAI), 333);
+
+        await processAiInteraction(
+          {
+            model: "gemini-2.5-pro",
+            config: personalizedConfig,
+            history: historyForAI,
+          },
+          effectiveInitialParts,
+          controller,
+          (chunk) => {
+            accumulatedContent += chunk;
+          },
+        );
+
+        // --- [FINALIZATION LOGIC] ---
+        if (finalMessageId) {
+          console.log(
+            `[DB_SAVE_SUCCESS] Saving ${accumulatedContent.length} chars for message ${finalMessageId}`,
+          );
+          await prismadb.message.update({
+            where: { id: finalMessageId },
+            data: {
+              content: [{ type: "text", content: accumulatedContent }],
+              status: "completed",
+            },
           });
-
-          if (clientProfile && clientProfile.profileData) {
-            const profile = clientProfile.profileData as Prisma.JsonObject;
-            let userContext = "关于当前用户，我们有以下已知信息，请在你的回复中酌情参考：\\n";
-            
-            if (profile.name) userContext += `- 姓名: ${profile.name}\\n`;
-            if (profile.height) userContext += `- 身高: ${profile.height}\\n`;
-            if (profile.weight) userContext += `- 体重: ${profile.weight}\\n`;
-            if (profile.preferences) userContext += `- 偏好: ${Array.isArray(profile.preferences) ? profile.preferences.join(', ') : profile.preferences}\\n`;
-            
-            const dynamicSystemInstruction = `${mainModelConfig.systemInstruction}\\n\\n${userContext}`;
-            
-            personalizedConfig = {
-              ...mainModelConfig,
-              systemInstruction: dynamicSystemInstruction,
-            };
-            console.log(`[USER_CONTEXT] 已为 Client ${clientId} 加载个性化配置。 ${JSON.stringify(profile)}`);
-          }
-        } catch (e) {
-          console.error(`[USER_CONTEXT] 为 Client ${clientId} 获取用户信息失败:`, e);
-          // 如果获取失败，继续使用默认配置，不中断流程
+          console.log(
+            `[STATEFUL_STREAM] Message ${finalMessageId} status updated to completed.`,
+          );
         }
-      }
-
-      const chat = genAI.chats.create({
-        model: 'gemini-2.5-pro',
-        config: personalizedConfig,
-        history: historyForAI,
-      });
-
-      // 核心递归函数，处理与模型的每一轮对话
-      async function processStreamStep(nextTurnParts: Part[]) {
-        try {
-          const result = await chat.sendMessageStream({
-            message: nextTurnParts
+      } catch (error) {
+        console.error(
+          "[STREAM_HANDLER] An error occurred in the main stream process:",
+          error,
+        );
+        if (finalMessageId) {
+          console.log(
+            `[DB_SAVE_FAILURE] Saving partial content (${accumulatedContent.length} chars) for message ${finalMessageId} before marking as failed.`,
+          );
+          // Even on failure, save what we've accumulated so far.
+          await prismadb.message.update({
+            where: { id: finalMessageId },
+            data: {
+              content: [{ type: "text", content: accumulatedContent }],
+              status: "failed",
+            },
           });
-          const allParts: Part[] = [];
-
-          // 1. 流式处理模型返回的文本块
-          for await (const chunk of result) {
-            const candidate = chunk.candidates?.[0];
-            const parts = candidate?.content?.parts;
-            if (parts) {
-              allParts.push(...parts);
-              const text = parts.find(p => p.text)?.text;
-              if (text) {
-                sendEvent(controller, 'text_chunk', { text });
-              }
-            }
-          }
-
-          // 2. 从完整响应中解析工具调用
-          const calls = allParts.filter(p => p.functionCall).map(p => p.functionCall);
-
-          if (calls && calls.length > 0) {
-            const functionResponsesForModel: Part[] = [];
-
-
-            // 1. 检查是否存在 gatekeeper_check 调用
-            const gatekeeperCall = calls.find(call => call!.name === 'gatekeeper_check');
-            if (gatekeeperCall) {
-              const args = gatekeeperCall.args as { is_ready?: boolean; questions?: string[] };
-              const { is_ready, questions } = args;
-
-              if (is_ready === false && Array.isArray(questions) && questions.length > 0) {
-                // AI 决定提问，发送问题并结束流程
-                const combinedQuestions = questions.join(' ');
-                sendEvent(controller, 'text_chunk', { text: combinedQuestions });
-                await handleStreamCompletion(controller, pendingImageTasks);
-                return; 
-              } else {
-                // AI 认为信息已就绪，准备一个"假"回复让它继续
-                functionResponsesForModel.push({
-                  functionResponse: {
-                    name: 'gatekeeper_check',
-                    response: { content: "OK, prerequisite check passed. You can proceed." },
-                  },
-                });
-              }
-            }
-
-
-            for (const call of calls) {
-              if (call!.name === 'image_generator' && call!.args?.prompt) {
-                const imgPrompt = call!.args.prompt as string;
-                const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                
-                // 立即向前端发送图片占位符事件
-                sendEvent(controller, 'image_placeholder', { id: imageId, alt: imgPrompt });
-                
-                // 在后台启动图片生成任务，并追踪它
-                const imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
-                pendingImageTasks.push(imagePromise);
-
-                // 准备一个“假”回复给模型，让它继续工作
-                functionResponsesForModel.push({
-                  functionResponse: {
-                    name: 'image_generator',
-                    response: { content: `OK, image generation for '${imgPrompt.substring(0, 30)}...' started.` },
-                  },
-                });
-              }
-            }
-
-            // 如果我们生成了有效的工具调用回复，就继续递归
-            if (functionResponsesForModel.length > 0) {
-              await processStreamStep(functionResponsesForModel);
-              return; // 递归结束后，立刻返回，防止执行下方的结束逻辑
-            } 
-          } 
-
-          // 3. 如果没有更多步骤，则安全地结束流
-          await handleStreamCompletion(controller, pendingImageTasks);
-
-        } catch (error) {
-          // 统一处理主流程中的任何错误
-          handleStreamError(controller, pendingImageTasks, error, "MainProcess");
+          console.log(
+            `[STATEFUL_STREAM] Message ${finalMessageId} status updated to failed.`,
+          );
         }
+        handleStreamError(controller, [], error as Error, "MainProcess");
       }
-
-      // 启动整个流程
-      await processStreamStep(initialParts);
     },
     cancel(reason) {
-      console.error("[CONTROLLER_LOG] --- ReadableStream 被取消 --- 原因:", reason);
-    }
+      console.error(
+        "[CONTROLLER_LOG] --- ReadableStream 被取消 --- 原因:",
+        reason,
+      );
+      // TODO: Update message status to 'cancelled' if finalMessageId exists.
+    },
   });
 }
