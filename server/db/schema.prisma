@@ -7,7 +7,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../../../node_modules/.prisma/client"
+  output   = "../../node_modules/.prisma/client"
 }
 
 // 1. 新建 ClientProfile 模型来存储与客户端相关的提取信息
@@ -27,6 +27,7 @@ model ClientProfile {
 
   profileData   Json      @default("{}") // 使用 JSON 字段，可以灵活存储任何提取出的信息
   conversations Conversation[] // 一个客户可以有多个会话
+  clothingItems ClothingItem[] // 新增与 ClothingItem 的关联
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -73,4 +74,37 @@ model Summary {
   conversationId  String
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
+
+// --- [新增] --- 橱窗功能模型
+// 1. 定义衣物主类别枚举
+enum ClothingMainCategory {
+  TOP       // 上装
+  BOTTOM    // 下装
+  OUTERWEAR // 外套
+  FOOTWEAR  // 鞋履
+  ACCESSORY // 配饰
+  ONE_PIECE // 连身装 (如连衣裙、连体裤)
+}
+
+// 2. 定义衣物单品模型
+model ClothingItem {
+  id           String               @id @default(cuid())
+  imageUrl     String
+  mainCategory ClothingMainCategory // 主要类别 (用于 Tab 分类)
+  subCategory  String               // 子类别 (AI 自动生成, e.g., 'T-shirt', 'Jeans')
+  season       String[]             @default([]) // 新增：季节
+  material     String[]             @default([]) // 新增：材质
+  description  String?
+  colors       String[]
+  tags         String[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  // 建立与 ClientProfile 的关联
+  clientProfileId String
+  clientProfile   ClientProfile @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+
+  @@index([clientProfileId])
+}
+
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Search, Plus, Trash2 } from "lucide-react"; // Import Trash2
+import { Search, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import React from "react";
@@ -110,3 +110,4 @@ export function SidebarLeft({
     </aside>
   );
 }
+
