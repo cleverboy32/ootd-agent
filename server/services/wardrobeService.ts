@@ -1,0 +1,94 @@
+/**
+ * Searches a user's wardrobe for clothing items that semantically match a given text query.
+ *
+ * @param clientProfileId The ID of the user whose wardrobe to search.
+ * @param queryText The natural language query (e.g., "something warm and cozy for a rainy day").
+ * @param limit The maximum number of items to return. Defaults to 5.
+ * @param minSimilarity The minimum similarity score (0 to 1) for an item to be included. Defaults to 0.5.
+ * @returns A promise that resolves to an array of matching clothing items, sorted by relevance.
+ */
+import prismadb from '@/server/db';
+import { generateEmbedding } from './embedding';
+import { ClothingMainCategory } from '@prisma/client'; // 导入 Prisma 的枚举类型
+
+// 定义一个精确的返回类型，包含处理器需要的所有字段以及相似度分数
+export type WardrobeSearchResult = {
+  id: string;
+  imageUrl: string;
+  mainCategory: ClothingMainCategory;
+  subCategory: string;
+  description: string | null;
+  colors: string[];
+  similarity: number;
+};
+
+/**
+ * 根据文本在用户的衣橱中进行语义搜索
+ * @param searchText - 经过提炼的搜索关键词
+ * @param userId - 用户的 ID (对应 clientProfileId)
+ * @param limit - 返回结果的最大数量
+ * @returns - 返回一个包含衣物信息和相似度分数的数组
+ */
+export async function searchWardrobeItemsByText(
+  searchText: string,
+  userId: string,
+  limit: number = 5
+): Promise<WardrobeSearchResult[]> {
+  console.log(`[RAG-SEARCH] Initiating search for userId: ${userId}`);
+  console.log(`[RAG-SEARCH] Searching with distilled keywords: "${searchText}"`);
+
+  if (!searchText.trim()) {
+    console.log('[RAG-SEARCH] SearchText is empty, returning empty array.');
+    return [];
+  }
+
+  try {
+    const queryEmbedding = await generateEmbedding(searchText);
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      console.error('[RAG-SEARCH] Failed to generate query embedding.');
+      return [];
+    }
+    console.log(`[RAG-SEARCH] Generated query embedding (first 3 dims): ${queryEmbedding.slice(0, 3)}...`);
+
+    // [FIX] Manually format the embedding array into a string that pgvector understands.
+    const vectorQueryString = `[${queryEmbedding.join(',')}]`;
+
+    // SQL查询，确保 SELECT 所有 ragSearchHandler 需要的字段
+    const results: WardrobeSearchResult[] = await prismadb.$queryRaw`
+      SELECT
+        "id",
+        "imageUrl",
+        "mainCategory",
+        "subCategory",
+        "description",
+        "colors",
+        1 - ("embedding" <-> ${vectorQueryString}::vector) as similarity
+      FROM
+        "ClothingItem"
+      WHERE
+        "clientProfileId" = ${userId} AND "embedding" IS NOT NULL
+      ORDER BY
+        similarity DESC
+      LIMIT ${limit};
+    `;
+
+    console.log('[RAG-SEARCH] Raw search results from DB:', JSON.stringify(results, null, 2));
+
+    if (!results || results.length === 0) {
+      console.log('[RAG-SEARCH] No items found in the database for this user.');
+      return [];
+    }
+
+    const SIMILARITY_THRESHOLD = 0.15; // [MODIFIED] 降低阈值，让更多结果通过
+
+    const filteredResults = results.filter(item => item.similarity > SIMILARITY_THRESHOLD);
+
+    console.log(`[RAG-SEARCH] Found ${filteredResults.length} items after filtering by threshold (${SIMILARITY_THRESHOLD}).`);
+
+    return filteredResults;
+  } catch (error) {
+    console.error('Error during wardrobe search:', error);
+    return [];
+  }
+}
+

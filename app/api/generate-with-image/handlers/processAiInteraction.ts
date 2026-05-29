@@ -1,13 +1,14 @@
 import { Content, Part, GenerateContentConfig } from '@google/genai';
 import { genAI } from 'server/services/ai';
 import { handleStreamCompletion, sendEvent } from '@/server/utils/stream-helpers';
-import { generateAndSendImageInBackground } from '@/server/services/generateImage';
-
+import { generateAndSendImageInBackground, generateAndSendImageWithContextInBackground } from '@/server/services/generateImage';
+import { ClothingItem } from '@prisma/client'; // Import ClothingItem
 export async function processAiInteraction(
   chatConfig: { model: string; config: GenerateContentConfig; history: Content[] },
   initialParts: Part[],
   controller: ReadableStreamDefaultController,
-  onChunk: (text: string) => void // <-- 新增的回调参数
+  onChunk: (text: string) => void,
+  ragCache: Map<string, ClothingItem> // [FIXED] Correctly type the cache to use ClothingItem
 ): Promise<void> { // The function now returns the full text content
   const chat = genAI.chats.create(chatConfig);
   const pendingImageTasks: Promise<void>[] = [];
@@ -66,9 +67,33 @@ export async function processAiInteraction(
       for (const call of calls) {
         if (call!.name === 'image_generator' && call!.args?.prompt) {
           const imgPrompt = call!.args.prompt as string;
+          const wardrobeItemsArg = call!.args.wardrobe_items as { id: string }[] | undefined;
+
           const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
           sendEvent(controller, 'image_placeholder', { id: imageId, alt: imgPrompt });
-          const imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
+
+          let imagePromise: Promise<void>;
+
+          // --- [NEW] Smartly decide which image generation function to call ---
+          if (wardrobeItemsArg && wardrobeItemsArg.length > 0) {
+            const imageUrls = wardrobeItemsArg.map(item => {
+              const cachedItem = ragCache.get(item.id);
+              return cachedItem?.imageUrl;
+            }).filter((url): url is string => !!url);
+
+            if (imageUrls.length > 0) {
+              console.log(`[PROCESS_AI] Calling image generation with ${imageUrls.length} context images.`);
+              imagePromise = generateAndSendImageWithContextInBackground(controller, imgPrompt, imageUrls, imageId);
+            } else {
+              console.log('[PROCESS_AI] Wardrobe items specified, but not found in cache. Falling back to simple image generation.');
+              imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
+            }
+          } else {
+            console.log('[PROCESS_AI] No wardrobe items specified. Calling simple image generation.');
+            imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
+          }
+          // --- [END NEW] ---
+
           pendingImageTasks.push(imagePromise);
           functionResponsesForModel.push({ functionResponse: { name: 'image_generator', response: { content: `OK, image generation for '${imgPrompt.substring(0, 30)}...' started.` } } });
         }
@@ -85,3 +110,4 @@ export async function processAiInteraction(
 
   await processStreamStep(initialParts);
 }
+

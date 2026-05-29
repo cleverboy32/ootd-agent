@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { ClothingMainCategory } from '@prisma/client';
+// [MODIFIED] Add Prisma to the import
+import { ClothingMainCategory, Prisma } from '@prisma/client';
 import prismadb from 'server/db';
 import { genAI } from 'server/services/ai';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { GenerateContentResponse } from '@google/genai';
-
+// [MODIFIED] Import both embedding generators
+import { generateEmbedding, generateMultimodalEmbedding } from 'server/services/embedding';
 // --- [新增] GET 请求处理函数 ---
 export async function GET(req: Request) {
   try {
@@ -137,9 +139,23 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: `Invalid mainCategory "${mainCategory}" from AI analysis` }, { status: 500 });
     }
 
-    // 5. 将结果存入数据库
+    // --- [MODIFIED] Switched to Multimodal Embedding ---
+    console.log('[API /api/wardrobe] Generating multimodal embedding...');
+    // 1. Prepare the text part from AI analysis
+    const textForEmbedding = `Category: ${subCategory}. Description: ${description}. Colors: ${colors.join(', ')}. Tags: ${tags.join(', ')}. Season: ${season.join(', ')}. Material: ${material.join(', ')}.`;
+    // 2. Prepare the image part (we already have it from the start)
+    const imagePartForEmbedding = await urlToGenerativePart(imageUrl);
+    // 3. Call the new multimodal embedding service
+    const embeddingVector = await generateMultimodalEmbedding(textForEmbedding, imagePartForEmbedding);
+    console.log('[API /api/wardrobe] Multimodal embedding generated successfully.');
+    // --- [END MODIFIED] ---
+
+    // --- [CORRECTED IMPLEMENTATION] 2-Step Write for Unsupported 'vector' Type ---
+    // 5. 将结果存入数据库 (in 2 steps)
     console.log('[API /api/wardrobe] Storing new clothing item to database...');
-    const newClothingItem = await prismadb.clothingItem.create({
+
+    // Step 1: Create the item WITHOUT the 'embedding' field.
+    const createdItem = await prismadb.clothingItem.create({
       data: {
         clientProfileId: clientId,
         imageUrl: imageUrl,
@@ -147,16 +163,23 @@ export async function POST(req: Request) {
         subCategory: subCategory,
         season: season.map(s => s.toLowerCase()),
         material: material.map(m => m.toLowerCase()),
-        // 将所有标签和颜色统一转为小写，以保持数据一致性
         colors: colors.map(c => c.toLowerCase()),
         tags: tags.map(t => t.toLowerCase()),
         description: description,
-      }
+      },
     });
-    console.log(`[API /api/wardrobe] Successfully created clothing item with id: ${newClothingItem.id}`);
 
-    // 6. 返回成功的响应
-    return NextResponse.json(newClothingItem, { status: 201 }); // 201 Created
+    // Step 2: Use a raw SQL query to UPDATE the item with the vector embedding.
+    const vectorString = `[${embeddingVector.join(',')}]`;
+    await prismadb.$executeRaw`
+      UPDATE "ClothingItem"
+      SET "embedding" = ${vectorString}::vector
+      WHERE id = ${createdItem.id};
+    `;
+    console.log(`[API /api/wardrobe] Successfully created item ${createdItem.id} and added embedding.`);
+
+    // 6. 返回成功的响应 (Prisma Client still can't read the embedding from the createdItem object)
+    return NextResponse.json(createdItem, { status: 201 });
 
   } catch (error) {
     console.error('Error in POST /api/wardrobe:', error);

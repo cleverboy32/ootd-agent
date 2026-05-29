@@ -97,8 +97,10 @@ model ClothingItem {
   description  String?
   colors       String[]
   tags         String[]
+  embedding    Unsupported("vector(3072)")? // [MODIFIED] Update dimension to 3072
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
+
 
   // 建立与 ClientProfile 的关联
   clientProfileId String
@@ -106,5 +108,4 @@ model ClothingItem {
 
   @@index([clientProfileId])
 }
-
 

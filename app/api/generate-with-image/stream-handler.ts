@@ -1,4 +1,5 @@
 import { Content, Part } from "@google/genai";
+import { ClothingItem } from '@prisma/client'; // [ADDED] Import ClothingItem type
 import prismadb from "server/db";
 import { mainModelConfig } from "@/server/utils/ootd-ai-config";
 import { handleStreamError, sendEvent } from "@/server/utils/stream-helpers";
@@ -7,6 +8,7 @@ import { handleStreamError, sendEvent } from "@/server/utils/stream-helpers";
 import { buildContext } from "./handlers/buildContext";
 import { loadPersonalization } from "./handlers/loadPersonalization";
 import { processAiInteraction } from "./handlers/processAiInteraction";
+import { performRagSearch } from './handlers/ragSearchHandler';
 /**
  * Creates a readable stream for handling OOTD requests.
  * This function orchestrates the entire process, including state management for retries.
@@ -25,9 +27,28 @@ export function createOotdStream(
       console.log("[CONTROLLER_LOG] --- 新的 ReadableStream 已创建 ---");
       let finalMessageId = messageId;
       let accumulatedContent = "";
+
+      // [FIXED] Correct cache type to store full ClothingItem objects
+      const ragCache = new Map<string, ClothingItem>();
+
       try {
         const effectiveInitialParts = initialParts;
-        const historyForAI: Content[] = await buildContext(conversationId); // 把 historyForAI 的定义提前
+        const historyForAI: Content[] = await buildContext(conversationId);
+
+        // --- [MODIFIED & FIXED] RAG Search Step ---
+        if (clientId) {
+          // [FIXED] Pass the ragCache map as the third argument
+          const searchResults = await performRagSearch(effectiveInitialParts, clientId, ragCache);
+
+          if (searchResults.xmlString && searchResults.items.length > 0) {
+            // [CLEANUP] The cache is now populated inside performRagSearch. Redundant 'for' loop is removed.
+          historyForAI.push({
+              role: 'user',
+              parts: [{ text: `Here are some items from my wardrobe that might be relevant:\n${searchResults.xmlString}` }]
+            });
+          }
+        }
+        // --- [END MODIFIED & FIXED] ---
 
         if (finalMessageId) {
           // --- 断点续传逻辑 ---
@@ -47,8 +68,8 @@ export function createOotdStream(
                 partialContent = textPart.text;
                 console.log(
                   `[RETRY_LOGIC] 提取到中断内容: \"${partialContent.slice(0, 100)}...\"`,
-                );
-              }
+          );
+        }
             }
           }
 
@@ -107,6 +128,7 @@ ${partialContent}
           (chunk) => {
             accumulatedContent += chunk;
           },
+          ragCache // <-- [NEW] Pass the cache down to the interaction processor
         );
 
         // --- [FINALIZATION LOGIC] ---
@@ -158,3 +180,4 @@ ${partialContent}
     },
   });
 }
+
