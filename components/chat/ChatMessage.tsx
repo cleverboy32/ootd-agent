@@ -6,6 +6,73 @@ import { Message } from '@/lib/types';
 import { User, AlertTriangle, RefreshCw } from 'lucide-react'; // <-- 引入图标
 import { useChatHandler } from '@/hooks/useChatHandler'; // <-- 引入我们的核心 hook
 import { Button } from '@/components/ui/button'; // <-- 引入按钮
+import { WardrobeItem } from './WardrobeItem'; // <-- 1. 导入新组件
+
+// 2. 定义辅助函数
+const ContentRenderer = ({ text }: { text: string }) => {
+  const regex = /\[衣橱物品:id=([^\]]+)\]/g;
+  const parts = text.split(regex);
+
+  // [NEW] Define a custom renderer for markdown images to control their style
+  const markdownComponents = {
+    img: (props: React.ComponentPropsWithoutRef<'img'>) => {
+      const src = props.src;
+      if (!src || typeof src !== 'string') return null;
+      return (
+        <Image
+          src={src}
+          alt={props.alt || 'AI generated image'}
+                        width={200}
+                        height={200}
+                        unoptimized
+                        className="h-auto w-full max-w-[200px] rounded-xl my-3 border border-border/10"
+                      />
+                    );
+    },
+  };
+
+  // If there are no special tags, just render the markdown directly.
+  if (parts.length <= 1) {
+    // [MODIFIED] Pass our custom components to ReactMarkdown to handle images
+    return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</ReactMarkdown>;
+  }
+  return (
+    <>
+      {parts.map((part, i) => {
+        // Odd-indexed parts are the captured wardrobe item IDs
+        if (i % 2 === 1) {
+          const itemId = part;
+          return (
+            <span key={`item-${itemId}-${i}`} className="inline-block align-middle mx-1">
+              <WardrobeItem itemId={itemId} />
+            </span>
+                    );
+                  }
+
+        // Even-indexed parts are the regular text.
+        // We render them through ReactMarkdown but disable the default <p> tag's margin
+        // to ensure they flow inline with our custom components.
+        if (part) {
+          return (
+            <ReactMarkdown
+              key={`text-${i}`}
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Keep the existing custom component for inline paragraphs
+                p: ({ children }: React.ComponentPropsWithoutRef<'p'>) => <span className="inline">{children}</span>,
+                // [MODIFIED] Add our custom image renderer to this part as well
+                ...markdownComponents
+              }}
+            >
+              {part}
+            </ReactMarkdown>
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+};
 
 
 // 1. 更新 props 接口以接收 isLoading
@@ -44,7 +111,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
               {Array.isArray(msg.content) ? (
                 msg.content.map((part, index) => {
                   if (part.type === 'text') {
-                    return <ReactMarkdown key={part.id || index} remarkPlugins={[remarkGfm]}>{part.content}</ReactMarkdown>;
+                    return <ContentRenderer key={part.id || index} text={part.content} />;
                   } else if (part.type === 'image') {
                     return (
                       <Image
@@ -78,7 +145,7 @@ export function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
                 })
               ) : (
                 msg.role === 'ai' ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <ContentRenderer text={msg.content as string} />
                 ) : (
                   msg.content
                 )

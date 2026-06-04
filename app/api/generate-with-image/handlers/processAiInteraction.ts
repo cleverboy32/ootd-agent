@@ -7,9 +7,10 @@ export async function processAiInteraction(
   chatConfig: { model: string; config: GenerateContentConfig; history: Content[] },
   initialParts: Part[],
   controller: ReadableStreamDefaultController,
-  onChunk: (text: string) => void,
+  // [MODIFIED] The callback now accepts a data object for text or a generated image with its ID
+  onData: (data: { text?: string; image?: { id: string; url: string } }) => void,
   ragCache: Map<string, ClothingItem> // [FIXED] Correctly type the cache to use ClothingItem
-): Promise<void> { // The function now returns the full text content
+): Promise<Promise<void>[]> { // [MODIFIED] The function now returns the array of pending image promises
   const chat = genAI.chats.create(chatConfig);
   const pendingImageTasks: Promise<void>[] = [];
 
@@ -34,14 +35,14 @@ export async function processAiInteraction(
             // 先把阈值前的最后一点文本发出去，让效果更逼真
             const partialText = text.substring(0, ERROR_THRESHOLD - (characterCount - text.length));
             sendEvent(controller, 'text_chunk', { text: partialText });
-            onChunk(partialText);
-            
+            onData({ text: partialText }); // [MODIFIED] Use the new data object format
+
             // 引爆炸弹！
             throw new Error(`人为制造的AI响应中断 (达到 ${ERROR_THRESHOLD} 字符)`);
           }
 
           sendEvent(controller, 'text_chunk', { text });
-          onChunk(text);
+          onData({ text }); // [MODIFIED] Use the new data object format
         }
       }
     }
@@ -56,7 +57,7 @@ export async function processAiInteraction(
         if (args.is_ready === false && Array.isArray(args.questions) && args.questions.length > 0) {
           const questionsText = args.questions.join(' ');
           sendEvent(controller, 'text_chunk', { text: questionsText });
-          onChunk(questionsText);
+          onData({ text: questionsText }); // [MODIFIED] Use the new data object format
           await handleStreamCompletion(controller, pendingImageTasks);
           return;
         } else {
@@ -72,9 +73,17 @@ export async function processAiInteraction(
           const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
           sendEvent(controller, 'image_placeholder', { id: imageId, alt: imgPrompt });
 
+          // [NEW STRATEGY] We are now in control. Inject a clean, predictable placeholder into the text stream.
+          const placeholderText = `\n[IMAGE=${imageId}]\n`;
+          onData({ text: placeholderText });
+
           let imagePromise: Promise<void>;
 
-          // --- [NEW] Smartly decide which image generation function to call ---
+          // [MODIFIED] This callback still correctly sends the final ID and URL mapping upwards.
+          const onImageGenerated = (id: string, url: string) => {
+            onData({ image: { id, url } });
+          };
+          // --- [MODIFIED] Smartly decide which image generation function to call, and pass the new callback ---
           if (wardrobeItemsArg && wardrobeItemsArg.length > 0) {
             const imageUrls = wardrobeItemsArg.map(item => {
               const cachedItem = ragCache.get(item.id);
@@ -83,19 +92,29 @@ export async function processAiInteraction(
 
             if (imageUrls.length > 0) {
               console.log(`[PROCESS_AI] Calling image generation with ${imageUrls.length} context images.`);
-              imagePromise = generateAndSendImageWithContextInBackground(controller, imgPrompt, imageUrls, imageId);
+              imagePromise = generateAndSendImageWithContextInBackground(controller, imgPrompt, imageUrls, imageId, onImageGenerated);
             } else {
               console.log('[PROCESS_AI] Wardrobe items specified, but not found in cache. Falling back to simple image generation.');
-              imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
+              imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId, onImageGenerated);
             }
           } else {
             console.log('[PROCESS_AI] No wardrobe items specified. Calling simple image generation.');
-            imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId);
+            imagePromise = generateAndSendImageInBackground(controller, imgPrompt, imageId, onImageGenerated);
           }
-          // --- [END NEW] ---
+          // --- [END MODIFIED] ---
 
           pendingImageTasks.push(imagePromise);
-          functionResponsesForModel.push({ functionResponse: { name: 'image_generator', response: { content: `OK, image generation for '${imgPrompt.substring(0, 30)}...' started.` } } });
+
+          // [NEW STRATEGY] Return a simple 'OK' to the AI. Its job is done for this tool call.
+          // We have already handled the placeholder injection.
+          functionResponsesForModel.push({
+            functionResponse: {
+              name: 'image_generator',
+              response: {
+                content: "OK, image generation has been initiated."
+              }
+            }
+          });
         }
       }
 
@@ -109,5 +128,8 @@ export async function processAiInteraction(
   }
 
   await processStreamStep(initialParts);
+
+  // [NEW] Return the pending tasks so the caller can wait for them
+  return pendingImageTasks;
 }
 

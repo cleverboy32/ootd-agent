@@ -10,7 +10,9 @@ export async function generateAndSendImageWithContextInBackground(
     controller: ReadableStreamDefaultController,
     imgPrompt: string, 
     wardrobeImageUrls: string[],
-    imageId: string
+    imageId: string,
+    // [MODIFIED] The callback now provides both the ID and the URL
+    onImageGenerated?: (id: string, url: string) => void
   ) {
     try {
       const publicUrl = await retry(async (bail, attemptNumber) => {
@@ -67,6 +69,8 @@ export async function generateAndSendImageWithContextInBackground(
       // 如果重试成功，publicUrl 会有值，发送事件
       if (publicUrl) {
         sendEvent(controller, 'image_generated', { id: imageId, imageUrl: publicUrl, alt: imgPrompt });
+        // [MODIFIED] Call the callback with both the ID and the URL
+        onImageGenerated?.(imageId, publicUrl);
       }
 
     } catch (e) {
@@ -80,7 +84,9 @@ export async function generateAndSendImageWithContextInBackground(
 export async function generateAndSendImageInBackground(
     controller: ReadableStreamDefaultController,
     imgPrompt: string,
-    imageId: string
+    imageId: string,
+    // [MODIFIED] The callback now provides both the ID and the URL
+    onImageGenerated?: (id: string, url: string) => void
   ) {
     try {
       // 2. 使用 retry 包裹图片生成和上传的整个过程
@@ -132,6 +138,8 @@ export async function generateAndSendImageInBackground(
           imageUrl: publicUrl,
           alt: imgPrompt
         });
+        // [MODIFIED] Call the callback with both the ID and the URL
+        onImageGenerated?.(imageId, publicUrl);
       }
   
     } catch (e) {
@@ -145,3 +153,5 @@ export async function generateAndSendImageInBackground(
       });
     }
   }
+
+

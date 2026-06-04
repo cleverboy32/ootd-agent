@@ -92,3 +92,30 @@ export async function searchWardrobeItemsByText(
   }
 }
 
+/**
+ * Retrieves the details of a single clothing item from the database.
+ * NOTE: This function provides the raw data access.
+ * The caller (e.g., a Server Action) is responsible for ensuring the user has permission to access the item.
+ * @param itemId The ID of the clothing item to retrieve.
+ * @returns A promise that resolves to the clothing item's details or null if not found.
+ */
+export async function getWardrobeItemDetails(itemId: string) {
+  try {
+    const item = await prismadb.clothingItem.findUnique({
+      where: {
+        id: itemId,
+      },
+      select: {
+        id: true,
+        subCategory: true, // 使用 subCategory 作为显示名称
+        imageUrl: true,
+        clientProfileId: true, // 关键：为安全检查包含此字段
+      },
+    });
+    return item;
+  } catch (error) {
+    console.error(`[DB-ERROR] Failed to fetch clothing item with id "${itemId}":`, error);
+    return null;
+  }
+}
+

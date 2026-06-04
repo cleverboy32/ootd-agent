@@ -27,9 +27,12 @@ export function createOotdStream(
       console.log("[CONTROLLER_LOG] --- 新的 ReadableStream 已创建 ---");
       let finalMessageId = messageId;
       let accumulatedContent = "";
-
-      // [FIXED] Correct cache type to store full ClothingItem objects
+      const imageMap = new Map<string, string>();
       const ragCache = new Map<string, ClothingItem>();
+
+      // [NEW] Variables to manage state across the new structure
+      let mainError: Error | null = null;
+      let imageTasks: Promise<void>[] = [];
 
       try {
         const effectiveInitialParts = initialParts;
@@ -42,6 +45,7 @@ export function createOotdStream(
 
           if (searchResults.xmlString && searchResults.items.length > 0) {
             // [CLEANUP] The cache is now populated inside performRagSearch. Redundant 'for' loop is removed.
+            console.log(`searchResults: ${JSON.stringify(searchResults.items)}`)
           historyForAI.push({
               role: 'user',
               parts: [{ text: `Here are some items from my wardrobe that might be relevant:\n${searchResults.xmlString}` }]
@@ -117,7 +121,8 @@ ${partialContent}
         // Step 3: Process the core AI interaction
         console.log(JSON.stringify(historyForAI), 333);
 
-        await processAiInteraction(
+        // [MODIFIED] Capture the returned image promises
+        imageTasks = await processAiInteraction(
           {
             model: "gemini-2.5-pro",
             config: personalizedConfig,
@@ -125,50 +130,66 @@ ${partialContent}
           },
           effectiveInitialParts,
           controller,
-          (chunk) => {
-            accumulatedContent += chunk;
+          // [MODIFIED] This callback now handles text chunks and image ID/URL pairs
+          (data: { text?: string; image?: { id: string; url: string } }) => {
+            if (data.text) {
+              accumulatedContent += data.text;
+            }
+            if (data.image) {
+              imageMap.set(data.image.id, data.image.url);
+              console.log(`[STREAM_HANDLER] Mapped image ID ${data.image.id} to URL ${data.image.url}`);
+            }
           },
-          ragCache // <-- [NEW] Pass the cache down to the interaction processor
+          ragCache // <-- Pass the cache down to the interaction processor
         );
 
-        // --- [FINALIZATION LOGIC] ---
-        if (finalMessageId) {
-          console.log(
-            `[DB_SAVE_SUCCESS] Saving ${accumulatedContent.length} chars for message ${finalMessageId}`,
-          );
-          await prismadb.message.update({
-            where: { id: finalMessageId },
-            data: {
-              content: [{ type: "text", content: accumulatedContent }],
-              status: "completed",
-            },
-          });
-          console.log(
-            `[STATEFUL_STREAM] Message ${finalMessageId} status updated to completed.`,
-          );
-        }
       } catch (error) {
+        // [MODIFIED] In case of an error, just capture it. The finally block will handle the rest.
+        mainError = error as Error;
         console.error(
           "[STREAM_HANDLER] An error occurred in the main stream process:",
-          error,
+          mainError
         );
+      } finally {
+        // [NEW] This block is the single exit point, ensuring graceful handling of all resources.
+
+        console.log('[FINALLY] Waiting for all pending image tasks to settle...');
+        await Promise.allSettled(imageTasks);
+        console.log('[FINALLY] All image tasks have settled.');
+
         if (finalMessageId) {
-          console.log(
-            `[DB_SAVE_FAILURE] Saving partial content (${accumulatedContent.length} chars) for message ${finalMessageId} before marking as failed.`,
-          );
-          // Even on failure, save what we've accumulated so far.
+          try {
+            // Assemble the final content regardless of success or failure
+            let finalContent = accumulatedContent;
+          for (const [id, url] of imageMap.entries()) {
+            const placeholder = `[IMAGE=${id}]`;
+            const markdownImage = `\n\n![AI 生成的穿搭建议图片](${url})\n\n`;
+              finalContent = finalContent.split(placeholder).join(markdownImage);
+          }
+
+            // Update DB with the final content and status
+            const finalStatus = mainError ? 'failed' : 'completed';
           await prismadb.message.update({
             where: { id: finalMessageId },
             data: {
-              content: [{ type: "text", content: accumulatedContent }],
-              status: "failed",
+                content: [{ type: "text", content: finalContent }],
+                status: finalStatus,
             },
           });
-          console.log(
-            `[STATEFUL_STREAM] Message ${finalMessageId} status updated to failed.`,
-          );
+            console.log(`[FINALLY] DB record ${finalMessageId} updated with status: ${finalStatus}`);
+
+          } catch (dbError) {
+            console.error(`[FINALLY] Failed to update DB for message ${finalMessageId}:`, dbError);
         }
-        handleStreamError(controller, [], error as Error, "MainProcess");
+      }
+
+        // If there was an error in the main process, send it to the client now
+        if (mainError) {
+          handleStreamError(controller, [], mainError, "MainProcess");
+        }
+
+        console.log('[FINALLY] Closing the stream controller.');
+        controller.close();
       }
     },
     cancel(reason) {
