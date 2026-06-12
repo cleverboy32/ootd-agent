@@ -18,26 +18,53 @@ export async function generateAndSendImageWithContextInBackground(
       const publicUrl = await retry(async (bail, attemptNumber) => {
         console.log(`后端日志：[上下文图片][尝试 ${attemptNumber}] 开始调用多模态画图, Prompt:`, imgPrompt);
         
-        // 1. 构建多模态输入 (imagePart + textPart)
-        const multiModalParts: Part[] = [];
-        for (const url of wardrobeImageUrls) {
+        let imageResponse;
+        let useFallback = false;
+
+        try {
+          // 1. 构建多模态输入 (imagePart + textPart)
+          const multiModalParts: Part[] = [];
+          for (const url of wardrobeImageUrls) {
+            try {
+              const imagePart = await urlToGenerativePart(url);
+              multiModalParts.push(imagePart);
+            } catch (e) {
+              console.warn(`[上下文图片] 转换衣橱图片URL失败，已跳过: ${url}`, e);
+            }
+          }
+          multiModalParts.push({ text: imgPrompt }); // 文本 Prompt 放在最后
+
+          // 2. 调用多模态图像生成模型
+          imageResponse = await genAI.models.generateContent({
+            model: "gemini-2.5-flash-image", // 您的图片生成模型
+            contents: [{ role: "user", parts: multiModalParts }],
+          });
+        } catch (error) {
+          console.warn(`后端日志：[上下文图片][尝试 ${attemptNumber}] 多模态画图接口调用抛出异常，触发保底，将回退到纯文本画图...`, error);
+          useFallback = true;
+        }
+
+        let imagePart = !useFallback ? imageResponse?.candidates?.[0]?.content?.parts?.find(p => p.inlineData) : null;
+
+        // 【安全退级兜底逻辑】
+        // 如果多模态调用返回成功但由于安全政策审查（例如敏感类别过滤等）没有携带 inlineData，或者刚才捕获到了异常
+        if (!imagePart?.inlineData) {
+          console.warn(`后端日志：[上下文图片][尝试 ${attemptNumber}] 无法通过多模态正常生成图片，启动【纯文本生成保底机制】...`);
+          if (imageResponse) {
+            console.log("多模态生成未成功响应结构为:", JSON.stringify(imageResponse, null, 2));
+          }
+
           try {
-            const imagePart = await urlToGenerativePart(url);
-            multiModalParts.push(imagePart);
-    } catch (e) {
-            // 如果转换单个图片失败，记录警告但不中断整个流程，跳过该图片
-            console.warn(`[上下文图片] 转换衣橱图片URL失败，已跳过: ${url}`, e);
+            imageResponse = await genAI.models.generateContent({
+              model: "gemini-2.5-flash-image",
+              contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
+            });
+            imagePart = imageResponse?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+          } catch (fallbackError) {
+            console.error(`后端日志：[上下文图片][尝试 ${attemptNumber}] 纯文本画图保底也失败了:`, fallbackError);
+            throw fallbackError;
           }
         }
-        multiModalParts.push({ text: imgPrompt }); // 文本 Prompt 放在最后
-
-        // 2. 调用多模态图像生成模型
-        const imageResponse = await genAI.models.generateContent({
-          model: "gemini-2.5-flash-image", // 您的图片生成模型
-          contents: [{ role: "user", parts: multiModalParts }],
-        });
-
-        const imagePart = imageResponse?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
 
         if (imagePart?.inlineData) {
           const { data: base64Data, mimeType } = imagePart.inlineData;
@@ -52,9 +79,9 @@ export async function generateAndSendImageWithContextInBackground(
           console.log(`后端日志：[上下文图片][尝试 ${attemptNumber}] 图片上传成功，URL: ${url}`);
           return url; // 成功时返回 URL
         } else {
-          // 如果 API 调用成功但没有返回图片数据，这是一个不应重试的错误
-          console.warn("后端日志：[上下文图片] 图片API调用成功，但未返回图片数据。将不会重试。");
-          bail(new Error("模型未按预期返回图片数据。")); // 阻止 async-retry 继续重试
+          // 如果两次尝试后依然无图，报出非重试错误
+          console.warn("后端日志：[上下文图片] 双重生成尝试后，图片API仍未返回图片数据。将不会重试。");
+          bail(new Error("多模态与文本保底生成模型均未按预期返回图片数据。请检查提示词或安全设置。"));
           return '';
         }
       }, {

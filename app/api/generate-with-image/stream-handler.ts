@@ -161,35 +161,45 @@ ${partialContent}
           try {
             // Assemble the final content regardless of success or failure
             let finalContent = accumulatedContent;
-          for (const [id, url] of imageMap.entries()) {
-            const placeholder = `[IMAGE=${id}]`;
-            const markdownImage = `\n\n![AI 生成的穿搭建议图片](${url})\n\n`;
+            for (const [id, url] of imageMap.entries()) {
+              const placeholder = `[IMAGE=${id}]`;
+              const markdownImage = `\n\n![AI 生成的穿搭建议图片](${url})\n\n`;
               finalContent = finalContent.split(placeholder).join(markdownImage);
           }
 
+            // 【安全退级机制】安全清洗所有可能因超时或失败未生成的占位符标签
+            finalContent = finalContent.replace(/\[IMAGE=[^\]]+\]/g, '\n\n*(❌ 效果图生成失败)*\n\n');
+
             // Update DB with the final content and status
             const finalStatus = mainError ? 'failed' : 'completed';
-          await prismadb.message.update({
-            where: { id: finalMessageId },
-            data: {
-                content: [{ type: "text", content: finalContent }],
-                status: finalStatus,
-            },
-          });
+            await prismadb.message.update({
+              where: { id: finalMessageId },
+              data: {
+                  content: [{ type: "text", content: finalContent }],
+                  status: finalStatus,
+              },
+            });
             console.log(`[FINALLY] DB record ${finalMessageId} updated with status: ${finalStatus}`);
 
           } catch (dbError) {
             console.error(`[FINALLY] Failed to update DB for message ${finalMessageId}:`, dbError);
+          }
         }
-      }
 
         // If there was an error in the main process, send it to the client now
         if (mainError) {
           handleStreamError(controller, [], mainError, "MainProcess");
+        } else {
+          console.log('[FINALLY] Sending stream_end event and closing the stream controller.');
+          sendEvent(controller, 'stream_end', { message: '所有内容已加载完毕' });
+          if (controller.desiredSize !== null) {
+            try {
+              controller.close();
+            } catch (e) {
+              console.warn('[FINALLY] Controller was already closed by client or downstream:', e);
+            }
+          }
         }
-
-        console.log('[FINALLY] Closing the stream controller.');
-        controller.close();
       }
     },
     cancel(reason) {

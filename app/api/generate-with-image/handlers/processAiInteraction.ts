@@ -1,6 +1,6 @@
 import { Content, Part, GenerateContentConfig } from '@google/genai';
 import { genAI } from 'server/services/ai';
-import { handleStreamCompletion, sendEvent } from '@/server/utils/stream-helpers';
+import { sendEvent } from '@/server/utils/stream-helpers';
 import { generateAndSendImageInBackground, generateAndSendImageWithContextInBackground } from '@/server/services/generateImage';
 import { ClothingItem } from '@prisma/client'; // Import ClothingItem
 export async function processAiInteraction(
@@ -58,7 +58,6 @@ export async function processAiInteraction(
           const questionsText = args.questions.join(' ');
           sendEvent(controller, 'text_chunk', { text: questionsText });
           onData({ text: questionsText }); // [MODIFIED] Use the new data object format
-          await handleStreamCompletion(controller, pendingImageTasks);
           return;
         } else {
           functionResponsesForModel.push({ functionResponse: { name: 'gatekeeper_check', response: { content: "OK, prerequisite check passed. You can proceed." } } });
@@ -123,8 +122,6 @@ export async function processAiInteraction(
         return;
       }
     }
-
-    await handleStreamCompletion(controller, pendingImageTasks);
   }
 
   await processStreamStep(initialParts);

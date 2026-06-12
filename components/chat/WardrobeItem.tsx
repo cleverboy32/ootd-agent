@@ -2,22 +2,29 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { Skeleton } from '@/components/ui/skeleton';
 import { getWardrobeItem, type WardrobeItemData } from '@/lib/api/wardrobe';
+
+// 简单的内存缓存，防止重复请求导致的抖动
+const wardrobeCache: Map<string, WardrobeItemData> = new Map();
 
 interface WardrobeItemProps {
   itemId: string;
 }
 
 export function WardrobeItem({ itemId }: WardrobeItemProps) {
-  const [item, setItem] = useState<WardrobeItemData | null>(null);
+  const [item, setItem] = useState<WardrobeItemData | null>(wardrobeCache.get(itemId) || null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!wardrobeCache.has(itemId));
 
   useEffect(() => {
+    // 如果缓存已有数据，直接返回，避免闪烁
+    if (wardrobeCache.has(itemId)) return;
+
     const fetchItem = async () => {
+      setLoading(true);
       try {
         const result = await getWardrobeItem(itemId);
+        wardrobeCache.set(itemId, result);
         setItem(result);
       } catch (e) {
         console.error('Failed to fetch wardrobe item:', e);
@@ -31,11 +38,9 @@ export function WardrobeItem({ itemId }: WardrobeItemProps) {
   }, [itemId]);
 
   if (loading) {
-    // 加载时显示一个与最终样式类似的骨架屏
+    // 改为使用 span 实现骨架屏，防止 div 导致的非法嵌套报错
     return (
-      <span className="inline-flex items-center align-middle">
-        <Skeleton className="h-6 w-32 rounded-full" />
-      </span>
+      <span className="inline-flex items-center align-middle h-6 w-32 rounded-full animate-pulse bg-muted/50" />
     );
   }
 
@@ -49,11 +54,10 @@ export function WardrobeItem({ itemId }: WardrobeItemProps) {
 
   return (
     <a
-      href={`/wardrobe?itemId=${item.id}`} // 链接到衣橱详情页（可选）
+      href={`/wardrobe?itemId=${item.id}`}
       target="_blank"
       rel="noopener noreferrer"
-      // [MODIFIED] Removed background, adjusted colors, and increased size for a cleaner look.
-      className="inline-flex items-center align-middle text-foreground rounded-full px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+      className="inline-flex items-center align-middle text-foreground rounded-full px-3 text-sm font-medium transition-colors hover:bg-muted"
     >
       <Image
         src={item.imageUrl}
@@ -61,9 +65,9 @@ export function WardrobeItem({ itemId }: WardrobeItemProps) {
         width={40}
         height={40}
         unoptimized
-        className="h-10 w-10 rounded-full mr-2 object-cover border-border"
+        className="h-10 w-10  mr-2 object-cover border-border"
       />
-      <span className="truncate">{item.name}</span>
     </a>
   );
 }
+
