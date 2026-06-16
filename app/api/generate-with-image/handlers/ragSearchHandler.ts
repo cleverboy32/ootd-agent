@@ -1,7 +1,22 @@
 import { searchWardrobeItemsByText, WardrobeSearchResult } from '../../../../server/services/wardrobeService';
-import { distillUserQueryForSearch } from '../../../../server/services/promptProcessor';
+import { buildRagSearchLogEntry, logRagSearch } from '../../../../server/services/ragAuditLogger';
+import {
+  normalizeWardrobeSearchInput,
+  resolveMainCategoryForSlot,
+  WardrobeSearchInput,
+} from '../../../../server/utils/ragSearchSlots';
 import { ClothingItem } from '@prisma/client';
-import { Part } from '@google/genai'; // 确保 Part 类型被导入
+import type { AnchorItemInfo, GatekeeperIntent } from './intentTypes';
+
+export type { WardrobeSearchInput, WardrobeSearchQuery } from '../../../../server/utils/ragSearchSlots';
+
+export interface RagSearchContext {
+  source?: string;
+  conversationId?: string;
+  userMessage?: string;
+  intent?: GatekeeperIntent;
+  anchorItem?: AnchorItemInfo;
+}
 
 /**
  * Formats the search results into an XML string for the AI prompt.
@@ -25,64 +40,96 @@ function formatResultsToXml(items: WardrobeSearchResult[]): string {
 }
 
 /**
- * Performs a RAG search against the user's wardrobe using query distillation.
- * @param initialParts The user's original input, can contain text and images.
+ * Performs a RAG search against the user's wardrobe using stylist-provided queries.
+ * @param searchQueries Search queries from the Stylist Agent.
  * @param userId The user's ID.
  * @param ragCache A cache to store search results for the current request.
  * @returns An object containing the XML string for the prompt and the found items.
  */
 export async function performRagSearch(
-  initialParts: Part[], // <--- 接收的是 Part[] 数组
+  searchQueries: WardrobeSearchInput[],
   userId: string,
-  ragCache: Map<string, ClothingItem>
+  ragCache: Map<string, ClothingItem>,
+  logContext?: RagSearchContext
 ): Promise<{ xmlString: string; items: ClothingItem[] }> {
   console.log('[RAG_HANDLER] Starting RAG search process...');
-  
-  // [FIX] 从 Part[] 数组中提取文本内容
-  const textPart = initialParts.find((part): part is { text: string } => 'text' in part);
-  const userMessage = textPart?.text || '';
 
-  if (!userMessage) {
-    console.log('[RAG_HANDLER] No text found in initial parts. Skipping RAG search.');
+  const queries = searchQueries
+    .map(normalizeWardrobeSearchInput)
+    .filter((item) => item.query.length > 0);
+  if (queries.length === 0) {
+    console.log('[RAG_HANDLER] No search queries provided. Skipping RAG search.');
     return { xmlString: '', items: [] };
   }
 
-  // 1. Distill the user's query to get better search keywords.
-  const distilledQuery = await distillUserQueryForSearch(userMessage); // <--- 现在传递的是正确的字符串
+  console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
 
-  if (!distilledQuery) {
-    console.log('[RAG_HANDLER] Query distillation resulted in empty string. Skipping search.');
+  try {
+    const seenIds = new Set<string>();
+    const mergedResults: WardrobeSearchResult[] = [];
+    const perQueryResults: Array<{
+      query: string;
+      slot?: string;
+      mainCategory?: string;
+      results: WardrobeSearchResult[];
+    }> = [];
+
+    for (const { query, slot } of queries) {
+      const mainCategory = resolveMainCategoryForSlot(slot);
+      const searchResults = await searchWardrobeItemsByText(query, userId, 5, mainCategory);
+      perQueryResults.push({
+        query,
+        slot,
+        mainCategory,
+        results: searchResults,
+      });
+      for (const item of searchResults) {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          mergedResults.push(item);
+        }
+      }
+    }
+
+    await logRagSearch(
+      buildRagSearchLogEntry({
+        userId,
+        queries: queries.map(({ query, slot }) => ({
+          query,
+          slot,
+          mainCategory: resolveMainCategoryForSlot(slot),
+        })),
+        perQueryResults,
+        mergedResults,
+        source: logContext?.source,
+        conversationId: logContext?.conversationId,
+        userMessage: logContext?.userMessage,
+        intent: logContext?.intent,
+        anchorItem: logContext?.anchorItem,
+      })
+    );
+
+    if (mergedResults.length === 0) {
+      console.log('[RAG_HANDLER] No relevant items found in wardrobe.');
       return { xmlString: '', items: [] };
     }
-    
-  try {
-    // 2. Perform semantic search using the distilled query.
-    const searchResults = await searchWardrobeItemsByText(distilledQuery, userId);
 
-    if (searchResults.length === 0) {
-      console.log('[RAG_HANDLER] No relevant items found in wardrobe after distillation.');
-    return { xmlString: '', items: [] };
-  }
+    console.log(`[RAG_HANDLER] Found ${mergedResults.length} unique items. Caching and formatting to XML.`);
 
-    console.log(`[RAG_HANDLER] Found ${searchResults.length} relevant items. Caching and formatting to XML.`);
-
-    // 3. Convert search results to ClothingItem type and populate the cache.
-    const clothingItems: ClothingItem[] = searchResults.map(result => ({
+    const clothingItems: ClothingItem[] = mergedResults.map((result) => ({
       ...result,
-      // Fill in non-overlapping fields from ClothingItem model if necessary
       clientProfileId: userId,
-      season: [], // These fields are not in WardrobeSearchResult, so provide defaults
+      season: [],
       material: [],
       tags: [],
-      embedding: null, // We don't need the embedding here
+      embedding: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    })); 
+    }));
 
-    clothingItems.forEach(item => ragCache.set(item.id, item));
-    
-    // 4. Format the results into an XML string for the prompt.
-    const xmlString = formatResultsToXml(searchResults);
+    clothingItems.forEach((item) => ragCache.set(item.id, item));
+
+    const xmlString = formatResultsToXml(mergedResults);
 
     return {
       xmlString,
@@ -91,6 +138,6 @@ export async function performRagSearch(
   } catch (error) {
     console.error('[RAG_HANDLER] Error during RAG search:', error);
     return { xmlString: '', items: [] };
-}
+  }
 }
 

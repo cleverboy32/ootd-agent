@@ -8,7 +8,7 @@
  * @returns A promise that resolves to an array of matching clothing items, sorted by relevance.
  */
 import prismadb from '@/server/db';
-import { generateEmbedding } from './embedding';
+import { generateQueryEmbedding } from './embedding';
 import { ClothingMainCategory } from '@prisma/client'; // 导入 Prisma 的枚举类型
 
 // 定义一个精确的返回类型，包含处理器需要的所有字段以及相似度分数
@@ -32,10 +32,14 @@ export type WardrobeSearchResult = {
 export async function searchWardrobeItemsByText(
   searchText: string,
   userId: string,
-  limit: number = 5
+  limit: number = 5,
+  mainCategory?: ClothingMainCategory
 ): Promise<WardrobeSearchResult[]> {
   console.log(`[RAG-SEARCH] Initiating search for userId: ${userId}`);
-  console.log(`[RAG-SEARCH] Searching with distilled keywords: "${searchText}"`);
+  console.log(
+    `[RAG-SEARCH] Searching with keywords: "${searchText}"` +
+      (mainCategory ? `, mainCategory: ${mainCategory}` : '')
+  );
 
   if (!searchText.trim()) {
     console.log('[RAG-SEARCH] SearchText is empty, returning empty array.');
@@ -43,7 +47,7 @@ export async function searchWardrobeItemsByText(
   }
 
   try {
-    const queryEmbedding = await generateEmbedding(searchText);
+    const queryEmbedding = await generateQueryEmbedding(searchText);
     if (!queryEmbedding || queryEmbedding.length === 0) {
       console.error('[RAG-SEARCH] Failed to generate query embedding.');
       return [];
@@ -53,24 +57,44 @@ export async function searchWardrobeItemsByText(
     // [FIX] Manually format the embedding array into a string that pgvector understands.
     const vectorQueryString = `[${queryEmbedding.join(',')}]`;
 
-    // SQL查询，确保 SELECT 所有 ragSearchHandler 需要的字段
-    const results: WardrobeSearchResult[] = await prismadb.$queryRaw`
-      SELECT
-        "id",
-        "imageUrl",
-        "mainCategory",
-        "subCategory",
-        "description",
-        "colors",
-        1 - ("embedding" <-> ${vectorQueryString}::vector) as similarity
-      FROM
-        "ClothingItem"
-      WHERE
-        "clientProfileId" = ${userId} AND "embedding" IS NOT NULL
-      ORDER BY
-        similarity DESC
-      LIMIT ${limit};
-    `;
+    // pgvector: <=> 是 cosine distance，similarity = 1 - cosine_distance
+    const results: WardrobeSearchResult[] = mainCategory
+      ? await prismadb.$queryRaw`
+          SELECT
+            "id",
+            "imageUrl",
+            "mainCategory",
+            "subCategory",
+            "description",
+            "colors",
+            1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
+          FROM
+            "ClothingItem"
+          WHERE
+            "clientProfileId" = ${userId}
+            AND "embedding" IS NOT NULL
+            AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
+          ORDER BY
+            "embedding" <=> ${vectorQueryString}::vector
+          LIMIT ${limit};
+        `
+      : await prismadb.$queryRaw`
+          SELECT
+            "id",
+            "imageUrl",
+            "mainCategory",
+            "subCategory",
+            "description",
+            "colors",
+            1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
+          FROM
+            "ClothingItem"
+          WHERE
+            "clientProfileId" = ${userId} AND "embedding" IS NOT NULL
+          ORDER BY
+            "embedding" <=> ${vectorQueryString}::vector
+          LIMIT ${limit};
+        `;
 
     console.log('[RAG-SEARCH] Raw search results from DB:', JSON.stringify(results, null, 2));
 
@@ -79,7 +103,7 @@ export async function searchWardrobeItemsByText(
       return [];
     }
 
-    const SIMILARITY_THRESHOLD = 0.15; // [MODIFIED] 降低阈值，让更多结果通过
+    const SIMILARITY_THRESHOLD = 0.5;
 
     const filteredResults = results.filter(item => item.similarity > SIMILARITY_THRESHOLD);
 
@@ -117,5 +141,26 @@ export async function getWardrobeItemDetails(itemId: string) {
     console.error(`[DB-ERROR] Failed to fetch clothing item with id "${itemId}":`, error);
     return null;
   }
+}
+
+/**
+ * 删除属于指定用户的衣橱单品（支持批量）。
+ * 仅删除数据库记录；GCS 图片不做清理。
+ */
+export async function deleteWardrobeItems(
+  itemIds: string[],
+  clientId: string
+): Promise<number> {
+  const uniqueIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) return 0;
+
+  const result = await prismadb.clothingItem.deleteMany({
+    where: {
+      id: { in: uniqueIds },
+      clientProfileId: clientId,
+    },
+  });
+
+  return result.count;
 }
 

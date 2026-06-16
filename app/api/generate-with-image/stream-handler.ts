@@ -36,12 +36,17 @@ export function createOotdStream(
 
       try {
         const effectiveInitialParts = initialParts;
-        const historyForAI: Content[] = await buildContext(conversationId);
+        const { historyForAI } = await buildContext(conversationId, finalMessageId);
 
         // --- [MODIFIED & FIXED] RAG Search Step ---
         if (clientId) {
-          // [FIXED] Pass the ragCache map as the third argument
-          const searchResults = await performRagSearch(effectiveInitialParts, clientId, ragCache);
+          const textPart = effectiveInitialParts.find((part): part is { text: string } => 'text' in part);
+          const queries = textPart?.text?.trim() ? [textPart.text.trim()] : [];
+          const searchResults = await performRagSearch(queries, clientId, ragCache, {
+            source: 'stream-handler',
+            conversationId,
+            userMessage: textPart?.text?.trim(),
+          });
 
           if (searchResults.xmlString && searchResults.items.length > 0) {
             // [CLEANUP] The cache is now populated inside performRagSearch. Redundant 'for' loop is removed.

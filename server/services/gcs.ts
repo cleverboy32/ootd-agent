@@ -26,24 +26,56 @@ const storage = new Storage({
 
 const bucket = storage.bucket(bucketName);
 
+/** 串行化 GCS 上传，避免并发 HTTPS 连接触发 Next.js dev 序列化异常 */
+let uploadChain: Promise<unknown> = Promise.resolve();
+
+function enqueueUpload<T>(fn: () => Promise<T>): Promise<T> {
+  const result = uploadChain.then(fn, fn);
+  uploadChain = result.catch(() => {});
+  return result;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 /**
  * Uploads a Base64 encoded image to Google Cloud Storage.
- * (此函数的内部逻辑保持完全不变)
  * @param base64Image The Base64 encoded image data.
  * @param mimeType The MIME type of the image (e.g., 'image/png').
  * @param destinationFileName The desired file name in the bucket.
  * @returns A promise that resolves to the public URL of the uploaded file.
  */
-export async function uploadImageToGCS(base64Image: string, mimeType: string, destinationFileName: string): Promise<string> {
-  try {
+export async function uploadImageToGCS(
+  base64Image: string,
+  mimeType: string,
+  destinationFileName: string
+): Promise<string> {
+  return enqueueUpload(async () => {
+    const maxRetries = 3;
     const buffer = Buffer.from(base64Image, 'base64');
-    const file = bucket.file(destinationFileName);
-    await file.save(buffer, {
-      metadata: { contentType: mimeType },
-    });
-    return file.publicUrl();
-  } catch (error) {
-    console.error('Failed to upload image to GCS:', error);
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const file = bucket.file(destinationFileName);
+        await file.save(buffer, {
+          metadata: { contentType: mimeType },
+          resumable: false,
+        });
+        return file.publicUrl();
+      } catch (error) {
+        const message = getErrorMessage(error);
+        console.error(
+          `[GCS] Upload attempt ${attempt + 1}/${maxRetries} failed for ${destinationFileName}: ${message}`
+        );
+        if (attempt === maxRetries - 1) {
+          throw new Error(`Image upload failed: ${message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+      }
+    }
+
     throw new Error('Image upload failed.');
-  }
+  });
 }

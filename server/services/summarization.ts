@@ -1,5 +1,7 @@
 import { genAI } from 'server/services/ai';
 import { Content } from '@google/genai';
+import { AGENT_MODELS } from '@/server/config/models';
+import { withRetryOn429 } from '@/server/utils/retryOn429';
 
 const summarizationInstruction = `你是一个对话摘要机器人。
     你的任务是将一段“之前的摘要”和“新的对话内容”合并，生成一个更新后的、更全面的摘要。
@@ -45,10 +47,14 @@ export async function generateSummary(
       
       --- 请生成更新后的摘要 ---`;
 
-    const result = await genAI.models.generateContent({
-        model: "gemini-2.5-flash", // 确认模型名称
-        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-        });
+    const result = await withRetryOn429(
+      () =>
+        genAI.models.generateContent({
+          model: AGENT_MODELS.summarization,
+          contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+        }),
+      { label: 'Summarization' }
+    );
       
     // --- [核心修改] --- 更健壮、类型安全的响应解析
     const firstCandidate = result.candidates?.[0];

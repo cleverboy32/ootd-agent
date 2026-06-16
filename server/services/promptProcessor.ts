@@ -1,8 +1,6 @@
-import { genAI } from './ai'; // [MODIFIED] 统一使用共享的 genAI 实例
-// 这个函数是我们新的“查询提炼”核心
-// 它的目标是把用户的自然语言请求，转换成适合向量搜索的关键词列表
-
-const modelName = 'gemini-2.5-pro';
+import { genAI } from './ai';
+import { AGENT_MODELS } from '@/server/config/models';
+import { withRetryOn429 } from '@/server/utils/retryOn429';
 
 const instructions = `
 你的任务是扮演一个专业的时尚搜索引擎优化专家。
@@ -37,11 +35,14 @@ export async function distillUserQueryForSearch(userQuery: string): Promise<stri
   try {
     const fullPrompt = `${instructions}\n用户请求: "${userQuery}"\n输出:`;
 
-    // [MODIFIED] 统一使用 genAI.models.generateContent 调用方式
-    const result = await genAI.models.generateContent({
-      model: modelName,
-      contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-    });
+    const result = await withRetryOn429(
+      () =>
+        genAI.models.generateContent({
+          model: AGENT_MODELS.reasoning,
+          contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+        }),
+      { label: 'QueryDistillation' }
+    );
 
     // [MODIFIED] 统一的响应处理方式
     const distilledKeywords = result.candidates?.[0]?.content?.parts?.[0]?.text || '';

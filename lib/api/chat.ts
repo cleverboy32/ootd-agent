@@ -1,4 +1,5 @@
-import { apiClient } from "@/lib/api-client"; // 1. 导入我们新的 apiClient
+import { apiClient } from "@/lib/api-client";
+import { mapDbMessagesToClient } from "@/lib/mappers/message";
 import { Conversation, Message, MessageContentPart } from "@/lib/types";
 
 const API_BASE = '/api';
@@ -40,7 +41,8 @@ export const deleteConversation = async (conversationId: string): Promise<void> 
  * @returns A promise that resolves to an array of messages.
  */
 export const getMessages = async (conversationId: string): Promise<Message[]> => {
-  return apiClient.get(`${API_BASE}/conversations/${conversationId}/messages`);
+  const raw = await apiClient.get(`${API_BASE}/conversations/${conversationId}/messages`);
+  return mapDbMessagesToClient(raw as Parameters<typeof mapDbMessagesToClient>[0]);
 };
 
 /**

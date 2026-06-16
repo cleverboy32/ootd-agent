@@ -6,7 +6,8 @@ import { genAI } from 'server/services/ai';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { GenerateContentResponse } from '@google/genai';
 // [MODIFIED] Import both embedding generators
-import { generateEmbedding, generateMultimodalEmbedding } from 'server/services/embedding';
+import { generateDocumentEmbedding } from 'server/services/embedding';
+import { deleteWardrobeItems } from '@/server/services/wardrobeService';
 // --- [新增] GET 请求处理函数 ---
 export async function GET(req: Request) {
   try {
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
     // [MODIFIED] 使用最新的 genAI.models.generateContent 方式调用 AI
     console.log('[API /api/wardrobe] Calling Gemini API for analysis with genAI.models.generateContent...');
     const result: GenerateContentResponse = await genAI.models.generateContent({
-      model: "gemini-2.5-pro", // 指定要使用的模型
+      model: "gemini-2.5-flash", // 指定要使用的模型
       contents: [{ role: 'user', parts: [imagePart, textPart] }] // 将图片和文本 prompt 组合
     });
 
@@ -146,7 +147,7 @@ export async function POST(req: Request) {
     // 2. Prepare the image part (we already have it from the start)
     const imagePartForEmbedding = await urlToGenerativePart(imageUrl);
     // 3. Call the new multimodal embedding service
-    const embeddingVector = await generateMultimodalEmbedding(textForEmbedding, imagePartForEmbedding);
+    const embeddingVector = await generateDocumentEmbedding(textForEmbedding, imagePartForEmbedding);
     console.log('[API /api/wardrobe] Multimodal embedding generated successfully.');
     // --- [END MODIFIED] ---
 
@@ -191,3 +192,24 @@ export async function POST(req: Request) {
   }
 }
 
+export async function DELETE(req: Request) {
+  try {
+    const clientId = req.headers.get('X-Client-ID');
+    if (!clientId) {
+      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    }
+
+    const body = (await req.json()) as { ids?: string[] };
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'ids array is required' }, { status: 400 });
+    }
+
+    const deletedCount = await deleteWardrobeItems(ids, clientId);
+    return NextResponse.json({ deletedCount }, { status: 200 });
+  } catch (error) {
+    console.error('Error in DELETE /api/wardrobe:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}

@@ -1,74 +1,79 @@
 import { genAI } from './ai';
 import { Part } from '@google/genai';
 
+export const EMBEDDING_MODEL = 'gemini-embedding-001';
+/** gemini-embedding-001 默认 3072 维，且已 L2 归一化，适合余弦相似度 */
+export const EMBEDDING_DIMENSIONS = 3072;
+
+const embedConfig = {
+  outputDimensionality: EMBEDDING_DIMENSIONS,
+} as const;
+
+function extractEmbeddingValues(result: Awaited<ReturnType<typeof genAI.models.embedContent>>): number[] {
+  if (!result.embeddings || result.embeddings.length === 0) {
+    throw new Error('The AI service returned an empty embedding response.');
+  }
+
+  const embedding = result.embeddings[0];
+  if (!embedding.values) {
+    throw new Error("Embedding object is missing 'values'.");
+  }
+
+  return embedding.values;
+}
+
 /**
- * Generates a vector embedding for a given text.
- * @param text The text to be converted into an embedding.
- * @returns A promise that resolves to an array of numbers (the vector).
+ * 检索 query 用 embedding（RETRIEVAL_QUERY）
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateQueryEmbedding(text: string): Promise<number[]> {
   try {
     const result = await genAI.models.embedContent({
-      model: 'gemini-embedding-001',
+      model: EMBEDDING_MODEL,
       contents: text,
+      config: {
+        ...embedConfig,
+        taskType: 'RETRIEVAL_QUERY',
+      },
     });
 
-    // [FIXED] Handle the response safely and idiomatically, as per the official examples.
-    if (!result.embeddings || result.embeddings.length === 0) {
-      throw new Error("Failed to generate embedding: The AI service returned an empty or invalid response.");
-    }
-
-    // The API returns an array of embeddings. For this function, we only need the first one.
-    const embedding = result.embeddings[0];
-
-    if (!embedding.values) {
-      throw new Error("Failed to generate embedding: Embedding object is missing 'values'.");
-    }
-    
-    return embedding.values;
-
+    return extractEmbeddingValues(result);
   } catch (error) {
-    console.error("Error in generateEmbedding:", error);
-    throw new Error("Failed to generate text embedding from the AI service.");
+    console.error('Error in generateQueryEmbedding:', error);
+    throw new Error('Failed to generate query embedding from the AI service.');
   }
 }
 
 /**
- * [NEW] Generates a single, high-quality vector embedding from a combination of text and an image.
- * @param text The descriptive text context for the image.
- * @param image The image part (mimeType and base64 data).
- * @returns A promise that resolves to an array of numbers (the multimodal vector).
+ * 衣橱单品入库用 embedding（RETRIEVAL_DOCUMENT + 图片）
  */
-export async function generateMultimodalEmbedding(text: string, image: Part): Promise<number[]> {
+export async function generateDocumentEmbedding(text: string, image: Part): Promise<number[]> {
   try {
-    console.log('[EmbeddingService] Generating multimodal embedding...');
+    console.log('[EmbeddingService] Generating document embedding (multimodal)...');
     const result = await genAI.models.embedContent({
-      model: 'gemini-embedding-001',
+      model: EMBEDDING_MODEL,
       contents: {
-        parts: [
-          { text: text },
-          image
-        ]
-      }
+        parts: [{ text }, image],
+      },
+      config: {
+        ...embedConfig,
+        taskType: 'RETRIEVAL_DOCUMENT',
+      },
     });
 
-    // [FIXED] Handle the response safely and idiomatically, as per the official examples.
-    if (!result.embeddings || result.embeddings.length === 0) {
-      throw new Error("Failed to generate multimodal embedding: The AI service returned an empty or invalid response.");
-    }
-
-    // The API returns an array of embeddings. For this function, we only need the first one.
-    const embedding = result.embeddings[0];
-
-    if (!embedding.values) {
-      throw new Error("Failed to generate multimodal embedding: Embedding object is missing 'values'.");
-    }
-
-    console.log('[EmbeddingService] Multimodal embedding generated successfully.');
-    return embedding.values;
-
+    console.log('[EmbeddingService] Document embedding generated successfully.');
+    return extractEmbeddingValues(result);
   } catch (error) {
-    console.error("Error in generateMultimodalEmbedding:", error);
-    throw new Error("Failed to generate multimodal embedding from the AI service.");
+    console.error('Error in generateDocumentEmbedding:', error);
+    throw new Error('Failed to generate document embedding from the AI service.');
   }
+}
+
+/** @deprecated 使用 generateQueryEmbedding 或 generateDocumentEmbedding */
+export async function generateEmbedding(text: string): Promise<number[]> {
+  return generateQueryEmbedding(text);
+}
+
+/** @deprecated 使用 generateDocumentEmbedding */
+export async function generateMultimodalEmbedding(text: string, image: Part): Promise<number[]> {
+  return generateDocumentEmbedding(text, image);
 }

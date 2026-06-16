@@ -116,33 +116,15 @@ export const useChatHandler = () => {
           return msg;
         }));
       },
-      onImagePlaceholder: (data: { id: string; alt: string; }) => {
-        updateMessages(messages => messages.map(msg => {
-          if (msg.id === currentAiMessageId && msg.role === 'ai' && Array.isArray(msg.content)) {
-            
-            // 创建一个新的 Part，并明确它的类型
-            const newPart: MessageContentPart = { 
-              type: 'image_placeholder', 
-              id: data.id, 
-              content: data.alt 
-            };
-      
-            const newContent = [...msg.content, newPart]; // 现在 TypeScript 满意了
-            return { ...msg, content: newContent };
-          }
-          return msg;
-        }));
+      onImagePlaceholder: () => {
+        // 占位符改由文本内 [IMAGE=...] 标记内联渲染，此事件不再使用
       },
       onImageGenerated: (data: { id: string; imageUrl: string; alt: string }) => {
         updateMessages(messages => messages.map(msg => {
-          if (msg.id === currentAiMessageId && msg.role === 'ai' && Array.isArray(msg.content)) {
+          if (msg.id === currentAiMessageId && msg.role === 'ai') {
             return {
               ...msg,
-              content: msg.content.map(part =>
-                part.type === 'image_placeholder' && part.id === data.id
-                  ? { ...part, type: 'image', content: data.imageUrl, alt: data.alt }
-                  : part
-              ),
+              imageStates: { ...msg.imageStates, [data.id]: data.imageUrl },
             };
           }
           return msg;
@@ -150,14 +132,10 @@ export const useChatHandler = () => {
       },
       onImageGenerationFailed: (data: { id: string; message: string; alt: string }) => {
         updateMessages(messages => messages.map(msg => {
-          if (msg.id === currentAiMessageId && msg.role === 'ai' && Array.isArray(msg.content)) {
+          if (msg.id === currentAiMessageId && msg.role === 'ai') {
             return {
               ...msg,
-              content: msg.content.map(part =>
-                part.type === 'image_placeholder' && part.id === data.id
-                  ? { ...part, type: 'image_failed', content: data.message, alt: data.alt }
-                  : part
-              ),
+              imageStates: { ...msg.imageStates, [data.id]: 'failed' as const },
             };
           }
           return msg;

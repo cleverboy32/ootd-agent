@@ -8,6 +8,8 @@ export type MessageContentPart = {
 
 export type MessageStatus = 'generating' | 'completed' | 'failed';
 
+export type ImageState = 'loading' | 'failed' | string;
+
 export type Message = {
   id: string;
   status: 'generating' | 'completed' | 'failed';
@@ -15,6 +17,7 @@ export type Message = {
   content: MessageContentPart[];
   timestamp: number;
   imageUrl?: string; // Add optional imageUrl for client-side rendering
+  imageStates?: Record<string, ImageState>; // key = outfit id, value = url | 'loading' | 'failed'
 };
 
 export type Conversation = {

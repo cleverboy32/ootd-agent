@@ -1,15 +1,34 @@
 import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
-import { createOotdStream } from "./stream-handler";
-import {  urlToGenerativePart } from '@/server/utils/image';
+import { createImageRetryStream, createMultiAgentStream } from "./multi-agent-orchestrator";
+import { urlToGenerativePart } from '@/server/utils/image';
 
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  'Connection': 'keep-alive',
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const { content, conversationId, messageId } = await req.json();
-    const { text, imageUrl } = content;
+    const body = await req.json();
+    const { content, conversationId, messageId, retryOutfitId } = body;
+    const text = content?.text;
+    const imageUrl = content?.imageUrl;
 
-    const clientId = req.headers.get('X-Client-ID'); 
+    const clientId = req.headers.get('X-Client-ID');
+
+    if (retryOutfitId) {
+      if (!conversationId || !messageId) {
+        return new Response(
+          JSON.stringify({ error: 'conversationId and messageId are required for image retry' }),
+          { status: 400 }
+        );
+      }
+      console.log(`[API_ROUTE] Image retry: message=${messageId} outfit=${retryOutfitId}`);
+      const stream = createImageRetryStream(conversationId, messageId, retryOutfitId);
+      return new Response(stream, { headers: SSE_HEADERS });
+    }
 
     console.log(`[API_ROUTE] POST request received. Conv ID: ${conversationId}, Client ID: ${clientId}`);
 
@@ -19,35 +38,20 @@ export async function POST(req: NextRequest) {
 
     const initialParts: Part[] = [];
 
-    // 3. 如果 imageUrl 存在，调用工具函数获取图片数据并转换为 Part
     if (imageUrl) {
-      console.log(`[API_ROUTE] 收到图片 URL，开始转换: ${imageUrl}`);
       const imagePart = await urlToGenerativePart(imageUrl);
       initialParts.push(imagePart);
     }
 
-   // 4. 如果文本存在，添加文本 Part
-    // 注意：Gemini 多模态输入要求图片在前，文本在后，我们调整一下顺序
     if (text) {
-      initialParts.push({ text: text });
+      initialParts.push({ text });
     }
 
-    console.log(`[API_ROUTE] 准备调用 createOotdStream，包含 ${initialParts.length} 个 part(s)。`);
-
-    // All complex logic is now in createOotdStream
-    const readableStream = createOotdStream(initialParts, clientId!, conversationId, messageId);
-    return new Response(readableStream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
-
+    const readableStream = createMultiAgentStream(initialParts, clientId!, conversationId, messageId);
+    return new Response(readableStream, { headers: SSE_HEADERS });
   } catch (e) {
     const error = e as Error;
     console.error("混合流式API顶层错误:", error);
     return new Response(JSON.stringify({ error: "服务器内部错误", message: error.message }), { status: 500 });
   }
 }
-

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getWardrobeItemDetails } from '@/server/services/wardrobeService';
+import { deleteWardrobeItems, getWardrobeItemDetails } from '@/server/services/wardrobeService';
 
 export async function GET(
   req: Request,
@@ -49,6 +49,34 @@ export async function GET(
 
   } catch (error) {
     console.error(`[API-ERROR] Failed to fetch wardrobe item ${itemId}:`, error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ itemId: string }> }
+) {
+  const { itemId } = await params;
+  const clientId = req.headers.get('x-client-id');
+
+  if (!clientId) {
+    return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+  }
+
+  if (!itemId) {
+    return NextResponse.json({ error: 'Item ID is required' }, { status: 400 });
+  }
+
+  try {
+    const deletedCount = await deleteWardrobeItems([itemId], clientId);
+    if (deletedCount === 0) {
+      return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ deletedCount }, { status: 200 });
+  } catch (error) {
+    console.error(`[API-ERROR] Failed to delete wardrobe item ${itemId}:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

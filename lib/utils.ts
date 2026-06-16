@@ -68,13 +68,13 @@ export interface StreamHandlers {
 // 将整个函数替换为这个版本
 export const streamResponse = async (
   payload: {
-    content: {
+    content?: {
       text?: string,
       imageUrl?: string,
     },
     conversationId?: string | null;
-    // 新增可选的 messageId
     messageId?: string;
+    retryOutfitId?: string;
   },
   handlers: StreamHandlers
 ) => {
