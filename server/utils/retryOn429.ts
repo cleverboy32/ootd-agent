@@ -1,4 +1,4 @@
-function is429Error(error: unknown): boolean {
+export function is429Error(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
 
   const err = error as Record<string, unknown>;

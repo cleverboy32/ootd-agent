@@ -12,8 +12,12 @@ import {
   AnchorSlot,
   GatekeeperIntent,
   getAnchorItemFromIntent,
+  getResolvedAnchorFromIntent,
   isPurchasePairingIntent,
+  isWardrobePairingIntent,
+  outfitIdToLabel,
 } from './intentTypes';
+import type { StylistCacheNode } from '@/server/utils/messageContent';
 
 // 定义 Stylist Agent 的输出 Schema
 const stylistSchema: Schema = {
@@ -101,6 +105,7 @@ const STYLIST_SYSTEM_INSTRUCTION = `
    - 色彩协调学：仅当档案中有肤色分析时结合肤色搭配；无则基于服装色彩与场合搭配。
    - 版型互补学：仅当档案中有身材分析时结合身材版型；无则基于通用版型原则。
    - 场合与天气契合度：严格契合提取的场合和天气温度。
+   - 季节协调（重要）：同一套方案内所有单品的 season 须有交集。温暖/夏季/户外场合禁止搭配仅冬季适用的厚外套（如 Puffer Jacket、羽绒）与夏季下装（短裤、骑行裤）同套出现；优先选择 Windbreaker 等轻薄外套。
 3. 多套方案 (Multi-Outfit Support)：
    - 默认应为用户提供 1 到 2 套不同的穿搭方案（例如：方案一为裙装，方案二为裤装；或者方案一为通勤风，方案二为休闲风）。
    - 每套方案必须有一个唯一的 id（如 outfit_1、outfit_2），以便后续文案和绘图精准对应。
@@ -111,6 +116,18 @@ const STYLIST_SYSTEM_INSTRUCTION = `
 - 其余单品【必须优先】从衣橱 XML 选取，用于与锚定单品形成互补（色彩、风格、版型协调）。
 - 禁止忽略锚定单品，禁止仅用衣橱单品拼出一套与锚定单品无关的方案。
 - 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
+
+【衣橱锚定搭配模式 wardrobe_pairing】
+- 当 request_type=wardrobe_pairing 且提供了【衣橱锚定单品 id】时进入此模式。
+- 每套方案【必须】包含该锚定单品：id 填真实衣橱 id（非 new_item），layer 与其槽位对应。
+- 其余单品【必须优先】从衣橱 XML 选取互补单品。
+- 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
+
+【反馈微调模式 feedback_revision（重要）】
+- 当 request_type=feedback_revision 且提供了【上一轮方案 JSON】时进入此模式。
+- 【只输出 1 套】方案，id 必须与 selected_outfit_id 一致（如 outfit_1）。
+- 在上一轮方案基础上【精准修改】：保留用户未提及的单品 id 不变，仅调整 special_requests 中要求的槽位。
+- 禁止重新推荐完全无关的全新方案；禁止输出 2 套。
 
 【多轮对话与反馈微调模式】
 - 仔细阅读历史对话。如果用户在上一轮已经得到了推荐，而当前输入是针对上一轮方案的修改反馈（例如：“第一套太正式了，换成裤装”、“外套不要红色的”）。
@@ -211,6 +228,17 @@ const PURCHASE_PAIRING_SEARCH_ADDENDUM = `
 - 锚定单品为 accessory（耳环、项链、包、腰带等）时：【必须】检索 top + bottom + shoes 共至少 3 条 query（+ 可选 outerwear），不要检索 accessory。目标是从衣橱找完整穿搭来衬托配饰。
 `;
 
+const WARDROBE_PAIRING_SEARCH_ADDENDUM = `
+【衣橱锚定搭配模式 — 互补槽位检索】
+- 用户指定了【衣橱已有锚定单品】（真实 id），你只为【互补槽位】生成 query。
+- 【禁止】检索与锚定单品相同槽位的衣物。
+- 规则同待购单品搭配：锚定为 dress 时只检索 shoes/outerwear/accessory；top 时检索 bottom+shoes 等。
+`;
+
+export interface StylistAgentOptions {
+  previousStylistCache?: StylistCacheNode | null;
+}
+
 function extractUserMessage(initialParts: Part[]): string {
   const textPart = initialParts.find((part): part is { text: string } => 'text' in part);
   return textPart?.text?.trim() || '';
@@ -245,15 +273,16 @@ async function planWardrobeSearchQueries(
 ): Promise<WardrobeSearchQuery[]> {
   console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
 
-  const isPairing = isPurchasePairingIntent(intent) && anchorItem;
+  const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchorItem;
   const pairingBlock = isPairing
     ? `
-【待购锚定单品】
+【锚定单品】
 - 名称: ${anchorItem.name}
 - 描述: ${anchorItem.summary}
 - 槽位: ${anchorItem.slot}（请勿为此槽位生成检索 query）
+${isWardrobePairingIntent(intent) ? '- 来源: 用户衣橱已有单品（真实 id）' : '- 来源: 待购单品（new_item）'}
 
-${PURCHASE_PAIRING_SEARCH_ADDENDUM}
+${isWardrobePairingIntent(intent) ? WARDROBE_PAIRING_SEARCH_ADDENDUM : PURCHASE_PAIRING_SEARCH_ADDENDUM}
 `
     : '';
 
@@ -298,7 +327,11 @@ ${
         contents,
         config: {
           systemInstruction: isPairing
-            ? `${WARDROBE_SEARCH_INSTRUCTION}\n${PURCHASE_PAIRING_SEARCH_ADDENDUM}`
+            ? `${WARDROBE_SEARCH_INSTRUCTION}\n${
+                isWardrobePairingIntent(intent)
+                  ? WARDROBE_PAIRING_SEARCH_ADDENDUM
+                  : PURCHASE_PAIRING_SEARCH_ADDENDUM
+              }`
             : WARDROBE_SEARCH_INSTRUCTION,
           temperature: 0.3,
           responseMimeType: 'application/json',
@@ -341,20 +374,42 @@ export async function callStylistAgent(
   initialParts: Part[],
   clientId?: string,
   ragCache?: Map<string, ClothingItem>,
-  conversationId?: string
+  conversationId?: string,
+  options: StylistAgentOptions = {}
 ): Promise<StylistResult> {
   console.log('[STYLIST_AGENT] Generating styling recommendations...');
 
-  const anchorItem: AnchorItemInfo | null = getAnchorItemFromIntent(intent);
+  const isRevision = intent.request_type === 'feedback_revision';
+  const resolvedAnchor = getResolvedAnchorFromIntent(intent);
+  const anchorItem: AnchorItemInfo | null = resolvedAnchor
+    ? {
+        name: resolvedAnchor.name,
+        summary: resolvedAnchor.summary,
+        slot: resolvedAnchor.slot,
+        imageData: resolvedAnchor.imageData,
+      }
+    : null;
+
   if (isPurchasePairingIntent(intent) && !anchorItem) {
     throw new Error('PurchasePairingMissingAnchor: Gatekeeper 未提供有效的锚定单品，无法生成搭配方案');
   }
+  if (isWardrobePairingIntent(intent) && !intent.anchor_wardrobe_id?.trim()) {
+    throw new Error('WardrobePairingMissingAnchor: Gatekeeper 未确认衣橱锚定单品');
+  }
   if (anchorItem) {
-    console.log('[STYLIST_AGENT] Purchase pairing anchor (from Gatekeeper):', anchorItem);
+    console.log('[STYLIST_AGENT] Anchor item (from Gatekeeper):', anchorItem);
   }
 
+  const previousCache = options.previousStylistCache;
+  const revisionOutfitId = intent.selected_outfit_id?.trim() || 'outfit_1';
+  const previousOutfit =
+    isRevision && previousCache
+      ? previousCache.stylist_result.outfits.find((o) => o.id === revisionOutfitId) ??
+        previousCache.stylist_result.outfits[0]
+      : undefined;
+
   let wardrobeXml = '';
-  if (clientId && ragCache) {
+  if (clientId && ragCache && !isRevision) {
     try {
       const userMessage = extractUserMessage(initialParts);
       console.log('[STYLIST_AGENT] Triggering internal RAG search...');
@@ -379,9 +434,18 @@ export async function callStylistAgent(
   }
 
   const hasVisualProfile = profileHasVisualData(profile);
+  const wardrobeAnchorId = isWardrobePairingIntent(intent) ? intent.anchor_wardrobe_id : undefined;
   const anchorBlock =
     anchorItem != null
-      ? `
+      ? isWardrobePairingIntent(intent) && wardrobeAnchorId
+        ? `
+【衣橱锚定单品 — 每套方案必须包含】
+- id: ${wardrobeAnchorId}（衣橱真实 id，禁止改为 new_item）
+- name: ${anchorItem.name}
+- layer: ${anchorSlotToLayer(anchorItem.slot)}
+- 描述: ${anchorItem.summary}
+`
+        : `
 【待购锚定单品 — 每套方案必须包含】
 - id: "new_item"（固定）
 - name: ${anchorItem.name}
@@ -389,6 +453,25 @@ export async function callStylistAgent(
 - 描述: ${anchorItem.summary}
 `
       : '';
+
+  const revisionBlock =
+    isRevision && previousOutfit
+      ? `
+【反馈微调模式 — 必须遵守】
+- 目标方案 id: ${revisionOutfitId}（${outfitIdToLabel(revisionOutfitId)}）
+- 用户修改要求: ${intent.special_requests || '无'}
+- 上一轮方案 JSON（在此基础上修改，未提及单品 id 保持不变）:
+${JSON.stringify(previousOutfit, null, 2)}
+- 【只输出 1 套】，id 必须为 ${revisionOutfitId}
+`
+      : isRevision
+        ? `
+【反馈微调模式】
+- 目标方案 id: ${revisionOutfitId}
+- 用户修改要求: ${intent.special_requests || '无'}
+- 请结合历史对话中的上一轮方案进行精准修改，【只输出 1 套】
+`
+        : '';
 
   const contextPrompt = `
 【今日用户时尚档案】
@@ -408,9 +491,9 @@ export async function callStylistAgent(
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${anchorBlock}
+${anchorBlock}${revisionBlock}
 【用户衣橱单品列表 (RAG 检索结果 — 互补单品)】
-${wardrobeXml || '*(用户衣橱为空，请推荐全新单品)*'}
+${wardrobeXml || (isRevision && previousCache ? '*(微调模式：优先复用上一轮方案中的衣橱单品 id)*' : '*(用户衣橱为空，请推荐全新单品)*')}
 `;
 
   const chat = genAI.chats.create({

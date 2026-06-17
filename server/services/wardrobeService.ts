@@ -19,6 +19,9 @@ export type WardrobeSearchResult = {
   subCategory: string;
   description: string | null;
   colors: string[];
+  season: string[];
+  material: string[];
+  tags: string[];
   similarity: number;
 };
 
@@ -67,6 +70,9 @@ export async function searchWardrobeItemsByText(
             "subCategory",
             "description",
             "colors",
+            "season",
+            "material",
+            "tags",
             1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"
@@ -86,6 +92,9 @@ export async function searchWardrobeItemsByText(
             "subCategory",
             "description",
             "colors",
+            "season",
+            "material",
+            "tags",
             1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"

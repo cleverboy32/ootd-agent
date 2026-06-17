@@ -24,6 +24,8 @@ export interface RagSearchResultItem {
   mainCategory: string;
   description: string | null;
   colors: string[];
+  season: string[];
+  tags: string[];
   similarity: number;
   imageUrl: string;
 }
@@ -50,6 +52,12 @@ export interface RagSearchLogEntry {
   }>;
   mergedResults: RagSearchResultItem[];
   totalUniqueItems: number;
+  seasonFilter?: {
+    dressingClimate?: string;
+    targetSeasons: string[];
+    isWarmWeather: boolean;
+    strictColdActivity: boolean;
+  };
 }
 
 const RAG_LOG_PATH = path.join(process.cwd(), 'logs', 'rag-search.jsonl');
@@ -61,6 +69,8 @@ function toResultItem(item: WardrobeSearchResult): RagSearchResultItem {
     mainCategory: item.mainCategory,
     description: item.description,
     colors: item.colors,
+    season: item.season ?? [],
+    tags: item.tags ?? [],
     similarity: item.similarity,
     imageUrl: item.imageUrl,
   };
@@ -94,6 +104,12 @@ export function buildRagSearchLogEntry(params: {
   userMessage?: string;
   intent?: RagSearchIntentLog;
   anchorItem?: RagSearchAnchorLog;
+  seasonFilter?: {
+    dressingClimate?: string;
+    targetSeasons: string[];
+    isWarmWeather: boolean;
+    strictColdActivity: boolean;
+  };
 }): RagSearchLogEntry {
   return {
     timestamp: new Date().toISOString(),
@@ -103,6 +119,7 @@ export function buildRagSearchLogEntry(params: {
     userMessage: params.userMessage,
     intent: params.intent,
     anchorItem: params.anchorItem,
+    seasonFilter: params.seasonFilter,
     queries: params.queries.map(({ query, slot, mainCategory }) => ({
       query,
       slot,

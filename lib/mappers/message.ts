@@ -1,4 +1,4 @@
-import type { ImageState, Message, MessageContentPart } from '@/lib/types';
+import type { ImageState, Message, MessageContentPart, WardrobeCandidateItem } from '@/lib/types';
 
 type DbMessage = {
   id: string;
@@ -23,12 +23,25 @@ function extractImageStates(content: unknown): Record<string, ImageState> | unde
   return node.states as Record<string, ImageState>;
 }
 
+function extractWardrobeCandidatesPart(content: unknown): MessageContentPart | null {
+  if (!Array.isArray(content)) return null;
+  const node = content.find((p) => p?.type === 'wardrobe_candidates');
+  if (!node?.items || !Array.isArray(node.items) || node.items.length === 0) return null;
+  return {
+    type: 'wardrobe_candidates',
+    content: typeof node.prompt === 'string' ? node.prompt : '',
+    wardrobeCandidates: node.items as WardrobeCandidateItem[],
+  };
+}
+
 /** Map API/DB message to client Message (hide stylist_cache, restore imageStates). */
 export function mapDbMessageToClient(db: DbMessage): Message {
   const text = extractTextPart(db.content);
   const imageStates = extractImageStates(db.content);
+  const wardrobePart = extractWardrobeCandidatesPart(db.content);
 
   const content: MessageContentPart[] = text ? [{ type: 'text', content: text }] : [];
+  if (wardrobePart) content.push(wardrobePart);
 
   const ts = db.timestamp ?? db.createdAt;
   const timestamp =

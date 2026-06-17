@@ -2,6 +2,7 @@ import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
 import { createImageRetryStream, createMultiAgentStream } from "./multi-agent-orchestrator";
 import { urlToGenerativePart } from '@/server/utils/image';
+import { resolveClientIp } from '@/server/utils/resolveClientIp';
 
 const SSE_HEADERS = {
   'Content-Type': 'text/event-stream',
@@ -47,7 +48,9 @@ export async function POST(req: NextRequest) {
       initialParts.push({ text });
     }
 
-    const readableStream = createMultiAgentStream(initialParts, clientId!, conversationId, messageId);
+    const readableStream = createMultiAgentStream(initialParts, clientId!, conversationId, messageId, {
+      clientIp: resolveClientIp(req),
+    });
     return new Response(readableStream, { headers: SSE_HEADERS });
   } catch (e) {
     const error = e as Error;

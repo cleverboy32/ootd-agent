@@ -141,6 +141,25 @@ export const useChatHandler = () => {
           return msg;
         }));
       },
+      onWardrobeCandidates: (data: { items: Array<{ id: string; imageUrl: string; subCategory: string; colors: string[] }> }) => {
+        updateMessages(messages => messages.map(msg => {
+          if (msg.id === currentAiMessageId && msg.role === 'ai') {
+            const withoutOld = msg.content.filter((p) => p.type !== 'wardrobe_candidates');
+            return {
+              ...msg,
+              content: [
+                ...withoutOld,
+                {
+                  type: 'wardrobe_candidates' as const,
+                  content: '',
+                  wardrobeCandidates: data.items,
+                },
+              ],
+            };
+          }
+          return msg;
+        }));
+      },
       onError: (message: string) => {
         streamHasError = true;
         if (currentAiMessageId) {

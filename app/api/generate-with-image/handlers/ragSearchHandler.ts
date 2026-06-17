@@ -2,9 +2,15 @@ import { searchWardrobeItemsByText, WardrobeSearchResult } from '../../../../ser
 import { buildRagSearchLogEntry, logRagSearch } from '../../../../server/services/ragAuditLogger';
 import {
   normalizeWardrobeSearchInput,
+  parseWardrobeSearchSlot,
   resolveMainCategoryForSlot,
   WardrobeSearchInput,
 } from '../../../../server/utils/ragSearchSlots';
+import {
+  applySeasonFilter,
+  buildSeasonFilterContext,
+  expandedSearchLimit,
+} from '../../../../server/utils/ragSeasonFilter';
 import { ClothingItem } from '@prisma/client';
 import type { AnchorItemInfo, GatekeeperIntent } from './intentTypes';
 
@@ -18,6 +24,13 @@ export interface RagSearchContext {
   anchorItem?: AnchorItemInfo;
 }
 
+function escapeXmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
 /**
  * Formats the search results into an XML string for the AI prompt.
  * @param items The search results from the wardrobe.
@@ -29,11 +42,11 @@ function formatResultsToXml(items: WardrobeSearchResult[]): string {
   }
 
   const itemsXml = items
-    .map(
-      (item) =>
-        // 使用 item.id, item.mainCategory, etc.
-        `  <item id="${item.id}" name="${item.subCategory}" description="${item.description || ''}" colors="${item.colors.join(', ')}"/>`
-    )
+    .map((item) => {
+      const season = (item.season ?? []).join(', ');
+      const tags = (item.tags ?? []).join(', ');
+      return `  <item id="${item.id}" name="${escapeXmlAttr(item.subCategory)}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
+    })
     .join('\n');
 
   return `\n<relevant_wardrobe_items>\n${itemsXml}\n</relevant_wardrobe_items>\n`;
@@ -65,6 +78,21 @@ export async function performRagSearch(
   console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
 
   try {
+    const seasonContext = buildSeasonFilterContext(logContext?.intent, logContext?.userMessage);
+    const resultLimit = 5;
+    const fetchLimit = expandedSearchLimit(seasonContext, resultLimit);
+
+    if (seasonContext.isWarmWeather) {
+      console.log(
+        `[RAG_HANDLER] Warm-season filter active. targetSeasons=${seasonContext.targetSeasons.join(',')}`
+      );
+    } else {
+      console.log(
+        `[RAG_HANDLER] Cold-season filter active. targetSeasons=${seasonContext.targetSeasons.join(',')}` +
+          (seasonContext.strictColdActivity ? ', strictColdActivity=true' : '')
+      );
+    }
+
     const seenIds = new Set<string>();
     const mergedResults: WardrobeSearchResult[] = [];
     const perQueryResults: Array<{
@@ -76,7 +104,9 @@ export async function performRagSearch(
 
     for (const { query, slot } of queries) {
       const mainCategory = resolveMainCategoryForSlot(slot);
-      const searchResults = await searchWardrobeItemsByText(query, userId, 5, mainCategory);
+      const parsedSlot = parseWardrobeSearchSlot(slot);
+      const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory);
+      const searchResults = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
       perQueryResults.push({
         query,
         slot,
@@ -106,6 +136,12 @@ export async function performRagSearch(
         userMessage: logContext?.userMessage,
         intent: logContext?.intent,
         anchorItem: logContext?.anchorItem,
+        seasonFilter: {
+          dressingClimate: seasonContext.dressingClimate,
+          targetSeasons: seasonContext.targetSeasons,
+          isWarmWeather: seasonContext.isWarmWeather,
+          strictColdActivity: seasonContext.strictColdActivity,
+        },
       })
     );
 
@@ -119,9 +155,9 @@ export async function performRagSearch(
     const clothingItems: ClothingItem[] = mergedResults.map((result) => ({
       ...result,
       clientProfileId: userId,
-      season: [],
-      material: [],
-      tags: [],
+      season: result.season ?? [],
+      material: result.material ?? [],
+      tags: result.tags ?? [],
       embedding: null,
       createdAt: new Date(),
       updatedAt: new Date(),

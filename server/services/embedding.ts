@@ -39,7 +39,7 @@ export async function generateQueryEmbedding(text: string): Promise<number[]> {
     return extractEmbeddingValues(result);
   } catch (error) {
     console.error('Error in generateQueryEmbedding:', error);
-    throw new Error('Failed to generate query embedding from the AI service.');
+    throw error;
   }
 }
 
@@ -64,7 +64,7 @@ export async function generateDocumentEmbedding(text: string, image: Part): Prom
     return extractEmbeddingValues(result);
   } catch (error) {
     console.error('Error in generateDocumentEmbedding:', error);
-    throw new Error('Failed to generate document embedding from the AI service.');
+    throw error;
   }
 }
 

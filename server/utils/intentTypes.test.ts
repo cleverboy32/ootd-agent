@@ -1,10 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildOutfitSelectionGatekeeperReply,
   correctAnchorSlot,
+  correctDressingClimate,
+  extractConfirmedWardrobeId,
+  extractOutfitIdFromText,
+  finalizeGatekeeperResult,
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
 } from '@/app/api/generate-with-image/handlers/intentTypes';
+import type { Content } from '@google/genai';
 
 describe('inferAnchorSlotFromSummary', () => {
   it('classifies earrings and necklaces as accessory', () => {
@@ -16,6 +22,32 @@ describe('inferAnchorSlotFromSummary', () => {
     assert.equal(inferAnchorSlotFromSummary('蓝白细条纹棉质衬衫'), 'top');
     assert.equal(inferAnchorSlotFromSummary('高腰阔腿牛仔裤'), 'bottom');
     assert.equal(inferAnchorSlotFromSummary('白色复古德训鞋'), 'shoes');
+    assert.equal(inferAnchorSlotFromSummary('绿色裙子'), 'dress');
+    assert.equal(inferAnchorSlotFromSummary('冬季灰色长毛呢外套'), 'outerwear');
+  });
+
+  it('prioritizes summary over conversation context', () => {
+    assert.equal(
+      inferAnchorSlotFromSummary('冬季灰色长毛呢外套', '之前聊过连衣裙和裙子'),
+      'outerwear'
+    );
+  });
+});
+
+describe('extractConfirmedWardrobeId', () => {
+  it('extracts id from picker confirmation message', () => {
+    assert.equal(
+      extractConfirmedWardrobeId('确认选择这件单品（id=cmqg5ec6b0000pvs8q5kp2358）'),
+      'cmqg5ec6b0000pvs8q5kp2358'
+    );
+  });
+});
+
+describe('buildOutfitSelectionGatekeeperReply', () => {
+  it('uses short conversational tone', () => {
+    const reply = buildOutfitSelectionGatekeeperReply('第一套');
+    assert.ok(reply.length < 80);
+    assert.doesNotMatch(reply, /衬.*气质/);
   });
 });
 
@@ -30,5 +62,227 @@ describe('correctAnchorSlot', () => {
 
     const fixed = correctAnchorSlot(intent, '这副耳环');
     assert.equal(fixed.anchor_slot, 'accessory');
+  });
+
+  it('fixes mislabeled outerwear anchor from dress when context mentions 裙子', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      anchor_item_summary: '冬季灰色长毛呢外套',
+      anchor_slot: 'dress',
+      occasion: '日常',
+    });
+
+    const fixed = correctAnchorSlot(intent, '之前推荐过连衣裙和绿色裙子');
+    assert.equal(fixed.anchor_slot, 'outerwear');
+  });
+});
+
+describe('correctDressingClimate', () => {
+  it('fills cold from winter coat anchor when Gatekeeper left empty', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      anchor_item_summary: '冬季灰色长毛呢外套',
+      anchor_slot: 'outerwear',
+      dressing_climate: '',
+    });
+    const fixed = correctDressingClimate(intent);
+    assert.equal(fixed.dressing_climate, 'cold');
+  });
+
+  it('corrects warm to cold when anchor is winter coat', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      anchor_item_summary: '灰色长毛呢外套',
+      anchor_slot: 'outerwear',
+      dressing_climate: 'warm',
+    });
+    const fixed = correctDressingClimate(intent);
+    assert.equal(fixed.dressing_climate, 'cold');
+  });
+});
+
+describe('finalizeGatekeeperResult — selection short-circuit', () => {
+  it('blocks outfit_selection and returns a gatekeeper reply', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'outfit_selection',
+        selected_outfit_id: 'outfit_1',
+        occasion: '聚餐',
+      }),
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.followup_questions.length, 0);
+    assert.match(result.gatekeeper_reply ?? '', /第一套/);
+  });
+
+  it('blocks clarify intent with a clarifying reply', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({ request_type: 'clarify' }),
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.ok((result.gatekeeper_reply ?? '').length > 0);
+  });
+
+  it('confirms outfit_confirmed without asking for revision', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'outfit_confirmed',
+        selected_outfit_id: 'outfit_1',
+      }),
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.match(result.gatekeeper_reply ?? '', /定下来/);
+    assert.doesNotMatch(result.gatekeeper_reply ?? '', /微调/);
+  });
+});
+
+describe('finalizeGatekeeperResult — feedback_revision outfit selection', () => {
+  const multiOutfitHistory: Content[] = [
+    { role: 'user', parts: [{ text: '这套裙子怎么搭呢' }] },
+    {
+      role: 'model',
+      parts: [{ text: '### 方案一\n通勤风\n### 方案二\n休闲风' }],
+    },
+  ];
+
+  it('asks which outfit when revision has no outfit mention and multiple outfits exist', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '去掉外套，进行单穿搭配',
+        selected_outfit_id: 'outfit_1',
+      }),
+      currentMessageText: '去掉外套，进行单穿搭配',
+      history: multiOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.extracted_intent.selected_outfit_id, '');
+    assert.match(result.gatekeeper_reply ?? '', /第一套还是第二套/);
+  });
+
+  it('passes revision when user names outfit in current message', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '去掉外套',
+        selected_outfit_id: '',
+      }),
+      currentMessageText: '第一套去掉外套',
+      history: multiOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_1');
+  });
+
+  it('infers outfit from prior user selection in history', () => {
+    const history: Content[] = [
+      ...multiOutfitHistory,
+      { role: 'user', parts: [{ text: '我更喜欢第二套' }] },
+    ];
+
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '鞋换成白色',
+        selected_outfit_id: 'outfit_1',
+      }),
+      currentMessageText: '鞋换成白色',
+      history,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_2');
+  });
+
+  it('defaults to outfit_1 when only one outfit was shown', () => {
+    const singleOutfitHistory: Content[] = [
+      { role: 'user', parts: [{ text: '帮我搭一套' }] },
+      { role: 'model', parts: [{ text: '### 方案一\n通勤风' }] },
+    ];
+
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '鞋换成高跟鞋',
+        selected_outfit_id: '',
+      }),
+      currentMessageText: '鞋换成高跟鞋',
+      history: singleOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_1');
+  });
+});
+
+describe('extractOutfitIdFromText', () => {
+  it('detects outfit ids in user phrasing', () => {
+    assert.equal(extractOutfitIdFromText('第一套去掉外套'), 'outfit_1');
+    assert.equal(extractOutfitIdFromText('第二套鞋换一下'), 'outfit_2');
+    assert.equal(extractOutfitIdFromText('去掉外套'), '');
+  });
+});
+
+describe('finalizeGatekeeperResult — wardrobe_pairing', () => {
+  it('returns wardrobe_candidates when resolver is ambiguous', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '绿色裙子',
+        anchor_slot: 'dress',
+      }),
+      wardrobeResolver: {
+        status: 'ambiguous',
+        candidates: [
+          {
+            id: 'item1',
+            imageUrl: 'https://example.com/1.jpg',
+            subCategory: 'dress',
+            colors: ['green'],
+            similarity: 0.8,
+          },
+          {
+            id: 'item2',
+            imageUrl: 'https://example.com/2.jpg',
+            subCategory: 'dress',
+            colors: ['green'],
+            similarity: 0.75,
+          },
+        ],
+      },
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.wardrobe_candidates?.length, 2);
+  });
+
+  it('passes when anchor resolved and occasion provided', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '绿色裙子',
+        anchor_slot: 'dress',
+        occasion: '逛街',
+      }),
+      wardrobeResolver: {
+        status: 'resolved',
+        itemId: 'item1',
+        item: {
+          id: 'item1',
+          imageUrl: 'https://example.com/1.jpg',
+          subCategory: 'dress',
+          colors: ['green'],
+          similarity: 0.9,
+        },
+      },
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.anchor_wardrobe_id, 'item1');
   });
 });

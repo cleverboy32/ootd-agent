@@ -8,6 +8,7 @@ import { GenerateContentResponse } from '@google/genai';
 // [MODIFIED] Import both embedding generators
 import { generateDocumentEmbedding } from 'server/services/embedding';
 import { deleteWardrobeItems } from '@/server/services/wardrobeService';
+import { is429Error, withRetryOn429 } from '@/server/utils/retryOn429';
 // --- [新增] GET 请求处理函数 ---
 export async function GET(req: Request) {
   try {
@@ -108,10 +109,14 @@ export async function POST(req: Request) {
 
     // [MODIFIED] 使用最新的 genAI.models.generateContent 方式调用 AI
     console.log('[API /api/wardrobe] Calling Gemini API for analysis with genAI.models.generateContent...');
-    const result: GenerateContentResponse = await genAI.models.generateContent({
-      model: "gemini-2.5-flash", // 指定要使用的模型
-      contents: [{ role: 'user', parts: [imagePart, textPart] }] // 将图片和文本 prompt 组合
-    });
+    const result: GenerateContentResponse = await withRetryOn429(
+      () =>
+        genAI.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ role: 'user', parts: [imagePart, textPart] }],
+        }),
+      { label: 'Wardrobe analysis', maxRetries: 4 }
+    );
 
     // 3. 获取分析结果
     const responseText = result.text;
@@ -146,8 +151,10 @@ export async function POST(req: Request) {
     const textForEmbedding = `Category: ${subCategory}. Description: ${description}. Colors: ${colors.join(', ')}. Tags: ${tags.join(', ')}. Season: ${season.join(', ')}. Material: ${material.join(', ')}.`;
     // 2. Prepare the image part (we already have it from the start)
     const imagePartForEmbedding = await urlToGenerativePart(imageUrl);
-    // 3. Call the new multimodal embedding service
-    const embeddingVector = await generateDocumentEmbedding(textForEmbedding, imagePartForEmbedding);
+    const embeddingVector = await withRetryOn429(
+      () => generateDocumentEmbedding(textForEmbedding, imagePartForEmbedding),
+      { label: 'Wardrobe embedding', maxRetries: 4 }
+    );
     console.log('[API /api/wardrobe] Multimodal embedding generated successfully.');
     // --- [END MODIFIED] ---
 
@@ -184,9 +191,20 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error('Error in POST /api/wardrobe:', error);
-    // 检查是否是 Google API 特定的错误
+    if (is429Error(error)) {
+      return NextResponse.json(
+        {
+          error: 'AI 服务请求过于频繁，请稍后再试',
+          code: 'RATE_LIMIT',
+        },
+        { status: 429 }
+      );
+    }
     if (error instanceof Error && error.message.includes('GoogleGenerativeAI')) {
       return NextResponse.json({ error: 'An error occurred with the AI service.', details: error.message }, { status: 502 });
+    }
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

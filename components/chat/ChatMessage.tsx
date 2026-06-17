@@ -8,6 +8,7 @@ import { useChatHandler } from "@/hooks/useChatHandler";
 import { useImageRetry } from "@/hooks/useImageRetry";
 import { Button } from "@/components/ui/button";
 import { WardrobeItem } from "./WardrobeItem";
+import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
 
 const IMAGE_MARKER_REGEX = /\[IMAGE=([^\]]+)\]/g;
@@ -264,6 +265,17 @@ export const ChatMessage = memo(
                     } else if (part.type === "image_failed") {
                       return (
                         <ImageFailedPlaceholder key={part.id || index} />
+                      );
+                    } else if (part.type === "wardrobe_candidates" && part.wardrobeCandidates?.length) {
+                      return (
+                        <WardrobeCandidatePicker
+                          key={part.id || index}
+                          items={part.wardrobeCandidates}
+                          disabled={isLoading}
+                          onSelect={(itemId) => {
+                            handleSend(`确认选择这件单品（id=${itemId}）`);
+                          }}
+                        />
                       );
                     }
                     return null;

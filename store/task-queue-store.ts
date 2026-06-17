@@ -4,7 +4,19 @@ import { executeUpload, executeAnalysis } from '../services/task-executors';
 
 // --- Constants ---
 const MAX_CONCURRENT_UPLOADS = 10;
-const MAX_CONCURRENT_ANALYSES = 3;
+const MAX_CONCURRENT_ANALYSES = 1;
+const ANALYZE_RATE_LIMIT_RETRY_MS = 8000;
+
+function isRateLimitMessage(message: string): boolean {
+  return (
+    message.includes('429') ||
+    message.includes('RATE_LIMIT') ||
+    message.includes('过于频繁') ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.includes('Resource exhausted') ||
+    message.includes('Quota exceeded')
+  );
+}
 
 type TaskType = 'upload' | 'analyze';
 
@@ -128,7 +140,17 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     } catch (error: unknown) {
       console.error(`TaskRunner: Error processing ${type} for ${fileId}:`, error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      updateFileStatus(fileId, { status: 'error', error: errorMessage });
+
+      if (type === 'analyze' && isRateLimitMessage(errorMessage)) {
+        updateFileStatus(fileId, {
+          status: 'analyzing',
+          error: 'AI 服务繁忙，8 秒后自动重试…',
+        });
+        get().resetTask(fileId);
+        setTimeout(() => get().addTask(fileId, 'analyze'), ANALYZE_RATE_LIMIT_RETRY_MS);
+      } else {
+        updateFileStatus(fileId, { status: 'error', error: errorMessage });
+      }
     } finally {
       // Decrement the active count for the completed task type and trigger the scheduler again.
       set(state => ({

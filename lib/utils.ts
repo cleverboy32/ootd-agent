@@ -60,9 +60,17 @@ export interface StreamHandlers {
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
   onImageGenerationFailed: (data: { id: string; message: string; alt: string; }) => void;
+  onWardrobeCandidates?: (data: { items: WardrobeCandidateItem[] }) => void;
   onError: (message: string) => void;
   onStreamEnd: () => void;
 }
+
+export type WardrobeCandidateItem = {
+  id: string;
+  imageUrl: string;
+  subCategory: string;
+  colors: string[];
+};
 
 // Utility 2: The complete API call and stream processing logic
 // 将整个函数替换为这个版本
@@ -144,6 +152,9 @@ export const streamResponse = async (
               break;
             case 'image_generation_failed':
               handlers.onImageGenerationFailed(data);
+              break;
+            case 'wardrobe_candidates':
+              handlers.onWardrobeCandidates?.(data);
               break;
             case 'error':
               handlers.onError(data.message);

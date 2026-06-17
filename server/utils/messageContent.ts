@@ -1,6 +1,7 @@
 import type { ImageState } from '@/lib/types';
 import type { StylistResult } from '@/app/api/generate-with-image/handlers/stylistAgent';
 import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import type { WardrobeAnchorCandidate } from '@/app/api/generate-with-image/handlers/intentTypes';
 import { ClothingItem } from '@prisma/client';
 
 export interface StylistCacheNode {
@@ -15,10 +16,17 @@ export interface ImageStatesNode {
   states: Record<string, ImageState>;
 }
 
+export interface WardrobeCandidatesNode {
+  type: 'wardrobe_candidates';
+  items: WardrobeAnchorCandidate[];
+  prompt?: string;
+}
+
 export type PersistedMessagePart =
   | { type: 'text'; content: string }
   | StylistCacheNode
   | ImageStatesNode
+  | WardrobeCandidatesNode
   | Record<string, unknown>;
 
 const IMAGE_PLACEHOLDER_RE = /\[IMAGE=([^\]]+)\]/g;
@@ -39,6 +47,11 @@ export function extractImageStates(content: unknown): Record<string, ImageState>
     | ImageStatesNode
     | undefined;
   return node?.states ?? {};
+}
+
+export function extractWardrobeCandidates(content: unknown): WardrobeCandidatesNode | null {
+  const node = asContentArray(content).find((p) => p.type === 'wardrobe_candidates');
+  return (node as WardrobeCandidatesNode) ?? null;
 }
 
 export function extractTextContent(content: unknown): string {
@@ -86,8 +99,13 @@ export function buildPersistedMessageContent(options: {
   text: string;
   stylistCache?: StylistCacheNode | null;
   imageStates: Record<string, ImageState>;
+  wardrobeCandidates?: WardrobeCandidatesNode | null;
 }): PersistedMessagePart[] {
   const parts: PersistedMessagePart[] = [{ type: 'text', content: options.text }];
+
+  if (options.wardrobeCandidates && options.wardrobeCandidates.items.length > 0) {
+    parts.push(options.wardrobeCandidates);
+  }
 
   if (options.stylistCache) {
     parts.push(options.stylistCache);

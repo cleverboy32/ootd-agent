@@ -56,8 +56,16 @@ export async function executeAnalysis(imageUrl: string): Promise<{ status: strin
   });
 
   if (!analyzeResponse.ok) {
-    const errorData = await analyzeResponse.json();
-    throw new Error(errorData.error || 'AI 分析失败');
+    const errorData = (await analyzeResponse.json().catch(() => ({}))) as {
+      error?: string;
+      code?: string;
+    };
+    const message =
+      errorData.error ||
+      (analyzeResponse.status === 429
+        ? 'AI 服务请求过于频繁，请稍后再试'
+        : `AI 分析失败 (${analyzeResponse.status})`);
+    throw new Error(message);
   }
 
   return analyzeResponse.json();

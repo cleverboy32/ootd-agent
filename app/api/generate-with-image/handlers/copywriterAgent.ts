@@ -10,6 +10,7 @@ import {
 import { evaluateCopywriterOutput } from '@/server/utils/copywriterEvaluator';
 import { logCopywriterAudit } from '@/server/services/copywriterAuditLogger';
 import { StylistResult } from './stylistAgent';
+import { GatekeeperIntent, outfitIdToLabel } from './intentTypes';
 
 export interface CopywriterAuditMeta {
   conversationId?: string;
@@ -84,6 +85,43 @@ const COPYWRITER_SYSTEM_INSTRUCTION = `
    - 不要输出任何 JSON 格式，直接输出纯 Markdown 文本。
 `;
 
+const COPYWRITER_REVISION_ADDENDUM = `
+【反馈微调模式 — 当前为 revision，必须遵守】
+- 这是用户对【已有方案】的修改，不是全新推荐。
+- 【禁止】使用「下午好呀」「为您定制了」「我为你准备了 N 套」等全新推荐开场。
+- 开场 1 句简短确认修改即可，如「好的，已在第一套里把鞋履换成高跟鞋～」。
+- 【只描述 1 套】方案，小标题可用 ### 方案一（已微调）。
+- 在 bullet 中点出【变更项】，其余单品简要带过。
+- 收尾用「还要再调哪里吗？」，禁止「喜欢哪套？告诉我帮你微调～」。
+`;
+
+function buildCopywriterPrompt(
+  stylistResult: StylistResult,
+  personalStyle: string,
+  intent?: GatekeeperIntent
+): { prompt: string; systemInstruction: string } {
+  const isRevision = intent?.request_type === 'feedback_revision';
+  const revisionNote = isRevision
+    ? `\n【微调上下文】\n- 目标方案: ${outfitIdToLabel(intent?.selected_outfit_id)}\n- 修改要求: ${intent?.special_requests || '无'}\n`
+    : '';
+
+  const prompt = `
+【用户风格定位】
+${personalStyle || '日常休闲'}
+${revisionNote}
+【搭配师给出的结构化方案】
+${JSON.stringify(stylistResult, null, 2)}
+
+请为以上方案进行温暖、优雅的文案润色。严格遵循占位符注入规则与排版模板，以即时聊天口吻输出，禁止书信落款。直接开始输出你的 Markdown 文本：
+`;
+
+  const systemInstruction = isRevision
+    ? `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_REVISION_ADDENDUM}`
+    : COPYWRITER_SYSTEM_INSTRUCTION;
+
+  return { prompt, systemInstruction };
+}
+
 /**
  * 调用 Copywriter Agent 进行流式文案润色
  * @param stylistResult 搭配师输出的结构化方案
@@ -96,25 +134,17 @@ export async function callCopywriterAgentStream(
   personalStyle: string,
   controller: ReadableStreamDefaultController,
   onData: (text: string) => void,
-  auditMeta?: CopywriterAuditMeta
+  auditMeta?: CopywriterAuditMeta,
+  intent?: GatekeeperIntent
 ): Promise<string> {
   console.log('[COPYWRITER_AGENT] Starting streaming copywriting...');
 
   const tagContext = buildCopywriterTagContext(stylistResult);
   const streamSanitizer = createCopywriterStreamSanitizer(tagContext);
-
-  const prompt = `
-【用户风格定位】
-${personalStyle || '日常休闲'}
-
-【搭配师给出的结构化方案】
-${JSON.stringify(stylistResult, null, 2)}
-
-请为以上方案进行温暖、优雅的文案润色。严格遵循占位符注入规则与排版模板，以即时聊天口吻输出，禁止书信落款。直接开始输出你的 Markdown 文本：
-`;
+  const { prompt, systemInstruction } = buildCopywriterPrompt(stylistResult, personalStyle, intent);
 
   const config = {
-    systemInstruction: COPYWRITER_SYSTEM_INSTRUCTION,
+    systemInstruction,
     temperature: 0.7,
   };
 
