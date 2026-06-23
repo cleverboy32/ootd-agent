@@ -139,6 +139,47 @@ describe('finalizeGatekeeperResult — selection short-circuit', () => {
   });
 });
 
+describe('finalizeGatekeeperResult — style_advice advice route', () => {
+  it('short-circuits to Style Advice Agent even when a concrete occasion is present', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'style_advice',
+        occasion: '商务通勤',
+      }),
+      modelIsComplete: true,
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.followup_questions.length, 0);
+    assert.equal(result.gatekeeper_reply, undefined);
+  });
+
+  it('does not require a Gatekeeper reply when too vague', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'style_advice',
+        occasion: '',
+      }),
+      modelIsComplete: false,
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.gatekeeper_reply, undefined);
+  });
+
+  it('does not generate when model judged incomplete even if occasion present', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'style_advice',
+        occasion: '商务通勤',
+      }),
+      modelIsComplete: false,
+    });
+
+    assert.equal(result.is_complete, false);
+  });
+});
+
 describe('finalizeGatekeeperResult — feedback_revision outfit selection', () => {
   const multiOutfitHistory: Content[] = [
     { role: 'user', parts: [{ text: '这套裙子怎么搭呢' }] },

@@ -28,14 +28,19 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   };
 
   // 4. Make the actual fetch request
-  const response = await fetch(url, newOptions);
+  let response: Response;
+  try {
+    response = await fetch(url, newOptions);
+  } catch {
+    throw new Error('Failed to fetch');
+  }
 
   // 5. [Recommended] Add generic error handling
   if (!response.ok) {
     // Try to parse the error body
     const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status}` }));
     // Throw an error with more info for the upper layer to catch
-    throw new Error(errorBody.message || `HTTP error! Status: ${response.status}`);
+    throw new Error(errorBody.error || errorBody.message || `HTTP error! Status: ${response.status}`);
   }
 
   return response;

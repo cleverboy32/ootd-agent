@@ -45,7 +45,9 @@ function formatResultsToXml(items: WardrobeSearchResult[]): string {
     .map((item) => {
       const season = (item.season ?? []).join(', ');
       const tags = (item.tags ?? []).join(', ');
-      return `  <item id="${item.id}" name="${escapeXmlAttr(item.subCategory)}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
+      const similarity =
+        typeof item.similarity === 'number' ? item.similarity.toFixed(2) : '';
+      return `  <item id="${item.id}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
     })
     .join('\n');
 

@@ -5,8 +5,8 @@ import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
 
 import { callGatekeeperAgent, GatekeeperContext, GatekeeperResult } from './handlers/gatekeeperAgent';
 import { callUserProfileAgent, buildUserProfileFallback, UserProfileResult, shouldSkipProfileAgentUpdate, loadUserProfileFromDb } from './handlers/userProfileAgent';
-import { callStylistAgent, StylistOutfit, StylistResult } from './handlers/stylistAgent';
-import { callCopywriterAgentStream, CopywriterAuditMeta } from './handlers/copywriterAgent';
+import { callStylistAgent, callStylistAdvice, StylistOutfit, StylistResult } from './handlers/stylistAgent';
+import { callCopywriterAgentStream, callCopywriterAdviceStream, CopywriterAuditMeta } from './handlers/copywriterAgent';
 import { callVisualDirectorAgent } from '@/server/services/visualDirectorService';
 import { AnchorItemImageData, GatekeeperIntent } from './handlers/intentTypes';
 import { buildContext } from './handlers/buildContext';
@@ -72,7 +72,8 @@ async function executeParallelAgents(
   failedImageIds: Set<string>,
   onText: (text: string) => void,
   auditMeta?: CopywriterAuditMeta,
-  intent?: GatekeeperIntent
+  intent?: GatekeeperIntent,
+  revisionNoItemChange?: boolean
 ): Promise<void> {
   console.log('[ORCHESTRATOR] 启动并行双轨执行链 (文案流 + 视觉导演并行画图)...');
 
@@ -82,7 +83,8 @@ async function executeParallelAgents(
     controller,
     onText,
     auditMeta,
-    intent
+    intent,
+    revisionNoItemChange
   );
 
   const wardrobeUrls = Array.from(ragCache.values())
@@ -350,6 +352,29 @@ export function createMultiAgentStream(
             { conversationId, messageId: finalMessageId }
           );
 
+          if (gatekeeperResult.extracted_intent.request_type === 'style_advice') {
+            activeIntent = gatekeeperResult.extracted_intent;
+            const adviceProfile = clientId
+              ? await loadUserProfileFromDb(clientId)
+              : buildUserProfileFallback();
+            const adviceResult = await callStylistAdvice(
+              historyForAI,
+              initialParts,
+              activeIntent,
+              adviceProfile
+            );
+            await callCopywriterAdviceStream(
+              adviceResult,
+              adviceProfile.personal_style,
+              controller,
+              (text) => {
+                accumulatedContent += text;
+              },
+              { conversationId, messageId: finalMessageId }
+            );
+            return;
+          }
+
           if (!gatekeeperResult.is_complete) {
             const questionsText =
               gatekeeperResult.gatekeeper_reply?.trim() ||
@@ -457,6 +482,25 @@ export function createMultiAgentStream(
             throw new Error('StylistFailed: 搭配师开小差了，请稍后再试~');
           }
 
+          // 对比前后方案单品，检测 feedback_revision 是否真的换了品
+          let revisionNoItemChange = false;
+          if (activeIntent.request_type === 'feedback_revision' && previousStylistCache && stylistResult.outfits.length > 0) {
+            const revisionOutfitId = activeIntent.selected_outfit_id?.trim() || 'outfit_1';
+            const prevOutfit =
+              previousStylistCache.stylist_result.outfits.find((o) => o.id === revisionOutfitId) ??
+              previousStylistCache.stylist_result.outfits[0];
+            const newOutfit = stylistResult.outfits[0];
+            if (prevOutfit && newOutfit) {
+              const prevIds = new Set(prevOutfit.selected_items.map((i) => i.id));
+              const newIds = new Set(newOutfit.selected_items.map((i) => i.id));
+              revisionNoItemChange =
+                prevIds.size === newIds.size && [...prevIds].every((id) => newIds.has(id));
+              if (revisionNoItemChange) {
+                console.log('[ORCHESTRATOR] feedback_revision: 单品未变，Copywriter 将如实说明原方案已适合');
+              }
+            }
+          }
+
           await executeParallelAgents(
             stylistResult,
             userProfileResult.personal_style,
@@ -468,7 +512,8 @@ export function createMultiAgentStream(
               accumulatedContent += text;
             },
             { conversationId, messageId: finalMessageId },
-            activeIntent
+            activeIntent,
+            revisionNoItemChange
           );
         }
       } catch (error) {

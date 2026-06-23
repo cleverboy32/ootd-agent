@@ -27,7 +27,7 @@ const gatekeeperSchema: Schema = {
     is_complete: {
       type: Type.BOOLEAN,
       description:
-        '是否可进入搭配流程。wardrobe_outfit 需场合明确；purchase_pairing 需锚定单品；feedback_revision 有明确修改指令时为 true；outfit_selection / outfit_confirmed / clarify 意图不明或已定稿，填 false，由 gatekeeper_reply 直接回复用户。',
+        '是否可进入搭配生成流程。wardrobe_outfit 需场合明确；purchase_pairing 需锚定单品；feedback_revision 有明确修改指令时为 true；style_advice 有可回答主题（如咨询风格、色彩、穿搭方法等）时填 true，由 Stylist 以建议模式回答；主题完全不明确时才填 false；outfit_selection / outfit_confirmed / clarify 意图不明或已定稿，填 false，由 gatekeeper_reply 直接回复用户。',
     },
     extracted_intent: {
       type: Type.OBJECT,
@@ -52,12 +52,12 @@ const gatekeeperSchema: Schema = {
         special_requests: {
           type: Type.STRING,
           description:
-            '用户明确说出的特殊要求（遮肚子、显腿长等）；purchase_pairing 时填写待购单品搭配说明。禁止臆测身材修饰需求。',
+            '用户明确说出的特殊要求（遮肚子、显腿长等）；purchase_pairing 时填写待购单品搭配说明；style_advice 时【必须】结合历史对话，填入用户最初真正想了解的建议主题（如「高级感色彩搭配公式」「美拉德风穿搭要点」），不要因后续补充场合而丢失原始诉求。【关键】忠实还原用户的提问层级和语气，禁止自行添加「进阶」「深度」等拔高修饰词——用户问「大地色有哪些颜色？」只填「大地色的颜色构成」，用户说「啊 原来分这么多种？」只填「大地色子系列的构成与区别」；只有当用户原话中明确出现「进阶」「深入」「详细」「高阶」等词才允许加"进阶"定性。禁止臆测身材修饰需求。',
         },
         request_type: {
           type: Type.STRING,
           description:
-            '请求类型：wardrobe_outfit（从衣橱搭一套）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
+            '请求类型：wardrobe_outfit（从衣橱搭一套）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| style_advice（咨询某风格/场景的穿搭建议，如「想了解X风格」「有什么好建议」，偏知识/建议而非直接要一套）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
         },
         selected_outfit_id: {
           type: Type.STRING,
@@ -82,7 +82,7 @@ const gatekeeperSchema: Schema = {
         dressing_climate: {
           type: Type.STRING,
           description:
-            '本轮搭配的穿衣气候，供衣橱检索过滤：cold（秋冬保暖，如滑雪、毛呢大衣、羽绒服）| warm（春夏轻薄，如海边、徒步、短裤吊带）| mild（过渡季或室内通勤、场合未明示冷暖）。进入搭配流程（is_complete=true 的 wardrobe_outfit / wardrobe_pairing / purchase_pairing / feedback_revision）时必须填写；综合锚点单品、场合、用户提到的天气/季节判断，勿留空。',
+            '本轮搭配的穿衣气候，供衣橱检索过滤：cold（秋冬保暖，如滑雪、毛呢大衣、羽绒服）| warm（春夏轻薄，如海边、徒步、短裤吊带）| mild（过渡季或室内通勤、场合未明示冷暖）。进入搭配流程（is_complete=true 的 wardrobe_outfit / wardrobe_pairing / purchase_pairing / feedback_revision）时必须填写；style_advice 可填 mild 或留空。综合锚点单品、场合、用户提到的天气/季节判断，勿留空。',
         },
       },
       required: [
@@ -110,7 +110,7 @@ const gatekeeperSchema: Schema = {
         needed: {
           type: Type.BOOLEAN,
           description:
-            '本轮搭配是否需要补充实时天气：wardrobe_outfit / feedback_revision 通常 true；purchase_pairing / outfit_selection / clarify 通常 false；用户已自述天气或温度时填 false。',
+            '本轮搭配是否需要补充实时天气：wardrobe_outfit / feedback_revision 通常 true；purchase_pairing / style_advice / outfit_selection / clarify 通常 false；用户已自述天气或温度时填 false。',
         },
         city: {
           type: Type.STRING,
@@ -144,6 +144,15 @@ const GATEKEEPER_SYSTEM_INSTRUCTION = `
 5. outfit_selection：用户【仅表示】更喜欢/选定上一轮的某一套（如「我比较喜欢第一套」「就第二套吧」），但【没有说明】是已满意、还是想再微调——不要放行，由你在 gatekeeper_reply 中确认并追问。
 6. outfit_confirmed：用户在选定某套后，明确表示【已满意、不用调整、可以直接穿】——归类为 outfit_confirmed，【禁止】归为 outfit_selection；【禁止】再次追问是否微调；gatekeeper_reply 亲切确认定稿即可。
 7. clarify：用户输入与搭配/穿衣相关，但意图模糊、信息不足以归入以上任何一类——不要放行，由你在 gatekeeper_reply 中亲切追问。
+8. style_advice：用户在【咨询某种风格、色彩、场景或穿搭方法的建议/知识】，而非直接要你立刻搭一套（如「高级感色彩搭配公式」「哪些颜色适合搭在一起」「显瘦有什么技巧」「美拉德风怎么穿」）。
+
+【style_advice 处理（重要）】
+- style_advice 是【知识/建议回答】类型，不需要搭配方案。有可回答主题（咨询风格、色彩、穿搭方法等）就直接放行（is_complete=true），由 Stylist 以建议模式回答。
+- 不要为了回答建议类问题而追问场合。用户问「高级感色彩搭配公式」「哪些颜色适合搭配」时，直接归为 style_advice，让 Stylist 直接回答公式、颜色组合和避坑。
+- 如果用户只是补充场合（如「职场通勤」「日常百搭」），仍然保持 style_advice；occasion 填该场景，special_requests 继续保留原始知识诉求，让 Advice Agent 讲“这个公式在该场景怎么用”。
+- 只有用户表达了【想看实际搭配效果 / 想把建议落实成穿搭示范】的意图时，才不要归为 style_advice；应归为 wardrobe_outfit（无特定锚点）或 wardrobe_pairing（有指定单品）。判断依据是意图，不依赖特定措辞——"给我搭一套""能变出什么魔法""想看看效果""用我的衣橱示范一下"都属于此类。此时 special_requests 中应继承刚才建议的核心主题（如「按高级感大地色系公式搭配」），让搭配师知道风格方向；occasion 若未明确则默认「日常百搭」。
+- 【贯穿原始诉求（关键）】：多轮咨询里，用户最初问的可能是某个知识点（如「高级感色彩搭配公式」），后续只是补充了场合（如「职场通勤」）。你【必须】从历史对话提取用户最初真正想了解的主题，写入 special_requests。occasion 只是落地场景，禁止丢掉原始主题。
+- style_advice 不需要锚定单品、天气或穿衣气候；weather_lookup.needed 填 false。
 
 【outfit_selection 话术（重要）】
 - gatekeeper_reply 必须【简短】：一句确认选了哪套 + 一个选择题（满意 or 微调）。
@@ -171,8 +180,11 @@ const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 不要因为缺少天气拦截 purchase_pairing。
 
 【wardrobe_outfit 放行标准】
-- 必须包含明确的场合（上班、约会、徒步等）。
-- 场合不明确时 is_complete=false，亲切追问 1-2 个问题。
+- 通常需要明确场合（上班、约会、徒步等）才可放行。
+- 但有以下情况可直接以「日常百搭」放行，无需追问场合：
+  ① 用户说「平时/百搭/日常/都可以穿/随便穿」等宽泛场合词；
+  ② 历史对话中存在建议类（style_advice）交流，且用户本轮的意图是【想看建议的实际效果 / 想把刚才的知识落实成穿搭示范】——无论用什么措辞（"给我搭一套" "帮我配一套" "想看看效果" "能变出什么" "实践一下" "用衣橱示范" 等），都直接判定为衣橱穿搭请求，occasion 填「日常百搭」，直接放行，【禁止】再追问场合。
+- 上述两种情况以外，场合不明确时 is_complete=false，亲切追问 1-2 个问题。
 
 【feedback_revision】
 - is_complete=true，request_type=feedback_revision，从上下文继承场合，special_requests 写入用户的修改要求。
@@ -182,7 +194,7 @@ const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 不要因缺少天气或温度信息而拦截用户。
 - 若用户主动提到天气/温度，提取到 extracted_intent.weather；若主动提到城市，提取到 extracted_intent.city。
 - 由你判断本轮搭配是否需要实时天气，并填写 weather_lookup：
-  - weather_lookup.needed：wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的，填 true；outfit_selection / outfit_confirmed / clarify / purchase_pairing 这类一般填 false；用户已自述天气/温度时填 false。
+  - weather_lookup.needed：wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的，填 true；style_advice / outfit_selection / outfit_confirmed / clarify / purchase_pairing 这类一般填 false；用户已自述天气/温度时填 false。
   - weather_lookup.city：需要查询时填用户提到的城市；未知则留空字符串，系统会用 IP 兜底。
 - 系统会在你返回后据 weather_lookup 串行查询并补全天气结果，你无需填写查询结果本身。
 
@@ -204,7 +216,8 @@ const GATEKEEPER_SYSTEM_INSTRUCTION = `
 1. 仔细阅读用户当前输入及历史对话（含历史中的服装图片）。
 2. 判定 request_type；衣橱已有单品 → wardrobe_pairing；意图不清晰时归为 outfit_selection 或 clarify，不要硬猜。
 3. 可放行（wardrobe_outfit / wardrobe_pairing / purchase_pairing / feedback_revision 且信息齐全）→ is_complete=true，gatekeeper_reply 留空。
-4. 不可放行 → is_complete=false：结构化信息缺失用 followup_questions；意图需澄清（outfit_selection / clarify）用 gatekeeper_reply 直接回复。
+4. style_advice → 有明确建议主题则 is_complete=true，由 Stylist 以建议模式回答；主题完全不明确时才 is_complete=false 并用 gatekeeper_reply 追问。
+5. 不可放行 → is_complete=false：结构化信息缺失用 followup_questions；意图需澄清（outfit_selection / clarify）用 gatekeeper_reply 直接回复。
 `;
 
 export interface GatekeeperContext {
@@ -328,6 +341,7 @@ export async function callGatekeeperAgent(
       wardrobeResolver,
       currentMessageText: extractTextFromParts(currentInput),
       history,
+      modelIsComplete: parsed.is_complete,
     });
 
     const contextText = buildContextText(history, currentInput);

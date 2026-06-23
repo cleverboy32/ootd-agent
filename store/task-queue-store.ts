@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useWardrobeStore } from './wardrobe-store';
-import { executeUpload, executeAnalysis } from '../services/task-executors';
+import { executeUpload, executeAnalysis } from '@/lib/task-executors';
 
 // --- Constants ---
 const MAX_CONCURRENT_UPLOADS = 10;

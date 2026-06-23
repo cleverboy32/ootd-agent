@@ -9,11 +9,13 @@ import {
   isVisualProfileVerified,
   readVerifiedVisualProfile,
 } from '@/server/utils/userProfileVisual';
+import { mergeChatProfileForPersistence } from '@/server/utils/profileMetadata';
 import {
   extractConfirmedWardrobeId,
   type GatekeeperIntent,
 } from '@/app/api/generate-with-image/handlers/intentTypes';
 import prismadb from 'server/db';
+import { Prisma } from '@prisma/client';
 
 // 定义 User Profile Agent 的输出 Schema
 const userProfileSchema: Schema = {
@@ -374,10 +376,11 @@ ${currentMessageText || '（无文字）'}
 
     if (clientId) {
       console.log('[USER_PROFILE_AGENT] Triggering async DB persistence...');
+      const profileToPersist = mergeChatProfileForPersistence(result, dbProfile);
       prismadb.clientProfile.upsert({
         where: { id: clientId },
-        update: { profileData: result as object },
-        create: { id: clientId, profileData: result as object }
+        update: { profileData: profileToPersist as Prisma.InputJsonValue },
+        create: { id: clientId, profileData: profileToPersist as Prisma.InputJsonValue }
       }).then(() => {
         console.log('[USER_PROFILE_AGENT] Successfully persisted profile to DB.');
       }).catch(e => {

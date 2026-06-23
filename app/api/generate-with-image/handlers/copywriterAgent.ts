@@ -9,8 +9,90 @@ import {
 } from '@/server/utils/copywriterTagSanitizer';
 import { evaluateCopywriterOutput } from '@/server/utils/copywriterEvaluator';
 import { logCopywriterAudit } from '@/server/services/copywriterAuditLogger';
-import { StylistResult } from './stylistAgent';
+import { StylistResult, StyleAdviceResult } from './stylistAgent';
 import { GatekeeperIntent, outfitIdToLabel } from './intentTypes';
+
+const COPYWRITER_ADVICE_SYSTEM_INSTRUCTION = `
+你是一个情商极高、充满时尚感和亲和力的时尚博主 (Copywriter Agent)。
+你的任务是把造型师给出的结构化穿搭建议，包装成温暖、有温度、排版优雅的聊天话术。
+
+【语气定制】
+- 仔细阅读传入的用户个人风格定位（personal_style）。
+- 甜美/活泼：多用 Emoji（✨💕🎀），语气活泼温暖。
+- 知性/优雅：语气从容专业，多用「您」，排版简洁大气。
+- 幽默/松弛：风趣贴心，排版轻松。
+- 默认：亲切专业，充满时尚建设性。
+
+【排版规范】
+- 这是即时聊天对话，禁止书信落款。
+- 开场 1-2 句口语化回应，引出建议主题。
+- 正文用 ### 小标题 + bullet 要点分项，层次清晰。
+- 若有个性化补充，单独一段自然融入。
+- 若有引导钩子，结尾自然带出，语气轻松不强迫。
+- 直接输出 Markdown 文本，不要输出 JSON。
+`;
+
+/**
+ * 调用 Copywriter Agent（建议模式）：将 StyleAdviceResult 包装成对话文本流式输出
+ */
+export async function callCopywriterAdviceStream(
+  advice: StyleAdviceResult,
+  personalStyle: string,
+  controller: ReadableStreamDefaultController,
+  onData: (text: string) => void,
+  _auditMeta?: CopywriterAuditMeta
+): Promise<void> {
+  console.log('[COPYWRITER_AGENT] Starting advice stream...');
+
+  const pointsList = advice.points.map((p, i) => `${i + 1}. ${p}`).join('\n');
+  const personalNoteBlock = advice.personal_note?.trim()
+    ? `\n个性化补充: ${advice.personal_note}`
+    : '';
+  const followupBlock = advice.followup?.trim() ? `\n引导钩子: ${advice.followup}` : '';
+
+  const prompt = `
+【用户风格定位】
+${personalStyle || '日常休闲'}
+
+【造型师给出的结构化建议】
+- 主题: ${advice.topic}
+- 核心要点:
+${pointsList}${personalNoteBlock}${followupBlock}
+
+请将以上建议包装成温暖、口语化的聊天话术。使用 Markdown 排版（### 小标题 + bullet 要点）。直接开始输出你的 Markdown 文本：
+`;
+
+  try {
+    const responseStream = await withRetryOn429(
+      () =>
+        genAI.models.generateContentStream({
+          model: AGENT_MODELS.copywriter,
+          contents: prompt,
+          config: {
+            systemInstruction: COPYWRITER_ADVICE_SYSTEM_INSTRUCTION,
+            temperature: 0.7,
+          },
+        }),
+      { label: 'Copywriter advice' }
+    );
+
+    let fullText = '';
+
+    for await (const chunk of responseStream) {
+      const text = chunk.text;
+      if (text) {
+        fullText += text;
+        sendEvent(controller, 'text_chunk', { text });
+      }
+    }
+
+    console.log('[COPYWRITER_AGENT] Advice stream completed. Length:', fullText.length);
+    onData(fullText);
+  } catch (error) {
+    console.error('[COPYWRITER_AGENT] Error during advice stream:', error);
+    throw error;
+  }
+}
 
 export interface CopywriterAuditMeta {
   conversationId?: string;
@@ -93,31 +175,61 @@ const COPYWRITER_REVISION_ADDENDUM = `
 - 【只描述 1 套】方案，小标题可用 ### 方案一（已微调）。
 - 在 bullet 中点出【变更项】，其余单品简要带过。
 - 收尾用「还要再调哪里吗？」，禁止「喜欢哪套？告诉我帮你微调～」。
+
+【无换品微调 — 仅当收到「单品未变」标记时生效，覆盖上方规则】
+- 【禁止】使用「微调」「已调整」「换了 XX」「做了一点改动」等暗示替换单品的词。
+- 开场改为诚实告知，例如「好消息！原方案其实已经很适合这个[天气/场合]了，我来帮你拆解一下原因～」
+- 重点解释每件单品为何适合该天气或场合（面料透气性、防风防雨功能、颜色对气色的影响等），而非描述"变更"。
+- 收尾用「你还有其他想调整的地方吗？」。
+`;
+
+const COPYWRITER_ADVICE_CONTINUATION_ADDENDUM = `
+【建议延续模式 — 当前穿搭是对刚才风格建议的衣橱实践】
+- 开场【必须】自然衔接刚才的建议话题，语气像「好！把刚才聊的XX公式在你的衣橱里试一下～」。
+- 【禁止】使用「Hi！今天给你准备了」「为您定制了」等与上下文断开的通用开场。
+- 可以在描述单品时点出它如何体现刚才建议的色彩/风格原则（如「这件奶油色针织，就是同色系叠搭的核心」）。
+- 收尾可邀请用户告诉你喜欢哪套，或者想进一步调整哪里。
 `;
 
 function buildCopywriterPrompt(
   stylistResult: StylistResult,
   personalStyle: string,
-  intent?: GatekeeperIntent
+  intent?: GatekeeperIntent,
+  revisionNoItemChange?: boolean
 ): { prompt: string; systemInstruction: string } {
   const isRevision = intent?.request_type === 'feedback_revision';
+  const specialRequests = intent?.special_requests?.trim() ?? '';
+
+  // 建议延续：special_requests 里有明确的风格/色彩主题，说明这套方案是从建议对话衍生的
+  const isAdviceContinuation =
+    !isRevision &&
+    specialRequests.length > 0 &&
+    /公式|建议|方法|色彩|配色|风格|大地|同色|高级感|美拉德|中性色/.test(specialRequests);
+
   const revisionNote = isRevision
-    ? `\n【微调上下文】\n- 目标方案: ${outfitIdToLabel(intent?.selected_outfit_id)}\n- 修改要求: ${intent?.special_requests || '无'}\n`
+    ? `\n【微调上下文】\n- 目标方案: ${outfitIdToLabel(intent?.selected_outfit_id)}\n- 修改要求: ${specialRequests || '无'}\n${revisionNoItemChange ? '- 【单品未变】本次调整未替换任何单品，请遵守「无换品微调」规则\n' : ''}`
+    : '';
+
+  const adviceContinuationNote = isAdviceContinuation
+    ? `\n【建议延续背景】\n此方案是对用户刚才咨询话题「${specialRequests}」的衣橱实践示范。\n`
     : '';
 
   const prompt = `
 【用户风格定位】
 ${personalStyle || '日常休闲'}
-${revisionNote}
+${revisionNote}${adviceContinuationNote}
 【搭配师给出的结构化方案】
 ${JSON.stringify(stylistResult, null, 2)}
 
 请为以上方案进行温暖、优雅的文案润色。严格遵循占位符注入规则与排版模板，以即时聊天口吻输出，禁止书信落款。直接开始输出你的 Markdown 文本：
 `;
 
-  const systemInstruction = isRevision
-    ? `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_REVISION_ADDENDUM}`
-    : COPYWRITER_SYSTEM_INSTRUCTION;
+  let systemInstruction = COPYWRITER_SYSTEM_INSTRUCTION;
+  if (isRevision) {
+    systemInstruction = `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_REVISION_ADDENDUM}`;
+  } else if (isAdviceContinuation) {
+    systemInstruction = `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_ADVICE_CONTINUATION_ADDENDUM}`;
+  }
 
   return { prompt, systemInstruction };
 }
@@ -135,13 +247,14 @@ export async function callCopywriterAgentStream(
   controller: ReadableStreamDefaultController,
   onData: (text: string) => void,
   auditMeta?: CopywriterAuditMeta,
-  intent?: GatekeeperIntent
+  intent?: GatekeeperIntent,
+  revisionNoItemChange?: boolean
 ): Promise<string> {
   console.log('[COPYWRITER_AGENT] Starting streaming copywriting...');
 
   const tagContext = buildCopywriterTagContext(stylistResult);
   const streamSanitizer = createCopywriterStreamSanitizer(tagContext);
-  const { prompt, systemInstruction } = buildCopywriterPrompt(stylistResult, personalStyle, intent);
+  const { prompt, systemInstruction } = buildCopywriterPrompt(stylistResult, personalStyle, intent, revisionNoItemChange);
 
   const config = {
     systemInstruction,

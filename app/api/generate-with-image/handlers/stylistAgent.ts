@@ -11,7 +11,6 @@ import {
   AnchorItemImageData,
   AnchorSlot,
   GatekeeperIntent,
-  getAnchorItemFromIntent,
   getResolvedAnchorFromIntent,
   isPurchasePairingIntent,
   isWardrobePairingIntent,
@@ -101,12 +100,19 @@ const STYLIST_SYSTEM_INSTRUCTION = `
 1. 衣橱优先 (Wardrobe First)：
    - 你必须【优先】尝试使用用户衣橱 XML 列表 (<relevant_wardrobe_items>) 中的单品。这是最重要的规则。
    - 只有当衣橱单品不足以搭配出完美的方案时，你才可以推荐 1-2 件新品（ID 填 "new_item"），并在 reason 中注明。
-2. 科学搭配 (Scientific Styling)：
+2. 单品适配判断（重要，先筛后搭）：
+   - 衣橱优先【不等于】必须用上每一件召回的单品。XML 中每个 item 带有 similarity（语义相似度 0~1）、subCategory（具体品类）、tags（风格标签），你必须先逐件判断它是否真的适配【本次场合与风格】，再决定是否选用。
+   - 场合/风格冲突：若场合偏正式/商务/通勤，而单品 tags 偏运动休闲（如 sporty、activewear、athletic、streetwear、y2k）或 similarity 明显偏低，视为【不适配】，不要为了凑数硬选。
+   - 品类不符：某槽位召回的单品 subCategory/tags 与目标品类不符（例如想要「包」，但候选全是 Earrings/Necklace/Ring/Choker 等首饰），判定该槽位【衣橱无合适单品】，禁止用首饰冒充包等其它品类。
+   - 不适配槽位的处理（按优先级）：① 同槽位若有更适配候选则改选它；② 否则用 "new_item" 补位，并在 reason 注明「衣橱暂无合适的 XX，建议补充…」；③ 仅当核心槽位（top/bottom/shoes）多数缺失时才酌情减少方案数量，不要轻易拒绝出方案。
+   - similarity 仅作参考权重，最终以场合/风格/品类的语义判断为准；不要机械按分数高低选择。
+3. 科学搭配 (Scientific Styling)：
+   - 【special_requests 优先】：若 special_requests 中有明确的色彩/风格方向（如「高级感大地色系」「同色系叠搭」），必须以此为首要选色原则，而非凭空发挥。
    - 色彩协调学：仅当档案中有肤色分析时结合肤色搭配；无则基于服装色彩与场合搭配。
    - 版型互补学：仅当档案中有身材分析时结合身材版型；无则基于通用版型原则。
    - 场合与天气契合度：严格契合提取的场合和天气温度。
    - 季节协调（重要）：同一套方案内所有单品的 season 须有交集。温暖/夏季/户外场合禁止搭配仅冬季适用的厚外套（如 Puffer Jacket、羽绒）与夏季下装（短裤、骑行裤）同套出现；优先选择 Windbreaker 等轻薄外套。
-3. 多套方案 (Multi-Outfit Support)：
+4. 多套方案 (Multi-Outfit Support)：
    - 默认应为用户提供 1 到 2 套不同的穿搭方案（例如：方案一为裙装，方案二为裤装；或者方案一为通勤风，方案二为休闲风）。
    - 每套方案必须有一个唯一的 id（如 outfit_1、outfit_2），以便后续文案和绘图精准对应。
 
@@ -234,6 +240,116 @@ const WARDROBE_PAIRING_SEARCH_ADDENDUM = `
 - 【禁止】检索与锚定单品相同槽位的衣物。
 - 规则同待购单品搭配：锚定为 dress 时只检索 shoes/outerwear/accessory；top 时检索 bottom+shoes 等。
 `;
+
+export interface StyleAdviceResult {
+  topic: string;
+  points: string[];
+  personal_note?: string;
+  followup?: string;
+}
+
+const styleAdviceSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    topic: {
+      type: Type.STRING,
+      description: '建议主题，从用户 special_requests 或对话中提炼（如：高级感色彩搭配公式）',
+    },
+    points: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: '核心建议要点，3-5 条，每条清晰、可操作',
+    },
+    personal_note: {
+      type: Type.STRING,
+      description: '基于用户档案（肤色/风格偏好）的个性化补充；无法个性化时留空字符串',
+    },
+    followup: {
+      type: Type.STRING,
+      description: '引导进入衣橱搭配的钩子（如：想看这个公式在您衣橱里的效果？）；可留空字符串',
+    },
+  },
+  required: ['topic', 'points', 'personal_note', 'followup'],
+};
+
+const STYLE_ADVICE_SYSTEM_INSTRUCTION = `
+你是一名世界顶级的时尚造型师与穿搭顾问。
+用户正在向你咨询某种风格、色彩或穿搭方法的建议与知识。
+
+你的核心任务：**读懂用户当前的理解水平**，给出深度匹配的建议，无需询问场合或生成搭配方案。
+
+【知识水平判断规则】
+- 仔细阅读对话历史，判断用户对该话题的熟悉程度
+- 用户表现出「不懂/刚接触」的信号：措辞疑惑（"啊？""这是什么？""原来还有这么多？"）、提问很基础（"有哪些颜色？""是什么风格？"）→ 回答侧重**清晰解释基础概念**，语气亲切，不堆砌专业术语
+- 用户表现出「已懂基础/想深入」的信号：明确说「进阶」「深入」「高阶」「怎么搭配更高级」，或已能准确使用专业术语 → 可以给出实操技巧和进阶规则
+- **当不确定时，宁可简单，不要复杂**
+
+可以参考用户的个人档案（肤色、风格偏好）做适当的个性化补充。
+
+输出必须是结构化 JSON，包含：
+- topic：建议主题，语气和难度与用户当前问题层级一致（用户问基础问题 → topic 就是基础解答，禁止自行升格为"进阶指南"）
+- points：3-5 条核心要点，深度与 topic 匹配；如用户明显是初学者，每条先解释概念再举例，避免只列操作步骤
+- personal_note：结合用户肤色/偏好的个性化建议（有档案数据时填写；无则留空字符串）
+- followup：引导用户进入衣橱搭配的自然钩子（可选，留空字符串则不显示）
+`;
+
+/**
+ * 调用 Stylist Agent 生成结构化风格建议（advice 模式，不走 RAG）
+ */
+export async function callStylistAdvice(
+  history: Content[],
+  initialParts: Part[],
+  intent: GatekeeperIntent,
+  profile: UserProfileResult
+): Promise<StyleAdviceResult> {
+  console.log('[STYLIST_AGENT] Generating style advice...');
+
+  const hasVisualProfile = profileHasVisualData(profile);
+  const userMessage = extractUserMessage(initialParts);
+
+  const prompt = `
+【今日用户时尚档案】
+- 风格偏好: ${profile.preferences.join(', ') || '未提供'}
+- 肤色: ${profile.skin_tone || '未分析'}
+- 个人风格: ${profile.personal_style || '未分析'}
+- 可靠外形数据: ${hasVisualProfile ? '有（可做个性化建议）' : '无'}
+
+【用户咨询主题】
+- 原始诉求: ${intent.special_requests || '用户咨询穿搭建议'}
+- 风格偏好: ${intent.style_preference || '未提供'}
+- 场合背景: ${intent.occasion || '未限定'}
+
+【用户当前消息】
+${userMessage || '（请根据历史对话推断咨询主题）'}
+
+请针对用户的咨询主题，给出专业、实用的风格建议。
+`;
+
+  const contents: Content[] = [...history, { role: 'user', parts: [{ text: prompt }] }];
+
+  const response = await withRetryOn429(
+    () =>
+      genAI.models.generateContent({
+        model: AGENT_MODELS.stylist,
+        contents,
+        config: {
+          systemInstruction: STYLE_ADVICE_SYSTEM_INSTRUCTION,
+          temperature: 0.5,
+          responseMimeType: 'application/json',
+          responseSchema: styleAdviceSchema,
+        },
+      }),
+    { label: 'Stylist advice' }
+  );
+
+  const responseText = response.text;
+  if (!responseText) {
+    throw new Error('Empty response from Stylist advice mode');
+  }
+
+  console.log('[STYLIST_AGENT] Advice raw response:', responseText);
+  return JSON.parse(responseText) as StyleAdviceResult;
+}
 
 export interface StylistAgentOptions {
   previousStylistCache?: StylistCacheNode | null;

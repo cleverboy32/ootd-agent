@@ -1,49 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prismadb from '@/server/db';
 import { MessageContentPart } from '@/lib/types';
-import { extractUserInfoFromText } from '@/server/services/analysis-profile'; // 1. Import our new service
 
 type RouteParams = {
   params: Promise<{
     conversationId: string;
   }>;
 };
-
-/**
- * A helper function to trigger the analysis and update the client profile.
- * It runs in the background ("fire and forget").
- * @param text The user's message content.
- * @param conversationId The ID of the current conversation.
- */
-async function triggerAnalysis(text: string, conversationId: string) {
-  try {
-    // Find the conversation to get the clientId
-    const conversation = await prismadb.conversation.findUnique({
-      where: { id: conversationId },
-      select: { clientId: true },
-    });
-
-    if (!conversation) return;
-    const { clientId } = conversation;
-
-    // Call our AI service to extract information
-    const extractedData = await extractUserInfoFromText(text);
-
-    // If the service returned data, update the client's profile
-    if (extractedData) {
-      // We need the full URL for server-side fetch
-      const updateUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/clients/${clientId}`;
-      
-      await fetch(updateUrl, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(extractedData),
-      });
-    }
-  } catch (error) {
-    console.error(`[ANALYSIS_TRIGGER] Failed for conversation ${conversationId}:`, error);
-  }
-}
 
 /**
  * Handles GET requests to fetch all messages for a specific conversation.
@@ -99,7 +62,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
     console.log('接收到的消息', JSON.stringify(content))
 
-    // 2. Create the new message and associate it with the conversation
     const newMessage = await prismadb.message.create({
       data: {
         conversationId: conversationId,
@@ -108,16 +70,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         timestamp: new Date(),
       },
     });
-
-    // 3. If the message is from the user, trigger the analysis in the background
-    const textToAnalyze = content
-      .filter(part => part.type === 'text')
-      .map(part => part.content)
-      .join(';');
-    if (role === 'user' && textToAnalyze) {
-      // We don't await this, so it doesn't block the response.
-      triggerAnalysis(textToAnalyze, conversationId);
-    }
 
     return NextResponse.json(newMessage, { status: 201 });
 

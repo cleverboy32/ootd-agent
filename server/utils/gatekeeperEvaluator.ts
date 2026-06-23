@@ -4,6 +4,7 @@ import {
   isOutfitGeneratingIntent,
   isPurchasePairingAnchorReady,
   isPurchasePairingIntent,
+  isValidRequestType,
   isWardrobePairingAnchorReady,
   isWardrobePairingIntent,
   parseDressingClimate,
@@ -48,16 +49,6 @@ export interface GatekeeperEvalContext {
 }
 
 const MULTIPLE_OUTFITS_IN_CONTEXT = /方案二|第二套|outfit_2|第\s*2\s*套|两套方案|两套穿搭|准备了\s*2\s*套|两套/;
-
-const VALID_REQUEST_TYPES = new Set<OutfitRequestType>([
-  'wardrobe_outfit',
-  'wardrobe_pairing',
-  'purchase_pairing',
-  'feedback_revision',
-  'outfit_selection',
-  'outfit_confirmed',
-  'clarify',
-]);
 
 const SHORT_CIRCUIT_TYPES = new Set<OutfitRequestType>([
   'clarify',
@@ -158,7 +149,7 @@ export function evaluateGatekeeperOutput(
   const hasReply = hasNonEmptyReply(result.gatekeeper_reply);
   const hasFollowupQuestions = hasFollowups(result.followup_questions);
 
-  if (!VALID_REQUEST_TYPES.has(requestType)) {
+  if (!isValidRequestType(requestType)) {
     issues.push({
       code: 'INVALID_REQUEST_TYPE',
       severity: 'error',
@@ -298,6 +289,24 @@ export function evaluateGatekeeperOutput(
     }
     if (result.is_complete) {
       appendDressingClimateWarnings(intent, result.is_complete, issues);
+    }
+  }
+
+  // style_advice：有主题则放行（is_complete=true），由 Stylist 以建议模式回答
+  if (requestType === 'style_advice') {
+    if (hasFollowupQuestions) {
+      issues.push({
+        code: 'STYLE_ADVICE_HAS_FOLLOWUPS',
+        severity: 'error',
+        message: 'style_advice should not use followup_questions; use gatekeeper_reply to ask for clarification',
+      });
+    }
+    if (!result.is_complete && !hasNonEmptyReply(result.gatekeeper_reply)) {
+      issues.push({
+        code: 'STYLE_ADVICE_INCOMPLETE_NO_REPLY',
+        severity: 'warn',
+        message: 'style_advice is incomplete but has no gatekeeper_reply to guide the user',
+      });
     }
   }
 

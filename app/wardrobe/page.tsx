@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { LayoutDashboard, PlusSquare } from 'lucide-react';
+import { LayoutDashboard, PlusSquare, UserCircle } from 'lucide-react';
 import { MainHeader } from './mainHeader';
 import { AddView } from '@/components/wardrobe/add-view';
 import { DisplayView } from '@/components/wardrobe/display-view';
@@ -44,6 +44,13 @@ export default function WardrobePage() {
                 <PlusSquare className="h-4 w-4" />
                 添加衣物
               </button>
+              <Link
+                href="/profile"
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
+              >
+                <UserCircle className="h-4 w-4" />
+                我的档案
+              </Link>
             </nav>
           </div>
         </div>
