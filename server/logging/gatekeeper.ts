@@ -1,7 +1,7 @@
-import { appendFile, mkdir } from 'fs/promises';
-import path from 'path';
-import type { GatekeeperIntent } from '@/app/api/generate-with-image/handlers/intentTypes';
+import type { GatekeeperIntent } from '@/server/agents/intent';
 import type { GatekeeperEvalResult } from '@/server/utils/gatekeeperEvaluator';
+import { auditLogPath } from './paths';
+import { appendJsonlEntry } from './jsonl';
 
 export interface GatekeeperAuditLogEntry {
   timestamp: string;
@@ -18,20 +18,12 @@ export interface GatekeeperAuditLogEntry {
   l1: GatekeeperEvalResult;
 }
 
-const AUDIT_LOG_PATH = path.join(process.cwd(), 'logs', 'gatekeeper-audit.jsonl');
+const AUDIT_LOG_PATH = auditLogPath('gatekeeper-audit.jsonl');
 
 export async function logGatekeeperAudit(entry: GatekeeperAuditLogEntry): Promise<void> {
-  const line = JSON.stringify(entry);
-
   console.log(
     `[GATEKEEPER_AUDIT] passed=${entry.l1.passed} score=${entry.l1.score} type=${entry.requestType} complete=${entry.is_complete} issues=${entry.l1.issues.length}`,
     entry.l1.issues.length > 0 ? entry.l1.issues : ''
   );
-
-  try {
-    await mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    await appendFile(AUDIT_LOG_PATH, `${line}\n`, 'utf8');
-  } catch (error) {
-    console.error('[GATEKEEPER_AUDIT] Failed to persist audit log:', error);
-  }
+  await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'GATEKEEPER_AUDIT');
 }

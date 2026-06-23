@@ -3,65 +3,29 @@ import { ClothingItem, Prisma } from '@prisma/client';
 import prismadb from '@/server/db';
 import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
 
-import { callGatekeeperAgent, GatekeeperContext, GatekeeperResult } from './handlers/gatekeeperAgent';
-import { callUserProfileAgent, buildUserProfileFallback, UserProfileResult, shouldSkipProfileAgentUpdate, loadUserProfileFromDb } from './handlers/userProfileAgent';
-import { callStylistAgent, callStylistAdvice, StylistOutfit, StylistResult } from './handlers/stylistAgent';
-import { callCopywriterAgentStream, callCopywriterAdviceStream, CopywriterAuditMeta } from './handlers/copywriterAgent';
-import { callVisualDirectorAgent } from '@/server/services/visualDirectorService';
-import { AnchorItemImageData, GatekeeperIntent } from './handlers/intentTypes';
-import { buildContext } from './handlers/buildContext';
+import { callGatekeeperAgent, GatekeeperContext, GatekeeperResult } from '@/server/agents/gatekeeper';
+import { callUserProfileAgent, buildUserProfileFallback, UserProfileResult, shouldSkipProfileAgentUpdate, loadUserProfileFromDb } from '@/server/agents/user-profile';
+import { callStylistAgent, callStylistAdvice, StylistResult } from '@/server/agents/stylist';
+import { callCopywriterAgentStream, callCopywriterAdviceStream, CopywriterAuditMeta } from '@/server/agents/copywriter';
+import { GatekeeperIntent } from '@/server/agents/intent';
+import { buildContext } from './context/buildContext';
 import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
 import { mapWithConcurrency } from '@/server/utils/concurrency';
 import {
   applyImageResultsToText,
-  buildImageStates,
   buildPersistedMessageContent,
   extractStylistCache,
-  extractImageStates,
-  extractTextContent,
-  patchMessageImageResult,
-  WardrobeCandidatesNode,
   StylistCacheNode,
+  WardrobeCandidatesNode,
 } from '@/server/utils/messageContent';
 
-async function runOutfitImageGeneration(
-  outfit: StylistOutfit,
-  wardrobeUrls: string[],
-  anchorImageData: AnchorItemImageData | undefined,
-  controller: ReadableStreamDefaultController,
-  imageMap: Map<string, string>,
-  failedImageIds: Set<string>,
-  messageId?: string,
-  trigger: 'initial' | 'user_retry' = 'initial'
-): Promise<void> {
-  const imageId = outfit.id;
+import { runOutfitImageGeneration, extractWardrobeUrls } from './imageRetry';
+import { getPreviousStylistCache, getProfileLocation, persistMessageContent } from './helpers';
 
-  try {
-    await callVisualDirectorAgent(
-      controller,
-      outfit,
-      wardrobeUrls,
-      anchorImageData,
-      imageId,
-      (id, url) => {
-        imageMap.set(id, url);
-        console.log(`[ORCHESTRATOR] 效果图生成成功: ${id} -> ${url}`);
-      },
-      { trigger, messageId }
-    );
-  } catch (e) {
-    failedImageIds.add(outfit.id);
-    console.warn(`[ORCHESTRATOR] 方案 ${outfit.id} 效果图生成失败 (已优雅降级):`, e);
-    sendEvent(controller, 'image_generation_failed', {
-      id: outfit.id,
-      message: e instanceof Error ? e.message : '效果图生成失败',
-      alt: outfit.overall_concept,
-    });
-  }
-}
+export { createImageRetryStream } from './imageRetry';
 
 /**
- * 公共执行链：并行启动文案流与视觉导演画图流，并在内部统一 Await 和进行致命错误判定
+ * 公共执行链：并行启动文案流与视觉导演画图流
  */
 async function executeParallelAgents(
   stylistResult: StylistResult,
@@ -87,9 +51,7 @@ async function executeParallelAgents(
     revisionNoItemChange
   );
 
-  const wardrobeUrls = Array.from(ragCache.values())
-    .map((item) => item.imageUrl)
-    .filter((url): url is string => !!url);
+  const wardrobeUrls = extractWardrobeUrls(ragCache);
 
   const imageTask = mapWithConcurrency(
     stylistResult.outfits,
@@ -111,153 +73,6 @@ async function executeParallelAgents(
 
   if (copywriterRes.status === 'rejected') {
     throw new Error(`CopywriterFailed: ${copywriterRes.reason?.message || '文案生成失败'}`);
-  }
-}
-
-async function persistMessageContent(
-  messageId: string,
-  options: {
-    text: string;
-    stylistCache: StylistCacheNode | null;
-    imageMap: Map<string, string>;
-    failedImageIds: Set<string>;
-    outfitIds: string[];
-    status: 'completed' | 'failed' | 'generating';
-    wardrobeCandidates?: WardrobeCandidatesNode | null;
-  }
-): Promise<void> {
-  const imageStates = buildImageStates(options.outfitIds, options.imageMap, options.failedImageIds);
-  const content = buildPersistedMessageContent({
-    text: options.text,
-    stylistCache: options.stylistCache,
-    imageStates,
-    wardrobeCandidates: options.wardrobeCandidates,
-  });
-
-  await prismadb.message.update({
-    where: { id: messageId },
-    data: {
-      content: content as Prisma.InputJsonValue,
-      status: options.status,
-    },
-  });
-}
-
-/** 单张效果图用户重试：仅重跑 VisualDirector，复用 stylist_cache */
-export function createImageRetryStream(
-  conversationId: string,
-  messageId: string,
-  retryOutfitId: string
-): ReadableStream {
-  return new ReadableStream({
-    async start(controller) {
-      console.log(`[ORCHESTRATOR] --- 单图重试: message=${messageId} outfit=${retryOutfitId} ---`);
-
-      try {
-        const message = await prismadb.message.findUnique({ where: { id: messageId } });
-        if (!message) {
-          throw new Error('Message not found');
-        }
-
-        const stylistCache = extractStylistCache(message.content);
-        if (!stylistCache) {
-          throw new Error('No stylist cache found for this message. Please retry the full message.');
-        }
-
-        const outfit = stylistCache.stylist_result.outfits.find((o) => o.id === retryOutfitId);
-        if (!outfit) {
-          throw new Error(`Outfit ${retryOutfitId} not found in stylist cache`);
-        }
-
-        const ragCache = new Map<string, ClothingItem>();
-        for (const item of stylistCache.wardrobe_items ?? []) {
-          ragCache.set(item.id, item);
-        }
-
-        const wardrobeUrls = Array.from(ragCache.values())
-          .map((item) => item.imageUrl)
-          .filter((url): url is string => !!url);
-
-        const imageMap = new Map<string, string>();
-        const failedImageIds = new Set<string>();
-
-        await runOutfitImageGeneration(
-          outfit,
-          wardrobeUrls,
-          stylistCache.stylist_result.anchor_item_image_data,
-          controller,
-          imageMap,
-          failedImageIds,
-          messageId,
-          'user_retry'
-        );
-
-        if (imageMap.has(retryOutfitId)) {
-          const url = imageMap.get(retryOutfitId)!;
-          const updatedContent = patchMessageImageResult(message.content, retryOutfitId, url);
-          await prismadb.message.update({
-            where: { id: messageId },
-            data: { content: updatedContent as Prisma.InputJsonValue },
-          });
-        } else {
-          const existingStates = extractImageStates(message.content);
-          await prismadb.message.update({
-            where: { id: messageId },
-            data: {
-              content: buildPersistedMessageContent({
-                text: extractTextContent(message.content),
-                stylistCache,
-                imageStates: { ...existingStates, [retryOutfitId]: 'failed' },
-              }) as Prisma.InputJsonValue,
-            },
-          });
-        }
-
-        sendEvent(controller, 'stream_end', { message: '图片重试完成' });
-        controller.close();
-      } catch (error) {
-        const err = error as Error;
-        console.error('[ORCHESTRATOR] 单图重试失败:', err);
-        handleStreamError(controller, [], err, 'ImageRetry');
-      }
-    },
-  });
-}
-
-async function getPreviousStylistCache(
-  conversationId: string,
-  excludeMessageId?: string
-): Promise<StylistCacheNode | null> {
-  const messages = await prismadb.message.findMany({
-    where: { conversationId, role: 'assistant' },
-    orderBy: { createdAt: 'desc' },
-    take: 12,
-    select: { id: true, content: true },
-  });
-
-  for (const msg of messages) {
-    if (excludeMessageId && msg.id === excludeMessageId) continue;
-    const cache = extractStylistCache(msg.content);
-    if (cache) return cache;
-  }
-  return null;
-}
-
-async function getProfileLocation(clientId?: string): Promise<string | undefined> {
-  if (!clientId) return undefined;
-
-  try {
-    const profile = await prismadb.clientProfile.findUnique({
-      where: { id: clientId },
-      select: { profileData: true },
-    });
-    if (!profile?.profileData || typeof profile.profileData !== 'object') return undefined;
-
-    const location = (profile.profileData as Record<string, unknown>).location;
-    return typeof location === 'string' && location.trim() ? location.trim() : undefined;
-  } catch (error) {
-    console.warn('[ORCHESTRATOR] Failed to read profile location:', error);
-    return undefined;
   }
 }
 
@@ -317,9 +132,7 @@ export function createMultiAgentStream(
             controller,
             imageMap,
             failedImageIds,
-            (text) => {
-              accumulatedContent += text;
-            },
+            (text) => { accumulatedContent += text; },
             { conversationId, messageId: finalMessageId }
           );
         } else {
@@ -352,6 +165,7 @@ export function createMultiAgentStream(
             { conversationId, messageId: finalMessageId }
           );
 
+          // --- style_advice 分支：直接给建议，不进入搭配流程 ---
           if (gatekeeperResult.extracted_intent.request_type === 'style_advice') {
             activeIntent = gatekeeperResult.extracted_intent;
             const adviceProfile = clientId
@@ -367,14 +181,13 @@ export function createMultiAgentStream(
               adviceResult,
               adviceProfile.personal_style,
               controller,
-              (text) => {
-                accumulatedContent += text;
-              },
+              (text) => { accumulatedContent += text; },
               { conversationId, messageId: finalMessageId }
             );
             return;
           }
 
+          // --- Gatekeeper 未放行：直接回复用户 ---
           if (!gatekeeperResult.is_complete) {
             const questionsText =
               gatekeeperResult.gatekeeper_reply?.trim() ||
@@ -395,6 +208,7 @@ export function createMultiAgentStream(
             return;
           }
 
+          // --- 主搭配流程 ---
           activeIntent = gatekeeperResult.extracted_intent;
           const previousStylistCache =
             conversationId && activeIntent.request_type === 'feedback_revision'
@@ -419,12 +233,12 @@ export function createMultiAgentStream(
             }
           }
 
-          let userProfileResult: UserProfileResult;
           const currentUserText = initialParts
             .filter((p): p is { text: string } => 'text' in p && Boolean(p.text?.trim()))
             .map((p) => p.text)
             .join('\n');
 
+          let userProfileResult: UserProfileResult;
           if (shouldSkipProfileAgentUpdate(activeIntent, currentUserText) && clientId) {
             console.log('[ORCHESTRATOR] 跳过 Profile Agent — 本轮为操作/确认类消息');
             userProfileResult = await loadUserProfileFromDb(clientId);
@@ -508,9 +322,7 @@ export function createMultiAgentStream(
             controller,
             imageMap,
             failedImageIds,
-            (text) => {
-              accumulatedContent += text;
-            },
+            (text) => { accumulatedContent += text; },
             { conversationId, messageId: finalMessageId },
             activeIntent,
             revisionNoItemChange

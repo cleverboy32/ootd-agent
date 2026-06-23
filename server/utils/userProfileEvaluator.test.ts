@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import type { UserProfileResult } from '@/server/agents/user-profile';
 import { evaluateUserProfileOutput } from './userProfileEvaluator';
 
 const baseProfile: UserProfileResult = {

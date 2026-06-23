@@ -1,4 +1,4 @@
-import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import type { UserProfileResult } from '@/server/agents/user-profile';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
 
 export const PROFILE_METADATA_KEYS = [

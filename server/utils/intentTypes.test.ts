@@ -9,7 +9,7 @@ import {
   finalizeGatekeeperResult,
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
-} from '@/app/api/generate-with-image/handlers/intentTypes';
+} from '@/server/agents/intent';
 import type { Content } from '@google/genai';
 
 describe('inferAnchorSlotFromSummary', () => {

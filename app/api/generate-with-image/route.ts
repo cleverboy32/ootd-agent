@@ -1,6 +1,6 @@
 import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
-import { createImageRetryStream, createMultiAgentStream } from "./multi-agent-orchestrator";
+import { createImageRetryStream, createMultiAgentStream } from "./orchestrator";
 import { urlToGenerativePart } from '@/server/utils/image';
 import { resolveClientIp } from '@/server/utils/resolveClientIp';
 

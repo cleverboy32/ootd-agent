@@ -1,4 +1,4 @@
-import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import type { UserProfileResult } from '@/server/agents/user-profile';
 
 /** 外形数据须由用户档案页上传自拍后标记；对话流程不得写入或保留未验证外形 */
 export function isVisualProfileVerified(dbProfile: Record<string, unknown>): boolean {

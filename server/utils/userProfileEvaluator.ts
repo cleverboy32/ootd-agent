@@ -1,6 +1,6 @@
-import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import type { UserProfileResult } from '@/server/agents/user-profile';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
-import { extractConfirmedWardrobeId } from '@/app/api/generate-with-image/handlers/intentTypes';
+import { extractConfirmedWardrobeId } from '@/server/agents/intent';
 
 export type UserProfileEvalSeverity = 'error' | 'warn';
 

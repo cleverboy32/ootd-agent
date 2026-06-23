@@ -1,0 +1,184 @@
+import { Content, Part } from '@google/genai';
+import { genAI } from '@/server/services/ai';
+import { AGENT_MODELS } from '@/server/config/models';
+import { withRetryOn429 } from '@/server/utils/retryOn429';
+import {
+  GatekeeperIntent,
+  enrichIntentFromContext,
+  enrichIntentWeather,
+  extractTextFromParts,
+  extractUserTextFromHistory,
+  normalizeGatekeeperIntent,
+  finalizeGatekeeperResult,
+} from '../intent';
+import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
+import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
+import { resolveWardrobeAnchor } from './wardrobeResolver';
+import type { WardrobeAnchorCandidate } from '../intent';
+import { gatekeeperSchema, WeatherLookup } from './schema';
+import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
+
+export type { WeatherLookup } from './schema';
+
+export interface GatekeeperContext {
+  clientIp?: string;
+  profileLocation?: string;
+  clientId?: string;
+}
+
+export interface GatekeeperAuditMeta {
+  conversationId?: string;
+  messageId?: string;
+}
+
+export interface GatekeeperResult {
+  is_complete: boolean;
+  extracted_intent: GatekeeperIntent;
+  followup_questions: string[];
+  /** outfit_selection / outfit_confirmed / clarify 时由 Gatekeeper 直接回复用户的话术 */
+  gatekeeper_reply?: string;
+  /** Gatekeeper 决策本轮是否查询天气及目标城市（仅服务端使用） */
+  weather_lookup?: WeatherLookup;
+  /** wardrobe_pairing 检索到多件相似单品时的候选列表 */
+  wardrobe_candidates?: WardrobeAnchorCandidate[];
+  /** 是否建议在回复中提示用户告知城市以获取天气 */
+  suggestCityForWeather?: boolean;
+}
+
+function buildContextText(history: Content[], currentInput: Part[]): string {
+  return `${extractUserTextFromHistory(history)}\n${extractTextFromParts(currentInput)}`.trim();
+}
+
+async function finalizeGatekeeperIntent(
+  intent: GatekeeperIntent,
+  history: Content[],
+  currentInput: Part[],
+  ctx: GatekeeperContext,
+  weatherLookup?: WeatherLookup
+): Promise<{ intent: GatekeeperIntent; suggestCityForWeather: boolean }> {
+  const contextText = buildContextText(history, currentInput);
+  let enriched = enrichIntentFromContext(intent, history, currentInput);
+
+  // 天气由 Gatekeeper LLM 决策（weather_lookup.needed）；服务端在此串行查询补全
+  if (weatherLookup?.needed && !enriched.weather.trim()) {
+    if (weatherLookup.city?.trim()) {
+      enriched = { ...enriched, city: weatherLookup.city.trim() };
+    }
+    enriched = await enrichIntentWeather(enriched, {
+      clientIp: ctx.clientIp,
+      profileLocation: ctx.profileLocation,
+      contextText,
+    });
+  }
+
+  const suggestCityForWeather = Boolean(weatherLookup?.needed) && !enriched.weather.trim();
+  return { intent: enriched, suggestCityForWeather };
+}
+
+/**
+ * 调用 Gatekeeper Agent 评估用户请求。
+ * 单次 LLM 调用即完成意图判定与天气决策；天气在 LLM 返回后按 weather_lookup 串行查询，不参与放行。
+ */
+export async function callGatekeeperAgent(
+  history: Content[],
+  currentInput: Part[],
+  ctx: GatekeeperContext = {},
+  auditMeta?: GatekeeperAuditMeta
+): Promise<GatekeeperResult> {
+  console.log('[GATEKEEPER_AGENT] Evaluating user request...');
+
+  const contents: Content[] = [...history, { role: 'user', parts: currentInput }];
+
+  try {
+    const response = await withRetryOn429(
+      () =>
+        genAI.models.generateContent({
+          model: AGENT_MODELS.gatekeeper,
+          contents,
+          config: {
+            systemInstruction: GATEKEEPER_SYSTEM_INSTRUCTION,
+            temperature: 0.0,
+            responseMimeType: 'application/json',
+            responseSchema: gatekeeperSchema,
+          },
+        }),
+      { label: 'Gatekeeper', maxRetries: 4 }
+    );
+
+    const responseText = response.text;
+    if (!responseText) {
+      throw new Error('Empty response from Gatekeeper Agent');
+    }
+
+    console.log('[GATEKEEPER_AGENT] Raw response:', responseText);
+
+    const parsed = JSON.parse(responseText) as GatekeeperResult;
+    const { intent, suggestCityForWeather } = await finalizeGatekeeperIntent(
+      normalizeGatekeeperIntent(parsed.extracted_intent),
+      history,
+      currentInput,
+      ctx,
+      parsed.weather_lookup
+    );
+
+    let wardrobeResolver;
+    if (
+      intent.request_type === 'wardrobe_pairing' &&
+      ctx.clientId &&
+      intent.anchor_item_summary.trim() &&
+      !intent.anchor_wardrobe_id?.trim()
+    ) {
+      wardrobeResolver = await resolveWardrobeAnchor(
+        ctx.clientId,
+        intent.anchor_item_summary,
+        intent.anchor_slot || undefined
+      );
+    }
+
+    const result = finalizeGatekeeperResult({
+      extracted_intent: intent,
+      followup_questions: parsed.followup_questions,
+      gatekeeper_reply: parsed.gatekeeper_reply,
+      suggestCityForWeather,
+      wardrobeResolver,
+      currentMessageText: extractTextFromParts(currentInput),
+      history,
+      modelIsComplete: parsed.is_complete,
+    });
+
+    const contextText = buildContextText(history, currentInput);
+    const l1 = evaluateGatekeeperOutput(
+      {
+        ...result,
+        wardrobe_candidates: result.wardrobe_candidates,
+      },
+      {
+        contextText,
+        currentMessageText: extractTextFromParts(currentInput),
+        weatherLookup: parsed.weather_lookup,
+      }
+    );
+    void logGatekeeperAudit({
+      timestamp: new Date().toISOString(),
+      conversationId: auditMeta?.conversationId,
+      messageId: auditMeta?.messageId,
+      contextTextLength: contextText.length,
+      requestType: result.extracted_intent.request_type,
+      is_complete: result.is_complete,
+      gatekeeper_reply: result.gatekeeper_reply,
+      followup_questions: result.followup_questions,
+      extracted_intent: result.extracted_intent,
+      weather_lookup: parsed.weather_lookup,
+      wardrobe_candidates: result.wardrobe_candidates,
+      l1,
+    });
+
+    return {
+      ...result,
+      weather_lookup: parsed.weather_lookup,
+    };
+  } catch (error) {
+    console.error('[GATEKEEPER_AGENT] Error calling Gatekeeper Agent:', error);
+    throw error;
+  }
+}

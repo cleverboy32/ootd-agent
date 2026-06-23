@@ -5,7 +5,7 @@ import {
   FinalizeGatekeeperInput,
   OutfitRequestType,
   WardrobeResolverResult,
-} from './intentTypeDefs';
+} from './typeDefs';
 import {
   normalizeGatekeeperIntent,
   outfitIdToLabel,
@@ -14,7 +14,7 @@ import {
   historyShowsMultipleOutfits,
   isPurchasePairingAnchorReady,
   isWardrobePairingAnchorReady,
-} from './intentUtils';
+} from './utils';
 
 // ─── Reply builders ────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
-import { appendFile, mkdir } from 'fs/promises';
-import path from 'path';
-import type { WardrobeSearchResult } from './wardrobeService';
+import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
+import { auditLogPath } from './paths';
+import { appendJsonlEntry } from './jsonl';
 
 export interface RagSearchIntentLog {
   weather: string;
@@ -60,7 +60,7 @@ export interface RagSearchLogEntry {
   };
 }
 
-const RAG_LOG_PATH = path.join(process.cwd(), 'logs', 'rag-search.jsonl');
+const RAG_LOG_PATH = auditLogPath('rag-search.jsonl');
 
 function toResultItem(item: WardrobeSearchResult): RagSearchResultItem {
   return {
@@ -78,15 +78,8 @@ function toResultItem(item: WardrobeSearchResult): RagSearchResultItem {
 
 export async function logRagSearch(entry: RagSearchLogEntry): Promise<void> {
   const line = JSON.stringify(entry);
-
   console.log('[RAG_AUDIT_LOG]', line);
-
-  try {
-    await mkdir(path.dirname(RAG_LOG_PATH), { recursive: true });
-    await appendFile(RAG_LOG_PATH, `${line}\n`, 'utf8');
-  } catch (error) {
-    console.error('[RAG_AUDIT_LOG] Failed to persist RAG search log:', error);
-  }
+  await appendJsonlEntry(RAG_LOG_PATH, entry, 'RAG_AUDIT_LOG');
 }
 
 export function buildRagSearchLogEntry(params: {

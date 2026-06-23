@@ -1,18 +1,7 @@
-import { genAI } from '@/server/services/ai';
-import { AGENT_MODELS } from '@/server/config/models';
-import { withRetryOn429 } from '@/server/utils/retryOn429';
-import { sendEvent } from '@/server/utils/stream-helpers';
-import {
-  buildCopywriterTagContext,
-  createCopywriterStreamSanitizer,
-  sanitizeCopywriterTags,
-} from '@/server/utils/copywriterTagSanitizer';
-import { evaluateCopywriterOutput } from '@/server/utils/copywriterEvaluator';
-import { logCopywriterAudit } from '@/server/services/copywriterAuditLogger';
-import { StylistResult, StyleAdviceResult } from './stylistAgent';
-import { GatekeeperIntent, outfitIdToLabel } from './intentTypes';
+import { GatekeeperIntent, outfitIdToLabel } from '../intent';
+import type { StylistResult } from '../stylist/agent';
 
-const COPYWRITER_ADVICE_SYSTEM_INSTRUCTION = `
+export const COPYWRITER_ADVICE_SYSTEM_INSTRUCTION = `
 你是一个情商极高、充满时尚感和亲和力的时尚博主 (Copywriter Agent)。
 你的任务是把造型师给出的结构化穿搭建议，包装成温暖、有温度、排版优雅的聊天话术。
 
@@ -32,83 +21,16 @@ const COPYWRITER_ADVICE_SYSTEM_INSTRUCTION = `
 - 直接输出 Markdown 文本，不要输出 JSON。
 `;
 
-/**
- * 调用 Copywriter Agent（建议模式）：将 StyleAdviceResult 包装成对话文本流式输出
- */
-export async function callCopywriterAdviceStream(
-  advice: StyleAdviceResult,
-  personalStyle: string,
-  controller: ReadableStreamDefaultController,
-  onData: (text: string) => void,
-  _auditMeta?: CopywriterAuditMeta
-): Promise<void> {
-  console.log('[COPYWRITER_AGENT] Starting advice stream...');
-
-  const pointsList = advice.points.map((p, i) => `${i + 1}. ${p}`).join('\n');
-  const personalNoteBlock = advice.personal_note?.trim()
-    ? `\n个性化补充: ${advice.personal_note}`
-    : '';
-  const followupBlock = advice.followup?.trim() ? `\n引导钩子: ${advice.followup}` : '';
-
-  const prompt = `
-【用户风格定位】
-${personalStyle || '日常休闲'}
-
-【造型师给出的结构化建议】
-- 主题: ${advice.topic}
-- 核心要点:
-${pointsList}${personalNoteBlock}${followupBlock}
-
-请将以上建议包装成温暖、口语化的聊天话术。使用 Markdown 排版（### 小标题 + bullet 要点）。直接开始输出你的 Markdown 文本：
-`;
-
-  try {
-    const responseStream = await withRetryOn429(
-      () =>
-        genAI.models.generateContentStream({
-          model: AGENT_MODELS.copywriter,
-          contents: prompt,
-          config: {
-            systemInstruction: COPYWRITER_ADVICE_SYSTEM_INSTRUCTION,
-            temperature: 0.7,
-          },
-        }),
-      { label: 'Copywriter advice' }
-    );
-
-    let fullText = '';
-
-    for await (const chunk of responseStream) {
-      const text = chunk.text;
-      if (text) {
-        fullText += text;
-        sendEvent(controller, 'text_chunk', { text });
-      }
-    }
-
-    console.log('[COPYWRITER_AGENT] Advice stream completed. Length:', fullText.length);
-    onData(fullText);
-  } catch (error) {
-    console.error('[COPYWRITER_AGENT] Error during advice stream:', error);
-    throw error;
-  }
-}
-
-export interface CopywriterAuditMeta {
-  conversationId?: string;
-  messageId?: string;
-}
-
-const COPYWRITER_SYSTEM_INSTRUCTION = `
+export const COPYWRITER_SYSTEM_INSTRUCTION = `
 你是一个情商极高、充满时尚感和亲和力的时尚博主与明星导购 (Copywriter Agent)。
 你的任务是把设计师（Stylist Agent）给出的 1 到 2 套硬核、枯燥的结构化穿搭方案，包装成温暖、有温度、排版优雅的聊天话术。
 
 【核心文案包装规则】
 1. 语气定制 (Tone Customization)：
    - 仔细阅读传入的用户个人风格定位（personal_style）。
-   - 如果偏向“甜美/活泼”：多用“亲爱的”、“小仙女”、Emoji（✨, 💕, 🎀），语气活泼、温暖。
-   - 如果偏向“知性/优雅/专业”：语气优雅、从容、专业，多用“您”，排版极简、大气。
-   - 如果偏向“幽默/松弛”：语气风趣、像贴心闺蜜，多用网络热梗，排版轻松。
+   - 如果偏向"甜美/活泼"：多用"亲爱的"、"小仙女"、Emoji（✨, 💕, 🎀），语气活泼、温暖。
+   - 如果偏向"知性/优雅/专业"：语气优雅、从容、专业，多用"您"，排版极简、大气。
+   - 如果偏向"幽默/松弛"：语气风趣、像贴心闺蜜，多用网络热梗，排版轻松。
    - 默认语气：亲切、专业、充满时尚建设性。
 
 2. 严格的占位符注入 (Strict Placeholder Injection) - 你的唯一 KPI，绝对不能出错：
@@ -167,7 +89,7 @@ const COPYWRITER_SYSTEM_INSTRUCTION = `
    - 不要输出任何 JSON 格式，直接输出纯 Markdown 文本。
 `;
 
-const COPYWRITER_REVISION_ADDENDUM = `
+export const COPYWRITER_REVISION_ADDENDUM = `
 【反馈微调模式 — 当前为 revision，必须遵守】
 - 这是用户对【已有方案】的修改，不是全新推荐。
 - 【禁止】使用「下午好呀」「为您定制了」「我为你准备了 N 套」等全新推荐开场。
@@ -183,7 +105,7 @@ const COPYWRITER_REVISION_ADDENDUM = `
 - 收尾用「你还有其他想调整的地方吗？」。
 `;
 
-const COPYWRITER_ADVICE_CONTINUATION_ADDENDUM = `
+export const COPYWRITER_ADVICE_CONTINUATION_ADDENDUM = `
 【建议延续模式 — 当前穿搭是对刚才风格建议的衣橱实践】
 - 开场【必须】自然衔接刚才的建议话题，语气像「好！把刚才聊的XX公式在你的衣橱里试一下～」。
 - 【禁止】使用「Hi！今天给你准备了」「为您定制了」等与上下文断开的通用开场。
@@ -191,7 +113,7 @@ const COPYWRITER_ADVICE_CONTINUATION_ADDENDUM = `
 - 收尾可邀请用户告诉你喜欢哪套，或者想进一步调整哪里。
 `;
 
-function buildCopywriterPrompt(
+export function buildCopywriterPrompt(
   stylistResult: StylistResult,
   personalStyle: string,
   intent?: GatekeeperIntent,
@@ -232,86 +154,4 @@ ${JSON.stringify(stylistResult, null, 2)}
   }
 
   return { prompt, systemInstruction };
-}
-
-/**
- * 调用 Copywriter Agent 进行流式文案润色
- * @param stylistResult 搭配师输出的结构化方案
- * @param personalStyle 用户的个人风格/性格偏好
- * @param controller ReadableStreamDefaultController 用于流式推送
- * @param onData 收集完整文本的回调函数
- */
-export async function callCopywriterAgentStream(
-  stylistResult: StylistResult,
-  personalStyle: string,
-  controller: ReadableStreamDefaultController,
-  onData: (text: string) => void,
-  auditMeta?: CopywriterAuditMeta,
-  intent?: GatekeeperIntent,
-  revisionNoItemChange?: boolean
-): Promise<string> {
-  console.log('[COPYWRITER_AGENT] Starting streaming copywriting...');
-
-  const tagContext = buildCopywriterTagContext(stylistResult);
-  const streamSanitizer = createCopywriterStreamSanitizer(tagContext);
-  const { prompt, systemInstruction } = buildCopywriterPrompt(stylistResult, personalStyle, intent, revisionNoItemChange);
-
-  const config = {
-    systemInstruction,
-    temperature: 0.7,
-  };
-
-  try {
-    const responseStream = await withRetryOn429(
-      () =>
-        genAI.models.generateContentStream({
-          model: AGENT_MODELS.copywriter,
-          contents: prompt,
-          config,
-        }),
-      { label: 'Copywriter' }
-    );
-
-    let fullText = '';
-
-    for await (const chunk of responseStream) {
-      const text = chunk.text;
-      if (text) {
-        const sanitized = streamSanitizer.process(text);
-        if (sanitized) {
-          fullText += sanitized;
-          sendEvent(controller, 'text_chunk', { text: sanitized });
-        }
-      }
-    }
-
-    const tail = streamSanitizer.flush();
-    if (tail) {
-      fullText += tail;
-      sendEvent(controller, 'text_chunk', { text: tail });
-    }
-
-    fullText = sanitizeCopywriterTags(fullText, tagContext);
-
-    const l1 = evaluateCopywriterOutput(fullText, stylistResult);
-    void logCopywriterAudit({
-      timestamp: new Date().toISOString(),
-      conversationId: auditMeta?.conversationId,
-      messageId: auditMeta?.messageId,
-      personalStyle,
-      outfitCount: stylistResult.outfits.length,
-      copywriterTextLength: fullText.length,
-      l1,
-      copywriterText: fullText,
-    });
-
-    console.log('[COPYWRITER_AGENT] Streaming completed. Total length:', fullText.length);
-
-    onData(fullText);
-
-    return fullText;
-  } catch (error) {
-    console.error('[COPYWRITER_AGENT] Error during copywriting stream:', error);
-    throw error;
-  }
 }

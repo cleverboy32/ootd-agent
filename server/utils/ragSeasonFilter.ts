@@ -1,5 +1,5 @@
-import type { DressingClimate, GatekeeperIntent } from '@/app/api/generate-with-image/handlers/intentTypes';
-import { parseDressingClimate } from '@/app/api/generate-with-image/handlers/intentTypes';
+import type { DressingClimate, GatekeeperIntent } from '@/server/agents/intent';
+import { parseDressingClimate } from '@/server/agents/intent';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 

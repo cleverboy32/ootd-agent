@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import prismadb from '@/server/db';
-import { analyzeVisualProfileFromImage } from '@/server/services/visualProfileAgent';
-import { logVisualProfileAudit } from '@/server/services/visualProfileAuditLogger';
+import { analyzeVisualProfileFromImage } from '@/server/agents/visual/profile';
+import { logVisualProfileAudit } from '@/server/logging/visualProfile';
 import {
   isClientOwnedUploadUrl,
   mergeVisualAnalysisIntoProfile,
 } from '@/server/utils/profileMetadata';
-import { profileFromDbRecord } from '@/app/api/generate-with-image/handlers/userProfileAgent';
+import { profileFromDbRecord } from '@/server/agents/user-profile';
 import { normalizeVisualFeaturesForZh } from '@/lib/hairColorDisplay';
 
 export async function POST(req: NextRequest) {

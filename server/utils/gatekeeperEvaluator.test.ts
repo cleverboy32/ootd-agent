@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateGatekeeperOutput } from './gatekeeperEvaluator';
-import { normalizeGatekeeperIntent } from '@/app/api/generate-with-image/handlers/intentTypes';
-import { finalizeGatekeeperResult } from '@/app/api/generate-with-image/handlers/intentTypes';
+import { normalizeGatekeeperIntent } from '@/server/agents/intent';
+import { finalizeGatekeeperResult } from '@/server/agents/intent';
 
 describe('evaluateGatekeeperOutput', () => {
   it('passes a complete wardrobe_outfit with occasion', () => {

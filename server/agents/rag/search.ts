@@ -1,20 +1,20 @@
-import { searchWardrobeItemsByText, WardrobeSearchResult } from '../../../../server/services/wardrobeService';
-import { buildRagSearchLogEntry, logRagSearch } from '../../../../server/services/ragAuditLogger';
+import { searchWardrobeItemsByText, WardrobeSearchResult } from '@/server/services/wardrobeService';
+import { buildRagSearchLogEntry, logRagSearch } from '@/server/logging/rag';
 import {
   normalizeWardrobeSearchInput,
   parseWardrobeSearchSlot,
   resolveMainCategoryForSlot,
   WardrobeSearchInput,
-} from '../../../../server/utils/ragSearchSlots';
+} from '@/server/utils/ragSearchSlots';
 import {
   applySeasonFilter,
   buildSeasonFilterContext,
   expandedSearchLimit,
-} from '../../../../server/utils/ragSeasonFilter';
+} from '@/server/utils/ragSeasonFilter';
 import { ClothingItem } from '@prisma/client';
-import type { AnchorItemInfo, GatekeeperIntent } from './intentTypes';
+import type { AnchorItemInfo, GatekeeperIntent } from '../intent';
 
-export type { WardrobeSearchInput, WardrobeSearchQuery } from '../../../../server/utils/ragSearchSlots';
+export type { WardrobeSearchInput, WardrobeSearchQuery } from '@/server/utils/ragSearchSlots';
 
 export interface RagSearchContext {
   source?: string;

@@ -1,5 +1,5 @@
-import { appendFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { auditLogPath } from './paths';
+import { appendJsonlEntry } from './jsonl';
 
 export interface VisualProfileAuditLogEntry {
   timestamp: string;
@@ -15,20 +15,12 @@ export interface VisualProfileAuditLogEntry {
   };
 }
 
-const AUDIT_LOG_PATH = path.join(process.cwd(), 'logs', 'visual-profile-audit.jsonl');
+const AUDIT_LOG_PATH = auditLogPath('visual-profile-audit.jsonl');
 
 export async function logVisualProfileAudit(entry: VisualProfileAuditLogEntry): Promise<void> {
-  const line = JSON.stringify(entry);
-
   console.log(
     `[VISUAL_PROFILE_AUDIT] success=${entry.success} clientId=${entry.clientId} durationMs=${entry.durationMs}`,
     entry.error ?? ''
   );
-
-  try {
-    await mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    await appendFile(AUDIT_LOG_PATH, `${line}\n`, 'utf8');
-  } catch (error) {
-    console.error('[VISUAL_PROFILE_AUDIT] Failed to persist audit log:', error);
-  }
+  await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'VISUAL_PROFILE_AUDIT');
 }

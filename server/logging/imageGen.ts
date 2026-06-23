@@ -1,5 +1,5 @@
-import { appendFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { auditLogPath } from './paths';
+import { appendJsonlEntry } from './jsonl';
 
 export interface ImageGenAuditLogEntry {
   timestamp: string;
@@ -12,18 +12,11 @@ export interface ImageGenAuditLogEntry {
   trigger: 'initial' | 'user_retry';
 }
 
-const AUDIT_LOG_PATH = path.join(process.cwd(), 'logs', 'image-gen-audit.jsonl');
+const AUDIT_LOG_PATH = auditLogPath('image-gen-audit.jsonl');
 
 export async function logImageGenAudit(entry: ImageGenAuditLogEntry): Promise<void> {
-  const line = JSON.stringify(entry);
   console.log(
     `[IMAGE_GEN_AUDIT] trigger=${entry.trigger} outfit=${entry.outfitId} attempt=${entry.attempt} success=${entry.success}`
   );
-
-  try {
-    await mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    await appendFile(AUDIT_LOG_PATH, `${line}\n`, 'utf8');
-  } catch (error) {
-    console.error('[IMAGE_GEN_AUDIT] Failed to persist audit log:', error);
-  }
+  await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'IMAGE_GEN_AUDIT');
 }

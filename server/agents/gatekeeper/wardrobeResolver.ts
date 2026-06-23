@@ -1,11 +1,11 @@
 import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
-import { inferAnchorSlotFromSummary } from '@/app/api/generate-with-image/handlers/intentTypes';
+import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
 import type {
   AnchorSlot,
   WardrobeAnchorCandidate,
   WardrobeResolverResult,
-} from '@/app/api/generate-with-image/handlers/intentTypes';
+} from '@/server/agents/intent';
 
 export type { WardrobeResolverResult };
 

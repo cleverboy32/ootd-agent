@@ -8,7 +8,7 @@ import {
   GatekeeperIntent,
   DEFAULT_GATEKEEPER_INTENT,
   WeatherEnrichmentContext,
-} from './intentTypeDefs';
+} from './typeDefs';
 
 // ─── Regex patterns ────────────────────────────────────────────────────────────
 

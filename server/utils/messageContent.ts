@@ -1,7 +1,7 @@
 import type { ImageState } from '@/lib/types';
-import type { StylistResult } from '@/app/api/generate-with-image/handlers/stylistAgent';
-import type { UserProfileResult } from '@/app/api/generate-with-image/handlers/userProfileAgent';
-import type { WardrobeAnchorCandidate } from '@/app/api/generate-with-image/handlers/intentTypes';
+import type { StylistResult } from '@/server/agents/stylist';
+import type { UserProfileResult } from '@/server/agents/user-profile';
+import type { WardrobeAnchorCandidate } from '@/server/agents/intent';
 import { ClothingItem } from '@prisma/client';
 
 export interface StylistCacheNode {

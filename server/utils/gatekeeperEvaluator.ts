@@ -1,4 +1,4 @@
-import type { GatekeeperIntent, OutfitRequestType } from '@/app/api/generate-with-image/handlers/intentTypes';
+import type { GatekeeperIntent, OutfitRequestType } from '@/server/agents/intent';
 import {
   inferAnchorSlotFromSummary,
   isOutfitGeneratingIntent,
@@ -10,7 +10,7 @@ import {
   parseDressingClimate,
   inferDressingClimateFromAnchor,
   userMentionedOutfitIdInText,
-} from '@/app/api/generate-with-image/handlers/intentTypes';
+} from '@/server/agents/intent';
 
 export type GatekeeperEvalSeverity = 'error' | 'warn';
 
