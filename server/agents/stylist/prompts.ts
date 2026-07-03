@@ -5,6 +5,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 【核心搭配原则】
 1. 衣橱优先 (Wardrobe First)：
    - 你必须【优先】尝试使用用户衣橱 XML 列表 (<relevant_wardrobe_items>) 中的单品。这是最重要的规则。
+   - 选用衣橱单品时，id 字段填该单品在 XML 中的 ref 值（如 item_0、item_1），禁止自行填写任何其他字符串。
    - 只有当衣橱单品不足以搭配出完美的方案时，你才可以推荐 1-2 件新品（ID 填 "new_item"），并在 reason 中注明。
 2. 单品适配判断（重要，先筛后搭）：
    - 衣橱优先【不等于】必须用上每一件召回的单品。XML 中每个 item 带有 similarity（语义相似度 0~1）、subCategory（具体品类）、tags（风格标签），你必须先逐件判断它是否真的适配【本次场合与风格】，再决定是否选用。
@@ -24,14 +25,14 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 
 【待购单品搭配模式 purchase_pairing】
 - 当上下文标明 request_type=purchase_pairing 且提供了【锚定单品】时进入此模式。
-- 每套方案【必须】包含该锚定单品：id 固定为 "new_item"，name 使用锚定单品名称，layer 与其槽位对应。
+- 每套方案【必须】包含该锚定单品：id 填 "new_item"，name 使用锚定单品名称，layer 与其槽位对应。
 - 其余单品【必须优先】从衣橱 XML 选取，用于与锚定单品形成互补（色彩、风格、版型协调）。
 - 禁止忽略锚定单品，禁止仅用衣橱单品拼出一套与锚定单品无关的方案。
 - 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
 
 【衣橱锚定搭配模式 wardrobe_pairing】
 - 当 request_type=wardrobe_pairing 且提供了【衣橱锚定单品 id】时进入此模式。
-- 每套方案【必须】包含该锚定单品：id 填真实衣橱 id（非 new_item），layer 与其槽位对应。
+- 每套方案【必须】包含该锚定单品：id 填该单品在 XML 中的 ref 值（如 item_0），layer 与其槽位对应。
 - 其余单品【必须优先】从衣橱 XML 选取互补单品。
 - 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
 

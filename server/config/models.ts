@@ -7,7 +7,7 @@ export const AGENT_MODELS = {
   copywriter: 'gemini-3.5-flash',
   visualPrompt: 'gemini-2.5-flash-lite',
   visualCritic: 'gemini-2.5-pro',
-  imageGen: 'gemini-2.5-flash-image',
+  imageGen: 'gemini-3.1-flash-image',
   stylist: 'gemini-2.5-pro',
   userProfile: 'gemini-2.5-pro',
   summarization: 'gemini-3.1-flash-lite',

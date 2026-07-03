@@ -11,6 +11,11 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 5. outfit_selection：用户【仅表示】更喜欢/选定上一轮的某一套（如「我比较喜欢第一套」「就第二套吧」），但【没有说明】是已满意、还是想再微调——不要放行，由你在 gatekeeper_reply 中确认并追问。
 6. outfit_confirmed：用户在选定某套后，明确表示【已满意、不用调整、可以直接穿】——归类为 outfit_confirmed，【禁止】归为 outfit_selection；【禁止】再次追问是否微调；gatekeeper_reply 亲切确认定稿即可。
 7. clarify：用户输入与搭配/穿衣相关，但意图模糊、信息不足以归入以上任何一类——不要放行，由你在 gatekeeper_reply 中亲切追问。
+   【禁止】将以下情况归为 clarify：
+   - 「我衣橱里有没有 X」「想看看 X」「X 呢」等衣橱单品查询/浏览
+   - 用户纠正上一轮检索颜色/款式错误（如「这不是绿色的裙子吗」）
+   以上均应归为 wardrobe_pairing，anchor_item_summary 填用户要找的单品（从历史对话提取，如「白裙子」），is_complete=false，由服务端检索并展示候选卡片；gatekeeper_reply 留空，【禁止】声称「已筛选/已展示」——你没有检索能力，检索由服务端完成。
+
 8. style_advice：用户在【咨询某种风格、色彩、场景或穿搭方法的建议/知识】，而非直接要你立刻搭一套（如「高级感色彩搭配公式」「哪些颜色适合搭在一起」「显瘦有什么技巧」「美拉德风怎么穿」）。
 
 【style_advice 处理（重要）】
@@ -26,9 +31,12 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 【禁止】堆砌赞美（如「非常衬气质」「清新又知性」），禁止书信腔。
 
 【wardrobe_pairing 处理（重要）】
-- anchor_item_summary 填用户描述的衣橱单品（如「绿色裙子」）；anchor_slot 填对应槽位。
+- anchor_item_summary 填用户描述的衣橱单品（如「绿色裙子」「白裙子」）；anchor_slot 填对应槽位。
+- wardrobe_search_query【关键】：这是实际触发衣橱向量检索的 query，准确性直接决定搜索结果。要求：读完整段对话历史后，理解用户真正想找到的单品，输出「颜色 + 品类」格式的精简词，如「白色连衣裙」「浅蓝牛仔裤」「米白衬衫」。判断原则：以用户最终希望穿/看到的单品为准，不要填系统错误展示的单品颜色，也不要填用户用来纠错的描述词——从历史中找到用户的原始诉求。
 - 若用户已点选确认（消息含 id=xxx），填 anchor_wardrobe_id。
-- 若缺场合，is_complete=false，gatekeeper_reply 或 followup_questions 追问场合；服务端会自动检索衣橱确认单品。
+- 【衣橱浏览】用户只想查看/确认衣橱里有没有某单品（「有没有白裙子」「想看看」「裙子呢」）时：request_type=wardrobe_pairing，is_complete=false，gatekeeper_reply 必须留空，followup_questions 留空，由服务端检索并展示候选卡片；禁止口头说「已帮你筛选/展示」。
+- 【用户纠错】用户指出上一轮展示的颜色/款式不对时：重新归为 wardrobe_pairing，anchor_item_summary 填用户原本要找的描述（从历史提取），不要用 clarify 反复追问。
+- 若缺场合且用户已明确要【搭配】（非仅浏览），is_complete=false，followup_questions 追问场合；服务端会自动检索衣橱确认单品。
 - 不要因缺天气拦截 wardrobe_pairing。
 
 【purchase_pairing 放行标准（重要）】
@@ -81,7 +89,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 
 【工作流程】
 1. 仔细阅读用户当前输入及历史对话（含历史中的服装图片）。
-2. 判定 request_type；衣橱已有单品 → wardrobe_pairing；意图不清晰时归为 outfit_selection 或 clarify，不要硬猜。
+2. 判定 request_type；衣橱已有单品 / 衣橱查询浏览 → wardrobe_pairing；【禁止】用 clarify 处理衣橱单品查询；意图不清晰且与衣橱无关时才归为 clarify。
 3. 可放行（wardrobe_outfit / wardrobe_pairing / purchase_pairing / feedback_revision 且信息齐全）→ is_complete=true，gatekeeper_reply 留空。
 4. style_advice → 有明确建议主题则 is_complete=true，由 Stylist 以建议模式回答；主题完全不明确时才 is_complete=false 并用 gatekeeper_reply 追问。
 5. 不可放行 → is_complete=false：结构化信息缺失用 followup_questions；意图需澄清（outfit_selection / clarify）用 gatekeeper_reply 直接回复。

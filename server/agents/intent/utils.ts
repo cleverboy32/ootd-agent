@@ -388,6 +388,76 @@ export function isWardrobePairingAnchorReady(intent: GatekeeperIntent): boolean 
   );
 }
 
+const WARDROBE_BROWSE_PATTERN =
+  /衣橱里?(有|有没有)|有没有.{0,12}(裙|裤|衫|衣|鞋|外套|单品)|想看看|看看.{0,8}(裙|裤|衫|衣|鞋)|裙子呢|单品呢|不是.{0,6}(绿|白|黑|红|蓝|灰|黄|粉)色?的?/;
+
+const ANCHOR_ITEM_FROM_CONTEXT_PATTERNS = [
+  /(?:有没有|想看看|查看|筛选|展示|衣橱里).{0,8}((?:白|黑|红|绿|蓝|灰|米|卡其|奶油|橄榄)[色]?[\u4e00-\u9fa5]{0,4}裙)/,
+  /((?:白|黑|红|绿|蓝|灰|米|卡其|奶油|橄榄)[色]?[\u4e00-\u9fa5]{0,6}(?:连衣)?裙)/,
+  /((?:白|黑|红|绿|蓝|灰|米|卡其|奶油|橄榄)[色]?[\u4e00-\u9fa5]{0,6}(?:衬衫|上衣|外套|裤|鞋))/,
+];
+
+/** 用户只想浏览/确认衣橱单品，尚未进入搭配场合收集阶段 */
+export function isWardrobeBrowseIntent(intent: GatekeeperIntent, currentMessageText?: string): boolean {
+  const text = `${intent.special_requests}\n${currentMessageText ?? ''}`;
+  return (
+    WARDROBE_BROWSE_PATTERN.test(text) ||
+    /查询衣橱|查看衣橱|展示衣橱|筛选出衣橱/.test(text)
+  );
+}
+
+export function extractAnchorSummaryFromContext(contextText: string, currentText: string): string {
+  const haystack = `${contextText}\n${currentText}`;
+  for (const pattern of ANCHOR_ITEM_FROM_CONTEXT_PATTERNS) {
+    const match = haystack.match(pattern);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  if (/不是.*绿/.test(currentText)) {
+    const whiteDress = haystack.match(/白[\u4e00-\u9fa5]{0,4}裙/);
+    if (whiteDress) return whiteDress[0];
+  }
+  return '';
+}
+
+/**
+ * LLM 误判为 clarify 时，根据对话上下文纠正为 wardrobe_pairing 并补全锚点描述。
+ */
+export function coerceWardrobeBrowseIntent(
+  intent: GatekeeperIntent,
+  history: Content[],
+  currentInput: Part[]
+): GatekeeperIntent {
+  const currentText = extractTextFromParts(currentInput);
+  const contextText = `${extractUserTextFromHistory(history)}\n${currentText}`;
+
+  const shouldCoerce =
+    intent.request_type === 'clarify' &&
+    (WARDROBE_BROWSE_PATTERN.test(currentText) ||
+      WARDROBE_BROWSE_PATTERN.test(intent.special_requests) ||
+      /查询衣橱|查看衣橱|展示|筛选/.test(intent.special_requests));
+
+  if (!shouldCoerce) return intent;
+
+  const summary =
+    intent.anchor_item_summary.trim() ||
+    extractAnchorSummaryFromContext(contextText, currentText) ||
+    intent.special_requests.replace(/查询衣橱[内中]?是否有?/g, '').trim();
+
+  const slot = intent.anchor_slot || inferAnchorSlotFromSummary(summary) || 'dress';
+
+  console.log(
+    `[GATEKEEPER] Coerced clarify → wardrobe_pairing for browse query: "${summary.slice(0, 32)}"`
+  );
+
+  return {
+    ...intent,
+    request_type: 'wardrobe_pairing',
+    anchor_item_summary: summary,
+    anchor_slot: slot,
+    special_requests: intent.special_requests.trim() || currentText,
+  };
+}
+
 // ─── Intent normalization ──────────────────────────────────────────────────────
 
 export function normalizeGatekeeperIntent(

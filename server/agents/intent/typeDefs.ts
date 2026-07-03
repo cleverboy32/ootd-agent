@@ -39,6 +39,8 @@ export interface GatekeeperIntent {
   special_requests: string;
   request_type: OutfitRequestType;
   anchor_item_summary: string;
+  /** wardrobe_pairing 时由 Gatekeeper LLM 生成的精简检索词，如「白色连衣裙」 */
+  wardrobe_search_query?: string;
   anchor_slot: AnchorSlot | '';
   anchor_item_image_data?: AnchorItemImageData;
   /** outfit_selection 时用户选中的方案 id，如 outfit_1 */
@@ -60,7 +62,12 @@ export interface WardrobeAnchorCandidate {
 export type WardrobeResolverResult =
   | { status: 'resolved'; itemId: string; item: WardrobeAnchorCandidate }
   | { status: 'ambiguous'; candidates: WardrobeAnchorCandidate[] }
-  | { status: 'not_found' };
+  | { status: 'not_found' }
+  | {
+      status: 'color_mismatch';
+      queriedSummary: string;
+      nearMiss: WardrobeAnchorCandidate;
+    };
 
 export interface WeatherEnrichmentContext {
   clientIp?: string;

@@ -326,4 +326,32 @@ describe('finalizeGatekeeperResult — wardrobe_pairing', () => {
     assert.equal(result.is_complete, true);
     assert.equal(result.extracted_intent.anchor_wardrobe_id, 'item1');
   });
+
+  it('returns color mismatch candidate when query color conflicts', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '白色裙子',
+        anchor_slot: 'dress',
+        special_requests: '查询衣橱里有没有白裙子',
+      }),
+      currentMessageText: '我衣橱里有没有白裙子',
+      wardrobeResolver: {
+        status: 'color_mismatch',
+        queriedSummary: '白色裙子',
+        nearMiss: {
+          id: 'green-dress',
+          imageUrl: 'https://example.com/g.jpg',
+          subCategory: 'Sleeveless Shift Dress',
+          colors: ['light green'],
+          similarity: 0.65,
+        },
+      },
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.wardrobe_candidates?.length, 1);
+    assert.match(result.gatekeeper_reply ?? '', /没有找到符合「白色裙子」/);
+    assert.match(result.gatekeeper_reply ?? '', /light green|浅绿/i);
+  });
 });

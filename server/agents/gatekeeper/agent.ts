@@ -10,6 +10,7 @@ import {
   extractUserTextFromHistory,
   normalizeGatekeeperIntent,
   finalizeGatekeeperResult,
+  coerceWardrobeBrowseIntent,
 } from '../intent';
 import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
@@ -113,8 +114,14 @@ export async function callGatekeeperAgent(
     console.log('[GATEKEEPER_AGENT] Raw response:', responseText);
 
     const parsed = JSON.parse(responseText) as GatekeeperResult;
+    const rawIntent = normalizeGatekeeperIntent(parsed.extracted_intent);
+    const intentBeforeCoerce = rawIntent.request_type;
+    const coercedIntent = coerceWardrobeBrowseIntent(rawIntent, history, currentInput);
+    const wasCoercedBrowse =
+      intentBeforeCoerce === 'clarify' && coercedIntent.request_type === 'wardrobe_pairing';
+
     const { intent, suggestCityForWeather } = await finalizeGatekeeperIntent(
-      normalizeGatekeeperIntent(parsed.extracted_intent),
+      coercedIntent,
       history,
       currentInput,
       ctx,
@@ -131,14 +138,15 @@ export async function callGatekeeperAgent(
       wardrobeResolver = await resolveWardrobeAnchor(
         ctx.clientId,
         intent.anchor_item_summary,
-        intent.anchor_slot || undefined
+        intent.anchor_slot || undefined,
+        intent.wardrobe_search_query
       );
     }
 
     const result = finalizeGatekeeperResult({
       extracted_intent: intent,
       followup_questions: parsed.followup_questions,
-      gatekeeper_reply: parsed.gatekeeper_reply,
+      gatekeeper_reply: wasCoercedBrowse ? undefined : parsed.gatekeeper_reply,
       suggestCityForWeather,
       wardrobeResolver,
       currentMessageText: extractTextFromParts(currentInput),

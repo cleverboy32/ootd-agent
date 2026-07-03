@@ -33,25 +33,32 @@ function escapeXmlAttr(value: string): string {
 
 /**
  * Formats the search results into an XML string for the AI prompt.
- * @param items The search results from the wardrobe.
- * @returns An XML-formatted string of wardrobe items.
+ * Uses short `ref` tokens (item_0, item_1…) instead of raw IDs to prevent LLM
+ * from corrupting long cuid strings. The returned indexMap maps ref → real ID.
  */
-function formatResultsToXml(items: WardrobeSearchResult[]): string {
-  if (items.length === 0) {
-    return '';
-  }
+function formatResultsToXml(items: WardrobeSearchResult[]): {
+  xml: string;
+  indexMap: Map<string, string>;
+} {
+  const indexMap = new Map<string, string>();
+  if (items.length === 0) return { xml: '', indexMap };
 
   const itemsXml = items
-    .map((item) => {
+    .map((item, i) => {
+      const ref = `item_${i}`;
+      indexMap.set(ref, item.id);
       const season = (item.season ?? []).join(', ');
       const tags = (item.tags ?? []).join(', ');
       const similarity =
         typeof item.similarity === 'number' ? item.similarity.toFixed(2) : '';
-      return `  <item id="${item.id}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
+      return `  <item ref="${ref}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
     })
     .join('\n');
 
-  return `\n<relevant_wardrobe_items>\n${itemsXml}\n</relevant_wardrobe_items>\n`;
+  return {
+    xml: `\n<relevant_wardrobe_items>\n${itemsXml}\n</relevant_wardrobe_items>\n`,
+    indexMap,
+  };
 }
 
 /**
@@ -66,7 +73,7 @@ export async function performRagSearch(
   userId: string,
   ragCache: Map<string, ClothingItem>,
   logContext?: RagSearchContext
-): Promise<{ xmlString: string; items: ClothingItem[] }> {
+): Promise<{ xmlString: string; indexMap: Map<string, string>; items: ClothingItem[] }> {
   console.log('[RAG_HANDLER] Starting RAG search process...');
 
   const queries = searchQueries
@@ -74,7 +81,7 @@ export async function performRagSearch(
     .filter((item) => item.query.length > 0);
   if (queries.length === 0) {
     console.log('[RAG_HANDLER] No search queries provided. Skipping RAG search.');
-    return { xmlString: '', items: [] };
+    return { xmlString: '', indexMap: new Map(), items: [] };
   }
 
   console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
@@ -149,7 +156,7 @@ export async function performRagSearch(
 
     if (mergedResults.length === 0) {
       console.log('[RAG_HANDLER] No relevant items found in wardrobe.');
-      return { xmlString: '', items: [] };
+      return { xmlString: '', indexMap: new Map(), items: [] };
     }
 
     console.log(`[RAG_HANDLER] Found ${mergedResults.length} unique items. Caching and formatting to XML.`);
@@ -167,15 +174,13 @@ export async function performRagSearch(
 
     clothingItems.forEach((item) => ragCache.set(item.id, item));
 
-    const xmlString = formatResultsToXml(mergedResults);
+    const { xml: xmlString, indexMap } = formatResultsToXml(mergedResults);
+    console.log('[RAG_HANDLER] Index map:', Object.fromEntries(indexMap));
 
-    return {
-      xmlString,
-      items: clothingItems,
-    };
+    return { xmlString, indexMap, items: clothingItems };
   } catch (error) {
     console.error('[RAG_HANDLER] Error during RAG search:', error);
-    return { xmlString: '', items: [] };
+    return { xmlString: '', indexMap: new Map(), items: [] };
   }
 }
 

@@ -1,6 +1,7 @@
 import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
 import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
+import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
 import type {
   AnchorSlot,
   WardrobeAnchorCandidate,
@@ -47,11 +48,18 @@ function toCandidate(item: {
 export async function resolveWardrobeAnchor(
   clientId: string,
   summary: string,
-  slot?: AnchorSlot | ''
+  slot?: AnchorSlot | '',
+  /** Gatekeeper LLM 直接生成的精简检索词，优先使用 */
+  llmSearchQuery?: string
 ): Promise<WardrobeResolverResult> {
-  const query = summary.trim();
+  const query = (llmSearchQuery?.trim() || summary.trim());
   if (!query || !clientId) {
     return { status: 'not_found' };
+  }
+  if (llmSearchQuery?.trim() && llmSearchQuery.trim() !== summary.trim()) {
+    console.log(
+      `[WARDROBE_RESOLVER] Using LLM search query: "${llmSearchQuery}" (summary: "${summary.slice(0, 32)}")`
+    );
   }
 
   const inferredSlot = inferAnchorSlotFromSummary(query);
@@ -66,14 +74,25 @@ export async function resolveWardrobeAnchor(
   }
 
   const mainCategory = effectiveSlot ? slotToMainCategory(effectiveSlot) : undefined;
-  const results = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1, mainCategory);
+  const rawResults = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1, mainCategory);
 
+  let results = rawResults;
   if (results.length === 0 && mainCategory) {
-    const fallback = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1);
-    return classifyResults(fallback);
+    results = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1);
   }
 
-  return classifyResults(results);
+  const { matched, rejected } = filterItemsByQueryColor(query, results);
+  if (matched.length === 0 && rejected.length > 0) {
+    const nearMiss = toCandidate(
+      [...rejected].sort((a, b) => b.similarity - a.similarity)[0]
+    );
+    console.warn(
+      `[WARDROBE_RESOLVER] Color mismatch for "${query.slice(0, 32)}": nearMiss colors=${nearMiss.colors.join(',')}`
+    );
+    return { status: 'color_mismatch', queriedSummary: query, nearMiss };
+  }
+
+  return classifyResults(matched);
 }
 
 function classifyResults(

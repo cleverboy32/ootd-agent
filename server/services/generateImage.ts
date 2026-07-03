@@ -4,6 +4,7 @@ import { uploadImageToGCS } from './gcs';
 import { sendEvent } from '../utils/stream-helpers';
 import { Part } from '@google/genai'; // <--- 新增: 导入 Part 类型
 import { urlToGenerativePart } from '../utils/image'; // <--- 新增: 导入图片 URL 转换工具
+import { AGENT_MODELS } from '@/server/config/models';
 
 // [NEW] Function to handle multimodal image generation with context
 export async function generateAndSendImageWithContextInBackground(
@@ -36,7 +37,7 @@ export async function generateAndSendImageWithContextInBackground(
 
           // 2. 调用多模态图像生成模型
           imageResponse = await genAI.models.generateContent({
-            model: "gemini-2.5-flash-image", // 您的图片生成模型
+            model: AGENT_MODELS.imageGen,
             contents: [{ role: "user", parts: multiModalParts }],
           });
         } catch (error) {
@@ -56,7 +57,7 @@ export async function generateAndSendImageWithContextInBackground(
 
           try {
             imageResponse = await genAI.models.generateContent({
-              model: "gemini-2.5-flash-image",
+              model: AGENT_MODELS.imageGen,
               contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
             });
             imagePart = imageResponse?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
@@ -121,7 +122,7 @@ export async function generateAndSendImageInBackground(
         console.log(`后端日志：[后台任务][尝试 ${attemptNumber}] 开始调用画图工具, Prompt:`, imgPrompt);
         
         const imageResponse = await genAI.models.generateContent({
-          model: "gemini-2.5-flash-image", // 您的图片生成模型
+          model: AGENT_MODELS.imageGen,
           contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
       });
 

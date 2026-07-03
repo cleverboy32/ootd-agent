@@ -2,6 +2,7 @@ import { uploadImageToGCS } from '@/server/services/gcs';
 import { sendEvent } from '@/server/utils/stream-helpers';
 import type { StylistOutfit } from '@/server/agents/stylist';
 import type { AnchorItemImageData } from '@/server/agents/intent';
+import type { ClothingItem } from '@prisma/client';
 import { buildImagePrompt, generateOutfitImage, ImageGenTrigger } from './imageGen';
 import { scheduleVisualAudit } from './critic';
 
@@ -17,12 +18,12 @@ export async function callVisualDirectorAgent(
   anchorImageData: AnchorItemImageData | undefined,
   imageId: string,
   onImageGenerated?: (id: string, url: string) => void,
-  options?: { trigger?: ImageGenTrigger; messageId?: string }
+  options?: { trigger?: ImageGenTrigger; messageId?: string; ragCache?: Map<string, ClothingItem> }
 ): Promise<void> {
   const trigger = options?.trigger ?? 'initial';
   console.log(`[VISUAL_DIRECTOR] Starting image generation for outfit ${outfit.id} (${trigger})...`);
 
-  const imgPrompt = buildImagePrompt(outfit);
+  const imgPrompt = buildImagePrompt(outfit, options?.ragCache);
 
   const { data: imageBase64, mimeType } = await generateOutfitImage(
     outfit,

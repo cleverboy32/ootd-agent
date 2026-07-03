@@ -22,7 +22,8 @@ export async function runOutfitImageGeneration(
   imageMap: Map<string, string>,
   failedImageIds: Set<string>,
   messageId?: string,
-  trigger: 'initial' | 'user_retry' = 'initial'
+  trigger: 'initial' | 'user_retry' = 'initial',
+  ragCache?: Map<string, ClothingItem>
 ): Promise<void> {
   const imageId = outfit.id;
 
@@ -37,7 +38,7 @@ export async function runOutfitImageGeneration(
         imageMap.set(id, url);
         console.log(`[ORCHESTRATOR] 效果图生成成功: ${id} -> ${url}`);
       },
-      { trigger, messageId }
+      { trigger, messageId, ragCache }
     );
   } catch (e) {
     failedImageIds.add(outfit.id);
@@ -81,22 +82,19 @@ export function createImageRetryStream(
           ragCache.set(item.id, item);
         }
 
-        const wardrobeUrls = Array.from(ragCache.values())
-          .map((item) => item.imageUrl)
-          .filter((url): url is string => !!url);
-
         const imageMap = new Map<string, string>();
         const failedImageIds = new Set<string>();
 
         await runOutfitImageGeneration(
           outfit,
-          wardrobeUrls,
+          extractSelectedItemUrls(outfit, ragCache),
           stylistCache.stylist_result.anchor_item_image_data,
           controller,
           imageMap,
           failedImageIds,
           messageId,
-          'user_retry'
+          'user_retry',
+          ragCache
         );
 
         if (imageMap.has(retryOutfitId)) {
@@ -131,10 +129,11 @@ export function createImageRetryStream(
   });
 }
 
-/** 从 ragCache 中提取所有有效的图片 URL */
-export function extractWardrobeUrls(ragCache: Map<string, ClothingItem>): string[] {
-  return Array.from(ragCache.values())
-    .map((item) => item.imageUrl)
+/** 只提取某套方案实际选中的衣橱单品图片（排除 new_item），减少图生图的噪声输入 */
+export function extractSelectedItemUrls(outfit: StylistOutfit, ragCache: Map<string, ClothingItem>): string[] {
+  return outfit.selected_items
+    .filter((i) => i.id !== 'new_item')
+    .map((i) => ragCache.get(i.id)?.imageUrl)
     .filter((url): url is string => !!url);
 }
 

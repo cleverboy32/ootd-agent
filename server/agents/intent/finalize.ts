@@ -5,6 +5,7 @@ import {
   FinalizeGatekeeperInput,
   OutfitRequestType,
   WardrobeResolverResult,
+  WardrobeAnchorCandidate,
 } from './typeDefs';
 import {
   normalizeGatekeeperIntent,
@@ -14,6 +15,7 @@ import {
   historyShowsMultipleOutfits,
   isPurchasePairingAnchorReady,
   isWardrobePairingAnchorReady,
+  isWardrobeBrowseIntent,
 } from './utils';
 
 // ─── Reply builders ────────────────────────────────────────────────────────────
@@ -43,6 +45,21 @@ export const STYLE_ADVICE_FALLBACK_REPLY = '这个问题可以直接聊方法，
 
 export const WARDROBE_NOT_FOUND_REPLY =
   '没在衣橱里找到匹配的单品～可以描述得更具体一些（颜色、款式），或者发一张该单品的照片给我～';
+
+export function buildColorMismatchReply(
+  queriedSummary: string,
+  nearMiss: WardrobeAnchorCandidate
+): string {
+  const colorLabel = nearMiss.colors.length > 0 ? nearMiss.colors.join('、') : '其他颜色';
+  return `衣橱里没有找到符合「${queriedSummary}」的单品。不过有一件${colorLabel}的${nearMiss.subCategory}，你看看是不是这件？`;
+}
+
+export function buildWardrobeBrowseReply(itemCount: number): string {
+  if (itemCount <= 1) {
+    return '在衣橱里找到了这件，点选确认后我可以帮你搭配～';
+  }
+  return '在衣橱里找到了几件相似的单品，请点击确认你想穿的是哪一件～';
+}
 
 export const PURCHASE_PAIRING_ANCHOR_FOLLOWUP =
   '方便描述一下您想搭配的单品吗？或者再发一张清晰的服装图片～';
@@ -153,7 +170,18 @@ const handleFeedbackRevision: RequestTypeHandler = (ctx) => {
 
 const handleWardrobePairing: RequestTypeHandler = (ctx) => {
   let intent = ctx.intent;
-  const { modelReply, modelFollowups, wardrobeResolver: resolver } = ctx;
+  const { modelReply, modelFollowups, wardrobeResolver: resolver, currentMessageText } = ctx;
+  const browseOnly = isWardrobeBrowseIntent(intent, currentMessageText);
+
+  if (resolver?.status === 'color_mismatch' && !intent.anchor_wardrobe_id?.trim()) {
+    return {
+      is_complete: false,
+      extracted_intent: intent,
+      followup_questions: [],
+      gatekeeper_reply: buildColorMismatchReply(resolver.queriedSummary, resolver.nearMiss),
+      wardrobe_candidates: [resolver.nearMiss],
+    };
+  }
 
   if (resolver?.status === 'not_found' && !intent.anchor_wardrobe_id?.trim()) {
     return {
@@ -168,14 +196,28 @@ const handleWardrobePairing: RequestTypeHandler = (ctx) => {
     return {
       is_complete: false,
       extracted_intent: intent,
-      followup_questions: [],
-      gatekeeper_reply: modelReply || buildWardrobeAmbiguousReply(),
+      followup_questions: browseOnly ? [] : modelFollowups,
+      gatekeeper_reply:
+        modelReply ||
+        (browseOnly
+          ? buildWardrobeBrowseReply(resolver.candidates.length)
+          : buildWardrobeAmbiguousReply()),
       wardrobe_candidates: resolver.candidates,
     };
   }
 
   if (resolver?.status === 'resolved' && !intent.anchor_wardrobe_id?.trim()) {
     intent = { ...intent, anchor_wardrobe_id: resolver.itemId };
+  }
+
+  if (browseOnly && resolver?.status === 'resolved') {
+    return {
+      is_complete: false,
+      extracted_intent: intent,
+      followup_questions: [],
+      gatekeeper_reply: buildWardrobeBrowseReply(1),
+      wardrobe_candidates: [resolver.item],
+    };
   }
 
   if (!isWardrobePairingAnchorReady(intent)) {

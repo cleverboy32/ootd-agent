@@ -217,6 +217,27 @@ ${
 }
 
 /**
+ * 将 Stylist 输出中的 item_0/item_1 ref 还原为真实衣橱 ID。
+ * 防止 LLM 在复制长 cuid 时发生字符幻觉。
+ */
+function resolveRagRefs(result: StylistResult, indexMap: Map<string, string>): void {
+  if (indexMap.size === 0) return;
+  for (const outfit of result.outfits) {
+    for (const item of outfit.selected_items) {
+      if (item.id === 'new_item') continue;
+      const realId = indexMap.get(item.id);
+      if (realId) {
+        console.log(`[STYLIST_AGENT] ref resolved: ${item.id} → ${realId}`);
+        item.id = realId;
+      } else if (/^item_\d+$/.test(item.id)) {
+        console.warn(`[STYLIST_AGENT] ref ${item.id} not in indexMap, falling back to new_item`);
+        item.id = 'new_item';
+      }
+    }
+  }
+}
+
+/**
  * 调用 Stylist Agent 生成穿搭方案
  */
 export async function callStylistAgent(
@@ -261,6 +282,7 @@ export async function callStylistAgent(
       : undefined;
 
   let wardrobeXml = '';
+  let ragIndexMap = new Map<string, string>();
   if (clientId && ragCache && !isRevision) {
     try {
       const userMessage = extractUserMessage(initialParts);
@@ -280,6 +302,7 @@ export async function callStylistAgent(
         anchorItem: anchorItem ?? undefined,
       });
       wardrobeXml = searchResults.xmlString;
+      ragIndexMap = searchResults.indexMap;
     } catch (ragError) {
       console.warn('[STYLIST_AGENT] RAG search failed, proceeding with empty wardrobe:', ragError);
     }
@@ -372,6 +395,7 @@ ${wardrobeXml || (isRevision && previousCache ? '*(微调模式：优先复用�
 
     console.log('[STYLIST_AGENT] Raw response:', responseText);
     const parsed = JSON.parse(responseText) as StylistResult;
+    resolveRagRefs(parsed, ragIndexMap);
     if (anchorItem?.imageData) {
       parsed.anchor_item_image_data = anchorItem.imageData;
     }

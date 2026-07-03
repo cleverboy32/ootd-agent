@@ -61,7 +61,7 @@ export const stylistSchema: Schema = {
             type: Type.OBJECT,
             properties: {
               model_pose: { type: Type.STRING, description: '模特的姿态与神态描述（英文，如：A young woman holding a tennis racket, smiling warmly）' },
-              outfit_details: { type: Type.STRING, description: '服装的材质、色彩与细节描述（英文，如：Wearing a fitted light pink athletic top, paired with dark grey sports shorts）' },
+              outfit_details: { type: Type.STRING, description: '服装的材质、色彩、廓形与细节描述（英文）。必须包含每件单品的精确长度/廓形词，如：knee-length / ankle-length / cropped / midi / maxi / shorts (5/10 length, above-the-knee) / wide-leg / straight-leg 等，不得省略。示例：Wearing a fitted light pink athletic top, paired with dark grey above-the-knee straight shorts' },
               background: { type: Type.STRING, description: '场景与光影背景描述（英文，如：An indoor modern table tennis court with soft lighting）' },
             },
             required: ['model_pose', 'outfit_details', 'background'],

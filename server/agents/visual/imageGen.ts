@@ -1,28 +1,64 @@
 import retry from 'async-retry';
 import { genAI } from '@/server/services/ai';
 import { urlToGenerativePart } from '@/server/utils/image';
-import { Part } from '@google/genai';
+import { Modality, Part, ThinkingLevel } from '@google/genai';
 import { AGENT_MODELS, IMAGE_GEN_RETRY } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { logImageGenAudit } from '@/server/logging/imageGen';
 import type { StylistOutfit } from '@/server/agents/stylist';
 import type { AnchorItemImageData } from '@/server/agents/intent';
+import type { ClothingItem } from '@prisma/client';
 
 export type ImageGenTrigger = 'initial' | 'user_retry';
 
+const IMAGE_GEN_SYSTEM_INSTRUCTION = [
+  'Generate a fashion editorial photo.',
+  'Strictly reproduce each wardrobe item silhouette, hem length, neckline, and fit from reference images and text.',
+  'Do NOT change shorts to pants, alter skirt/dress lengths, or modify garment proportions.',
+].join(' ');
+
+const IMAGE_GEN_CONFIG = {
+  responseModalities: [Modality.IMAGE],
+  imageConfig: {
+    aspectRatio: '3:4',
+    imageSize: '1K',
+  },
+  thinkingConfig: {
+    thinkingLevel: ThinkingLevel.HIGH,
+  },
+  systemInstruction: IMAGE_GEN_SYSTEM_INSTRUCTION,
+};
+
 /** 直接用搭配师方案拼装图像提示词，避免二次扩写引入偏差 */
-export function buildImagePrompt(outfit: StylistOutfit): string {
-  const items = outfit.selected_items
-    .map((i) => `${i.name} (${i.layer})`)
-    .join(', ');
+export function buildImagePrompt(
+  outfit: StylistOutfit,
+  ragCache?: Map<string, ClothingItem>
+): string {
+  const itemLines = outfit.selected_items.map((i) => {
+    const cached = ragCache?.get(i.id);
+    const parts: string[] = [`${i.name} (${i.layer})`];
+    if (cached?.description) parts.push(cached.description);
+    if (cached?.tags?.length) parts.push(cached.tags.join(', '));
+    return `  - ${parts.join(' | ')}`;
+  });
 
   return [
     'Fashion editorial photography, photorealistic, highly detailed fabric textures.',
+    'CRITICAL GARMENT FIDELITY: Every item must match its exact silhouette, hemline length, and fit as described. Do NOT alter proportions or lengths.',
     `Pose: ${outfit.visual_composition.model_pose}`,
     `Outfit: ${outfit.visual_composition.outfit_details}`,
-    `Wardrobe items: ${items}`,
+    'Wardrobe items:',
+    ...itemLines,
     `Scene: ${outfit.visual_composition.background}`,
   ].join('\n');
+}
+
+function callImageGen(parts: Part[]) {
+  return genAI.models.generateContent({
+    model: AGENT_MODELS.imageGen,
+    contents: [{ role: 'user', parts }],
+    config: IMAGE_GEN_CONFIG,
+  });
 }
 
 export async function attemptGenerateOutfitImage(
@@ -55,20 +91,12 @@ export async function attemptGenerateOutfitImage(
       multiModalParts.push({ text: imgPrompt });
 
       imageResponse = await withRetryOn429(
-        () =>
-          genAI.models.generateContent({
-            model: AGENT_MODELS.imageGen,
-            contents: [{ role: 'user', parts: multiModalParts }],
-          }),
+        () => callImageGen(multiModalParts),
         { label: `ImageGen multimodal (${outfit.id})` }
       );
     } else {
       imageResponse = await withRetryOn429(
-        () =>
-          genAI.models.generateContent({
-            model: AGENT_MODELS.imageGen,
-            contents: [{ role: 'user', parts: [{ text: imgPrompt }] }],
-          }),
+        () => callImageGen([{ text: imgPrompt }]),
         { label: `ImageGen text-only (${outfit.id})` }
       );
     }
@@ -85,11 +113,7 @@ export async function attemptGenerateOutfitImage(
   if (!imagePart?.inlineData) {
     mode = 'text-only';
     imageResponse = await withRetryOn429(
-      () =>
-        genAI.models.generateContent({
-          model: AGENT_MODELS.imageGen,
-          contents: [{ role: 'user', parts: [{ text: imgPrompt }] }],
-        }),
+      () => callImageGen([{ text: imgPrompt }]),
       { label: `ImageGen fallback (${outfit.id})` }
     );
     imagePart = imageResponse?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);

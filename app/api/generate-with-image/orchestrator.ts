@@ -19,7 +19,7 @@ import {
   WardrobeCandidatesNode,
 } from '@/server/utils/messageContent';
 
-import { runOutfitImageGeneration, extractWardrobeUrls } from './imageRetry';
+import { runOutfitImageGeneration, extractSelectedItemUrls } from './imageRetry';
 import { getPreviousStylistCache, getProfileLocation, persistMessageContent } from './helpers';
 
 export { createImageRetryStream } from './imageRetry';
@@ -51,21 +51,20 @@ async function executeParallelAgents(
     revisionNoItemChange
   );
 
-  const wardrobeUrls = extractWardrobeUrls(ragCache);
-
   const imageTask = mapWithConcurrency(
     stylistResult.outfits,
     IMAGE_GEN_CONCURRENCY,
     (outfit) =>
       runOutfitImageGeneration(
         outfit,
-        wardrobeUrls,
+        extractSelectedItemUrls(outfit, ragCache),
         stylistResult.anchor_item_image_data,
         controller,
         imageMap,
         failedImageIds,
         auditMeta?.messageId,
-        'initial'
+        'initial',
+        ragCache
       )
   );
 

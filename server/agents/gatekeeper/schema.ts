@@ -58,6 +58,11 @@ export const gatekeeperSchema: Schema = {
           description:
             'purchase_pairing / wardrobe_pairing 时：锚定单品描述（颜色+品类+关键特征）。其他类型填空字符串。',
         },
+        wardrobe_search_query: {
+          type: Type.STRING,
+          description:
+            'wardrobe_pairing 专用：用于衣橱语义检索的精简关键词（颜色 + 品类），如「白色连衣裙」「浅蓝牛仔裤」「米白衬衫」。读完整段对话历史后，以用户最终希望找到/穿到的单品为准填写，不是用户用来描述错误结果的词，也不是系统误返单品的颜色。其他类型填空字符串。',
+        },
         anchor_slot: {
           type: Type.STRING,
           description:
@@ -77,6 +82,7 @@ export const gatekeeperSchema: Schema = {
         'special_requests',
         'request_type',
         'anchor_item_summary',
+        'wardrobe_search_query',
         'anchor_slot',
         'selected_outfit_id',
         'anchor_wardrobe_id',
