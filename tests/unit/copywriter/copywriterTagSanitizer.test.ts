@@ -5,7 +5,7 @@ import {
   createCopywriterStreamSanitizer,
   sanitizeCopywriterTags,
   type CopywriterTagContext,
-} from './copywriterTagSanitizer';
+} from '@/server/utils/copywriterTagSanitizer';
 
 const WARDROBE_ID = 'cmqg5ec6b0000pvs8q5kp2358';
 const OUTFIT_ID = 'outfit_1';

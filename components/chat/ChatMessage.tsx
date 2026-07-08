@@ -1,9 +1,9 @@
-import React, { memo } from "react";
+import React, { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import Image from "next/image";
 import remarkGfm from "remark-gfm";
-import { ImageState, Message } from "@/lib/types";
-import { User, AlertTriangle, RefreshCw } from "lucide-react";
+import { ImageState, Message, MessageProgress } from "@/lib/types";
+import { User, AlertTriangle, RefreshCw, Check, Loader2, Minus } from "lucide-react";
 import { useChatHandler } from "@/hooks/useChatHandler";
 import { useImageRetry } from "@/hooks/useImageRetry";
 import { Button } from "@/components/ui/button";
@@ -188,6 +188,56 @@ const ContentRenderer = ({
   );
 };
 
+function ThinkingPanel({
+  progress,
+  isFailed,
+}: {
+  progress: MessageProgress;
+  isCompleted: boolean;
+  isFailed: boolean;
+}) {
+  const { stages } = progress;
+
+  if (!stages.length) return null;
+
+  return (
+    <div className="mb-2 w-full">
+      <div className="rounded-2xl border border-border/20 bg-muted/50 px-3.5 py-2.5 space-y-2">
+        {stages.map((stage, i) => {
+          const isDone = stage.done || isFailed;
+          const isActive = !isDone && i === stages.findIndex((s) => !s.done && !isFailed);
+          const showThinking = false; // reserved for future Chinese thinking support
+
+          return (
+            <div key={stage.key} className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                  {isDone ? (
+                    <Check className={`h-3.5 w-3.5 ${isFailed && !stage.done ? 'text-destructive' : 'text-emerald-500'}`} />
+                  ) : isActive ? (
+                    <Loader2 className="h-3.5 w-3.5 text-muted-foreground/50 animate-spin" />
+                  ) : (
+                    <Minus className="h-3 w-3 text-muted-foreground/30" />
+                  )}
+                </div>
+                <span className={`leading-none ${
+                  isActive ? 'text-muted-foreground' :
+                  isDone ? 'text-muted-foreground/60' :
+                  'text-muted-foreground/35'
+                }`}>
+                  {stage.label}
+                </span>
+              </div>
+
+              {/* thinking entry point hidden until Gemini supports Chinese thinking tokens */}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface ChatMessageProps {
   msg: Message;
   isLoading?: boolean;
@@ -195,18 +245,21 @@ interface ChatMessageProps {
 
 export const ChatMessage = memo(
   function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
-    const { handleSend } = useChatHandler();
+    const { handleSend, handleRetrySend } = useChatHandler();
     const { retryOutfitImage } = useImageRetry();
+
+    const hasProgress = msg.role === "ai" && (msg.progress?.stages.length ?? 0) > 0;
 
     const shouldRenderBubble =
       (Array.isArray(msg.content) && msg.content.length > 0) ||
       (typeof msg.content === "string" && msg.content !== "") ||
-      msg.imageUrl;
+      !!msg.imageUrl;
 
     const isGenerating =
       msg.role === "ai" &&
       msg.status === "generating" &&
-      msg.content.length === 0;
+      msg.content.length === 0 &&
+      !hasProgress;
 
     return (
       <div
@@ -232,8 +285,16 @@ export const ChatMessage = memo(
           </div>
 
           <div
-            className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
+            className={`flex flex-col gap-1 min-w-0 flex-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
           >
+            {hasProgress && msg.progress && (
+              <ThinkingPanel
+                progress={msg.progress}
+                isCompleted={msg.status === "completed"}
+                isFailed={msg.status === "failed"}
+              />
+            )}
+
             {shouldRenderBubble && (
               <div
                 className={`rounded-2xl px-5 py-3.5 ${msg.role === "user" ? "bg-gradient-to-br from-amber-400/20 to-yellow-600/10 text-black rounded-tr-sm" : "bg-muted/40 border border-border/50 text-foreground rounded-tl-sm"} shadow-sm ${msg.role === "ai" ? "prose prose-sm dark:prose-invert max-w-none" : "whitespace-pre-wrap leading-relaxed"}`}
@@ -303,7 +364,8 @@ export const ChatMessage = memo(
               </div>
             )}
 
-            {msg.role === "ai" && msg.status === "failed" && (
+            {/* AI 消息生成失败（已有内容/进度条，属于正常 retry 流程） */}
+            {msg.role === "ai" && msg.status === "failed" && msg.content.length > 0 && (
               <div className="flex items-center gap-2 mt-2 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <span className="text-xs">消息生成失败</span>
@@ -312,6 +374,23 @@ export const ChatMessage = memo(
                   size="sm"
                   className="flex items-center gap-1.5 text-xs h-auto px-2 py-1"
                   onClick={() => handleSend(msg)}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  重试
+                </Button>
+              </div>
+            )}
+
+            {/* 用户消息发送失败（请求未到服务器就断开） */}
+            {msg.role === "user" && msg.sendFailed && (
+              <div className="flex items-center gap-1.5 mt-1 text-destructive/80">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-xs">发送失败，请检查网络</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex items-center gap-1 text-xs h-auto px-2 py-0.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={() => handleRetrySend(msg)}
                 >
                   <RefreshCw className="h-3 w-3" />
                   重试
@@ -328,6 +407,8 @@ export const ChatMessage = memo(
       prev.msg.content === next.msg.content &&
       prev.msg.status === next.msg.status &&
       prev.msg.imageStates === next.msg.imageStates &&
+      prev.msg.progress === next.msg.progress &&
+      prev.msg.sendFailed === next.msg.sendFailed &&
       prev.isLoading === next.isLoading
     );
   },

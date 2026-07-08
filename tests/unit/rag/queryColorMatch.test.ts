@@ -5,7 +5,7 @@ import {
   filterItemsByQueryColor,
   itemMatchesQueryColorFamilies,
   normalizeWardrobeSearchQuery,
-} from './queryColorMatch';
+} from '@/server/utils/queryColorMatch';
 
 describe('queryColorMatch', () => {
   it('extracts white family from 白裙子', () => {

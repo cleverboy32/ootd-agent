@@ -7,7 +7,10 @@
     "build": "NODE_OPTIONS='--max-old-space-size=8192' next build",
     "start": "next start",
     "lint": "eslint && tsc --noEmit",
-    "test": "tsx --test server/**/*.test.ts",
+    "test": "tsx --test \"tests/unit/**/*.test.ts\"",
+    "test:prompts": "tsx --test \"tests/prompts/**/*.test.ts\"",
+    "test:e2e": "playwright test",
+    "replay:rag-scores": "dotenv -e .env -e .env.local -- tsx scripts/replay-rag-search-scores.ts",
     "db:migrate": "npx prisma migrate dev --name add_message_status --schema=server/db/schema.prisma",
     "db:generate": "pnpm npx prisma generate --schema=./server/db/schema.prisma",
     "db:push": "dotenv -- prisma db push",
@@ -47,6 +50,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/typography": "^0.5.19",
     "@types/async-retry": "^1.4.9",

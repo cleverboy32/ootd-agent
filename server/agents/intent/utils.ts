@@ -10,6 +10,39 @@ import {
   WeatherEnrichmentContext,
 } from './typeDefs';
 
+/**
+ * ─── LLM 输出纠偏规则清单（务必先读完再新增规则）────────────────────────
+ *
+ * 本文件里对 Gatekeeper LLM 输出做后处理的函数分两类：
+ *
+ * 【A类·空值兜底】只在 LLM 漏填某字段时补默认值，不覆盖 LLM 已做的分类判断。
+ * 风险低，可以按需增加：
+ *   - inferOccasionFromText / extractCityFromText
+ *   - buildWardrobePairingSpecialRequest / buildPurchasePairingSpecialRequest
+ *   - ACCESSORY_ANCHOR_PATTERN 匹配（enrichIntentFromContext 内）
+ *   - extractConfirmedWardrobeId（解析系统自己生成的确认字符串，非猜测）
+ *
+ * 【B类·矛盾纠正/分类裁决】覆盖 LLM 已给出的显式判断，用于修正已知的
+ * 系统性误判。这类规则有风险（可能误伤未覆盖到的正常场景），当前清单：
+ *   1. correctAnchorSlot                — anchor_slot 与文本描述矛盾时纠正
+ *   2. correctDressingClimate           — dressing_climate 与锚点描述矛盾时纠正
+ *   3. coerceWardrobeBrowseIntent       — clarify → wardrobe_pairing（衣橱浏览类误判）
+ *   4. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景误判为微调）
+ *
+ * 新增 B 类规则前请先确认：
+ *   - 能否通过调整 Gatekeeper prompt/schema 描述解决？优先改 prompt。
+ *   - 触发条件是否足够窄、可用正则/关键词稳定判断？不要为单一场景写规则，
+ *     应抽象成通用信号（如"是否有明确修改动作词"），否则会陷入无限打补丁。
+ *   - 是否补充了对应单元测试？B 类规则必须有测试覆盖。
+ *   - B 类规则数量建议控制在个位数；持续增长应考虑用统一的分类裁决器替代零散规则。
+ *
+ * 调用顺序（server/agents/gatekeeper/agent.ts）：
+ *   rawIntent → coerceWardrobeBrowseIntent → adjudicateNewTaskVsRevisionIntent → enrichIntentFromContext
+ * 两者作用的 request_type 互斥（clarify vs feedback_revision），暂无顺序冲突；
+ * 新增规则时需重新评估是否存在交叉影响。
+ * ──────────────────────────────────────────────────────────────────────
+ */
+
 // ─── Regex patterns ────────────────────────────────────────────────────────────
 
 export const ACCESSORY_ANCHOR_PATTERN =
@@ -23,6 +56,16 @@ const MULTIPLE_OUTFITS_IN_TEXT = /方案二|第二套|outfit_2|第\s*2\s*套|两
 
 const ANCHOR_SLOT_SET = new Set<string>(['top', 'bottom', 'dress', 'shoes', 'outerwear', 'accessory']);
 const DRESSING_CLIMATE_SET = new Set<string>(['cold', 'warm', 'mild']);
+
+const REVISION_TARGET_PATTERN =
+  /第一套|第二套|这套|那套|上一套|刚才那套|上面那套|方案一|方案二|outfit_[12]|第\s*[12]\s*套/;
+const REVISION_ACTION_PATTERN =
+  /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
+const NEW_OUTFIT_REQUEST_PATTERN =
+  /穿啥|穿什么|怎么穿|怎么搭|搭配一套|配一套|来一套|出一套|穿搭方案|应该穿|适合穿/;
+const OCCASION_KEYWORDS =
+  '打球|踢球|运动|健身|跑步|爬山|徒步|约会|通勤|上班|面试|聚会|旅行|逛街|打篮球|踢足球|篮球|足球';
+const NEW_OCCASION_PATTERN = new RegExp(`(?:去.{0,8})?(?:${OCCASION_KEYWORDS})`);
 
 const ANCHOR_COLD_CLIMATE_HINT =
   /冬季|冬天|寒冷|下雪|保暖|winter|cold|snow|羽绒|厚外套|毛呢|呢大衣|羊绒|棉服/i;
@@ -69,18 +112,16 @@ export function extractAssistantTextFromHistory(history: Content[]): string {
     .join('\n');
 }
 
-export function collectImageParts(history: Content[], currentInput: Part[]): Part[] {
-  const images: Part[] = [];
-  for (const msg of history) {
-    if (msg.role !== 'user') continue;
-    for (const part of msg.parts ?? []) {
-      if ('inlineData' in part && part.inlineData) images.push(part);
-    }
-  }
-  for (const part of currentInput) {
-    if ('inlineData' in part && part.inlineData) images.push(part);
-  }
-  return images;
+function isImagePart(part: Part): boolean {
+  return 'inlineData' in part && Boolean(part.inlineData);
+}
+
+/** 收集历史中用户上传过的图片 + 当前输入的图片，用于跨轮次找回锚点图（如先发图后补场合）。 */
+function collectImageParts(history: Content[], currentInput: Part[]): Part[] {
+  const historyImages = history
+    .filter((msg) => msg.role === 'user')
+    .flatMap((msg) => (msg.parts ?? []).filter(isImagePart));
+  return [...historyImages, ...currentInput.filter(isImagePart)];
 }
 
 export function collectLatestImageData(
@@ -412,10 +453,6 @@ export function extractAnchorSummaryFromContext(contextText: string, currentText
     const match = haystack.match(pattern);
     if (match?.[1]?.trim()) return match[1].trim();
   }
-  if (/不是.*绿/.test(currentText)) {
-    const whiteDress = haystack.match(/白[\u4e00-\u9fa5]{0,4}裙/);
-    if (whiteDress) return whiteDress[0];
-  }
   return '';
 }
 
@@ -454,6 +491,43 @@ export function coerceWardrobeBrowseIntent(
     request_type: 'wardrobe_pairing',
     anchor_item_summary: summary,
     anchor_slot: slot,
+    special_requests: intent.special_requests.trim() || currentText,
+  };
+}
+
+export function hasExplicitRevisionSignal(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  return REVISION_TARGET_PATTERN.test(normalized) || REVISION_ACTION_PATTERN.test(normalized);
+}
+
+export function looksLikeNewOutfitTask(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  return NEW_OUTFIT_REQUEST_PATTERN.test(normalized) || NEW_OCCASION_PATTERN.test(normalized);
+}
+
+/**
+ * 通用 new-task vs revision-task 裁决：
+ * LLM 容易被上一轮方案带偏，把「新场景/新活动穿搭」误判为 feedback_revision。
+ * 这里不识别具体场景名，只判断本轮是否缺少明确修订信号且像一个新的穿搭目标。
+ */
+export function adjudicateNewTaskVsRevisionIntent(
+  intent: GatekeeperIntent,
+  currentInput: Part[]
+): GatekeeperIntent {
+  if (intent.request_type !== 'feedback_revision') return intent;
+
+  const currentText = extractTextFromParts(currentInput);
+  if (!looksLikeNewOutfitTask(currentText) || hasExplicitRevisionSignal(currentText)) {
+    return intent;
+  }
+
+  console.log('[GATEKEEPER] Adjudicated feedback_revision → wardrobe_outfit (new outfit task)');
+  return {
+    ...intent,
+    request_type: 'wardrobe_outfit',
+    selected_outfit_id: '',
     special_requests: intent.special_requests.trim() || currentText,
   };
 }

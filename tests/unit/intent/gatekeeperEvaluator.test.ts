@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateGatekeeperOutput } from './gatekeeperEvaluator';
+import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { normalizeGatekeeperIntent } from '@/server/agents/intent';
 import { finalizeGatekeeperResult } from '@/server/agents/intent';
 

@@ -116,6 +116,7 @@ export function ChatInputArea({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="上传图片"
               className="h-10 w-10 text-muted-foreground hover:text-foreground rounded-full shrink-0"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading} // 上传时禁用
@@ -133,6 +134,7 @@ export function ChatInputArea({
             />
             <Button
               size="icon"
+              aria-label="发送消息"
               onClick={onSend} // 使用封装后的 onSend
               disabled={isSendDisabled} // 使用计算出的禁用状态
               className="h-10 w-10 bg-gradient-to-br from-amber-400 to-yellow-600 hover:brightness-110 text-black rounded-full shrink-0 ml-2 disabled:opacity-50 transition-all"

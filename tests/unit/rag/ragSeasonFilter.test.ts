@@ -5,7 +5,7 @@ import {
   applySeasonFilter,
   buildSeasonFilterContext,
   shouldExcludeBySeason,
-} from './ragSeasonFilter';
+} from '@/server/utils/ragSeasonFilter';
 
 function item(
   overrides: Partial<WardrobeSearchResult> & Pick<WardrobeSearchResult, 'id' | 'subCategory'>

@@ -61,6 +61,7 @@ export interface StreamHandlers {
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
   onImageGenerationFailed: (data: { id: string; message: string; alt: string; }) => void;
   onWardrobeCandidates?: (data: { items: WardrobeCandidateItem[] }) => void;
+  onProgress?: (data: { stage: string; label?: string; done?: boolean; thinking?: string }) => void;
   onError: (message: string) => void;
   onStreamEnd: () => void;
 }
@@ -155,6 +156,9 @@ export const streamResponse = async (
               break;
             case 'wardrobe_candidates':
               handlers.onWardrobeCandidates?.(data);
+              break;
+            case 'progress':
+              handlers.onProgress?.(data);
               break;
             case 'error':
               handlers.onError(data.message);

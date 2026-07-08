@@ -1,4 +1,4 @@
-import { Content, Part } from '@google/genai';
+import { Content, Part, ThinkingLevel } from '@google/genai';
 import { genAI } from '@/server/services/ai';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
@@ -11,6 +11,7 @@ import {
   normalizeGatekeeperIntent,
   finalizeGatekeeperResult,
   coerceWardrobeBrowseIntent,
+  adjudicateNewTaskVsRevisionIntent,
 } from '../intent';
 import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
@@ -44,6 +45,8 @@ export interface GatekeeperResult {
   wardrobe_candidates?: WardrobeAnchorCandidate[];
   /** 是否建议在回复中提示用户告知城市以获取天气 */
   suggestCityForWeather?: boolean;
+  /** Gatekeeper 的推理过程文本（仅 thinking 模式下存在） */
+  thinking?: string;
 }
 
 function buildContextText(history: Content[], currentInput: Part[]): string {
@@ -101,10 +104,20 @@ export async function callGatekeeperAgent(
             temperature: 0.0,
             responseMimeType: 'application/json',
             responseSchema: gatekeeperSchema,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM, includeThoughts: true },
           },
         }),
       { label: 'Gatekeeper', maxRetries: 4 }
     );
+
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
+    const thinkingText = parts
+      .filter((p) => p.thought === true)
+      .map((p) => p.text ?? '')
+      .join('');
+    if (thinkingText) {
+      console.log('[GATEKEEPER_AGENT] Thinking:\n', thinkingText);
+    }
 
     const responseText = response.text;
     if (!responseText) {
@@ -116,7 +129,8 @@ export async function callGatekeeperAgent(
     const parsed = JSON.parse(responseText) as GatekeeperResult;
     const rawIntent = normalizeGatekeeperIntent(parsed.extracted_intent);
     const intentBeforeCoerce = rawIntent.request_type;
-    const coercedIntent = coerceWardrobeBrowseIntent(rawIntent, history, currentInput);
+    const browsedIntent = coerceWardrobeBrowseIntent(rawIntent, history, currentInput);
+    const coercedIntent = adjudicateNewTaskVsRevisionIntent(browsedIntent, currentInput);
     const wasCoercedBrowse =
       intentBeforeCoerce === 'clarify' && coercedIntent.request_type === 'wardrobe_pairing';
 
@@ -179,11 +193,13 @@ export async function callGatekeeperAgent(
       weather_lookup: parsed.weather_lookup,
       wardrobe_candidates: result.wardrobe_candidates,
       l1,
+      thinking: thinkingText || undefined,
     });
 
     return {
       ...result,
       weather_lookup: parsed.weather_lookup,
+      thinking: thinkingText || undefined,
     };
   } catch (error) {
     console.error('[GATEKEEPER_AGENT] Error calling Gatekeeper Agent:', error);

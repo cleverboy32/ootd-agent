@@ -14,6 +14,17 @@ export type MessageContentPart = {
   wardrobeCandidates?: WardrobeCandidateItem[];
 };
 
+export type ProgressStage = {
+  key: string;
+  label: string;
+  done: boolean;
+};
+
+export type MessageProgress = {
+  stages: ProgressStage[];
+  thinking?: string;
+};
+
 export type MessageStatus = 'generating' | 'completed' | 'failed';
 
 export type ImageState = 'loading' | 'failed' | string;
@@ -26,6 +37,9 @@ export type Message = {
   timestamp: number;
   imageUrl?: string; // Add optional imageUrl for client-side rendering
   imageStates?: Record<string, ImageState>; // key = outfit id, value = url | 'loading' | 'failed'
+  progress?: MessageProgress;
+  /** 用户消息发送后请求完全失败（如网络断开），等待用户手动重试 */
+  sendFailed?: boolean;
 };
 
 export type Conversation = {

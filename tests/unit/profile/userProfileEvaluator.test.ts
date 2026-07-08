@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { UserProfileResult } from '@/server/agents/user-profile';
-import { evaluateUserProfileOutput } from './userProfileEvaluator';
+import { evaluateUserProfileOutput } from '@/server/utils/userProfileEvaluator';
 
 const baseProfile: UserProfileResult = {
   name: '',

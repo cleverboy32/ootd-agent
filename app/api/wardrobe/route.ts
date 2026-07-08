@@ -6,6 +6,7 @@ import { genAI } from 'server/services/ai';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { GenerateContentResponse } from '@google/genai';
 // [MODIFIED] Import both embedding generators
+import { buildWardrobeDocumentEmbeddingText } from '@/server/utils/embeddingText';
 import { generateDocumentEmbedding } from 'server/services/embedding';
 import { deleteWardrobeItems } from '@/server/services/wardrobeService';
 import { is429Error, withRetryOn429 } from '@/server/utils/retryOn429';
@@ -148,7 +149,14 @@ export async function POST(req: Request) {
     // --- [MODIFIED] Switched to Multimodal Embedding ---
     console.log('[API /api/wardrobe] Generating multimodal embedding...');
     // 1. Prepare the text part from AI analysis
-    const textForEmbedding = `Category: ${subCategory}. Description: ${description}. Colors: ${colors.join(', ')}. Tags: ${tags.join(', ')}. Season: ${season.join(', ')}. Material: ${material.join(', ')}.`;
+    const textForEmbedding = buildWardrobeDocumentEmbeddingText({
+      subCategory,
+      description,
+      colors,
+      tags,
+      season,
+      material,
+    });
     // 2. Prepare the image part (we already have it from the start)
     const imagePartForEmbedding = await urlToGenerativePart(imageUrl);
     const embeddingVector = await withRetryOn429(

@@ -4,6 +4,7 @@ import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
+import { isAthleticOccasion } from '@/server/utils/ragMatchQuality';
 import { WardrobeSearchQuery, parseWardrobeSearchSlot, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { ClothingItem } from '@prisma/client';
 import {
@@ -126,6 +127,7 @@ async function planWardrobeSearchQueries(
   console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
 
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchorItem;
+  const athleticOccasion = isAthleticOccasion(intent, userMessage);
   const pairingBlock = isPairing
     ? `
 【锚定单品】
@@ -164,7 +166,8 @@ ${
           : ''
       }`
     : `- 若用户要「一套」穿搭：按槽位检索（上装 + 下装 + 鞋，视天气加外套），不要混搭裤装与连衣裙路线。
-- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。`
+- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。
+${athleticOccasion ? '- 当前为【运动场合】：检索 query 必须体现 athletic/sports 功能属性，下装搜 sports shorts，鞋搜 basketball/athletic sneakers。' : ''}`
 }
 
 请输出衣橱检索 query 列表：
@@ -369,6 +372,7 @@ ${JSON.stringify(previousOutfit, null, 2)}
 ${anchorBlock}${revisionBlock}
 【用户衣橱单品列表 (RAG 检索结果 — 互补单品)】
 ${wardrobeXml || (isRevision && previousCache ? '*(微调模式：优先复用上一轮方案中的衣橱单品 id)*' : '*(用户衣橱为空，请推荐全新单品)*')}
+${isAthleticOccasion(intent, extractUserMessage(initialParts)) ? '\n【提醒】当前为运动场合：请先阅读 <wardrobe_match_summary>，对 status=weak/none 的核心槽位使用 new_item，禁止硬选时装类单品。' : ''}
 `;
 
   const chat = genAI.chats.create({

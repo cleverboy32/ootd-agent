@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateCopywriterOutput } from './copywriterEvaluator';
+import { evaluateCopywriterOutput } from '@/server/utils/copywriterEvaluator';
 
 const WARDROBE_ID = 'cmqg5ec6b0000pvs8q5kp2358';
 

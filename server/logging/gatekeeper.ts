@@ -16,6 +16,7 @@ export interface GatekeeperAuditLogEntry {
   weather_lookup?: { needed: boolean; city: string };
   wardrobe_candidates?: unknown[];
   l1: GatekeeperEvalResult;
+  thinking?: string;
 }
 
 const AUDIT_LOG_PATH = auditLogPath('gatekeeper-audit.jsonl');

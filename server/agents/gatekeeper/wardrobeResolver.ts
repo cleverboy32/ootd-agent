@@ -2,6 +2,7 @@ import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
 import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
 import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
+import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import type {
   AnchorSlot,
   WardrobeAnchorCandidate,
@@ -74,11 +75,19 @@ export async function resolveWardrobeAnchor(
   }
 
   const mainCategory = effectiveSlot ? slotToMainCategory(effectiveSlot) : undefined;
-  const rawResults = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1, mainCategory);
+  const searchSlot = effectiveSlot ? (effectiveSlot as WardrobeSearchSlot) : undefined;
+  const searchOptions = searchSlot ? { slot: searchSlot } : undefined;
+  const rawResults = await searchWardrobeItemsByText(
+    query,
+    clientId,
+    MAX_CANDIDATES + 1,
+    mainCategory,
+    searchOptions
+  );
 
   let results = rawResults;
   if (results.length === 0 && mainCategory) {
-    results = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1);
+    results = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1, undefined, searchOptions);
   }
 
   const { matched, rejected } = filterItemsByQueryColor(query, results);

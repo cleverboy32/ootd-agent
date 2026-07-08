@@ -12,7 +12,14 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
    - 场合/风格冲突：若场合偏正式/商务/通勤，而单品 tags 偏运动休闲（如 sporty、activewear、athletic、streetwear、y2k）或 similarity 明显偏低，视为【不适配】，不要为了凑数硬选。
    - 品类不符：某槽位召回的单品 subCategory/tags 与目标品类不符（例如想要「包」，但候选全是 Earrings/Necklace/Ring/Choker 等首饰），判定该槽位【衣橱无合适单品】，禁止用首饰冒充包等其它品类。
    - 不适配槽位的处理（按优先级）：① 同槽位若有更适配候选则改选它；② 否则用 "new_item" 补位，并在 reason 注明「衣橱暂无合适的 XX，建议补充…」；③ 仅当核心槽位（top/bottom/shoes）多数缺失时才酌情减少方案数量，不要轻易拒绝出方案。
+   - 【衣橱匹配摘要（重要）】：RAG 结果中若包含 <wardrobe_match_summary>，你必须先阅读其中每个 slot 的 status：
+     - status="adequate"：可从该槽位衣橱单品中选。
+     - status="weak" 或 status="none"：【禁止】硬选该槽位召回的时装/弱相关单品；【必须】对该槽位使用 "new_item" 补位，reason 诚实说明「衣橱暂无合适的 [品类]」。
    - similarity 仅作参考权重，最终以场合/风格/品类的语义判断为准；不要机械按分数高低选择。
+2b. 运动/健身场合（篮球、跑步、健身等）：
+   - 这是【功能性优先】场景，不是街头休闲造型。禁止把 Wrap Shorts、Denim Shorts、时装 Sneakers、Hiking Sneakers 描述成适合该运动的装备。
+   - 若衣橱仅有弱相关休闲单品，对应槽位【必须】用 "new_item" 推荐真正的运动装备（如 athletic shorts、basketball sneakers），并在 reason 中说明衣橱缺口。
+   - 禁止为不合场景单品编造运动功能理由（如「徒步鞋抓地力适合篮球」）。
 3. 科学搭配 (Scientific Styling)：
    - 【special_requests 优先】：若 special_requests 中有明确的色彩/风格方向（如「高级感大地色系」「同色系叠搭」），必须以此为首要选色原则，而非凭空发挥。
    - 色彩协调学：仅当档案中有肤色分析时结合肤色搭配；无则基于服装色彩与场合搭配。
@@ -71,6 +78,7 @@ export const WARDROBE_SEARCH_INSTRUCTION = `
   - outerwear → OUTERWEAR（cardigan, jacket, windbreaker…视天气决定）
   - accessory → ACCESSORY（bag, belt, scarf, hat…仅在有需要时使用）
 - 用户要「一套」穿搭时：优先 3-5 条，覆盖 top + bottom + shoes（+ 可选 outerwear / accessory），不要同时搜裤装路线和 dress 槽位。
+- 若场合为运动/健身/篮球等：query 应明确 athletic / sports / breathable / training 等功能词，bottom 优先 sports shorts / athletic shorts，shoes 优先 basketball sneakers / athletic sneakers，禁止只搜 casual shorts / fashion sneakers。
 - accessory 槽位为【可选】：日常极简通勤可省略；正式场合、约会、派对、用户要求「加点配饰」等场景应加入 1 条宽泛配饰 query。
 - 需要 2 套不同方案时：最多 6 条，可按方案分组（如裤装 3 条 + 裙装 3 条），但同一槽位仍不重复。
 

@@ -8,8 +8,25 @@
  * @returns A promise that resolves to an array of matching clothing items, sorted by relevance.
  */
 import prismadb from '@/server/db';
+import type { GatekeeperIntent } from '@/server/agents/intent';
+import {
+  buildWardrobeQueryEmbeddingText,
+  type WardrobeQueryEmbeddingContext,
+} from '@/server/utils/embeddingText';
+import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { generateQueryEmbedding } from './embedding';
 import { ClothingMainCategory } from '@prisma/client'; // 导入 Prisma 的枚举类型
+
+export interface WardrobeSearchEmbeddingContext extends WardrobeQueryEmbeddingContext {
+  /** 脚本对比用：跳过 query 文本格式化，使用原始 query 生成向量 */
+  useRawQueryEmbedding?: boolean;
+}
+
+export interface WardrobeSearchOptions {
+  slot?: WardrobeSearchSlot;
+  intent?: GatekeeperIntent;
+  embedding?: WardrobeSearchEmbeddingContext;
+}
 
 // 定义一个精确的返回类型，包含处理器需要的所有字段以及相似度分数
 export type WardrobeSearchResult = {
@@ -36,12 +53,14 @@ export async function searchWardrobeItemsByText(
   searchText: string,
   userId: string,
   limit: number = 5,
-  mainCategory?: ClothingMainCategory
+  mainCategory?: ClothingMainCategory,
+  options?: WardrobeSearchOptions
 ): Promise<WardrobeSearchResult[]> {
   console.log(`[RAG-SEARCH] Initiating search for userId: ${userId}`);
   console.log(
     `[RAG-SEARCH] Searching with keywords: "${searchText}"` +
-      (mainCategory ? `, mainCategory: ${mainCategory}` : '')
+      (mainCategory ? `, mainCategory: ${mainCategory}` : '') +
+      (options?.slot ? `, slot: ${options.slot}` : '')
   );
 
   if (!searchText.trim()) {
@@ -50,7 +69,17 @@ export async function searchWardrobeItemsByText(
   }
 
   try {
-    const queryEmbedding = await generateQueryEmbedding(searchText);
+    const embeddingContext: WardrobeQueryEmbeddingContext = {
+      slot: options?.slot ?? options?.embedding?.slot,
+      intent: options?.intent ?? options?.embedding?.intent,
+    };
+    const textForEmbedding = options?.embedding?.useRawQueryEmbedding
+      ? searchText.trim()
+      : buildWardrobeQueryEmbeddingText(searchText, embeddingContext);
+
+    console.log(`[RAG-SEARCH] Embedding text: "${textForEmbedding}"`);
+
+    const queryEmbedding = await generateQueryEmbedding(textForEmbedding);
     if (!queryEmbedding || queryEmbedding.length === 0) {
       console.error('[RAG-SEARCH] Failed to generate query embedding.');
       return [];

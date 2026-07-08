@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildOutfitSelectionGatekeeperReply,
+  adjudicateNewTaskVsRevisionIntent,
+  coerceWardrobeBrowseIntent,
   correctAnchorSlot,
   correctDressingClimate,
   extractConfirmedWardrobeId,
@@ -10,7 +12,7 @@ import {
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
 } from '@/server/agents/intent';
-import type { Content } from '@google/genai';
+import type { Content, Part } from '@google/genai';
 
 describe('inferAnchorSlotFromSummary', () => {
   it('classifies earrings and necklaces as accessory', () => {
@@ -266,6 +268,105 @@ describe('extractOutfitIdFromText', () => {
     assert.equal(extractOutfitIdFromText('第一套去掉外套'), 'outfit_1');
     assert.equal(extractOutfitIdFromText('第二套鞋换一下'), 'outfit_2');
     assert.equal(extractOutfitIdFromText('去掉外套'), '');
+  });
+});
+
+describe('adjudicateNewTaskVsRevisionIntent', () => {
+  it('coerces a new activity request away from feedback_revision', () => {
+    const result = adjudicateNewTaskVsRevisionIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '踢足球',
+        special_requests: '在上一轮搭配基础上，针对踢足球场景进行调整',
+        selected_outfit_id: '',
+      }),
+      [{ text: '我还想去踢足球，应该穿啥' }]
+    );
+
+    assert.equal(result.request_type, 'wardrobe_outfit');
+    assert.equal(result.selected_outfit_id, '');
+  });
+
+  it('keeps explicit outfit edits as feedback_revision', () => {
+    const result = adjudicateNewTaskVsRevisionIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '运动',
+        special_requests: '第一套改成踢足球也能穿的',
+        selected_outfit_id: 'outfit_1',
+      }),
+      [{ text: '第一套改成踢足球也能穿的' }]
+    );
+
+    assert.equal(result.request_type, 'feedback_revision');
+    assert.equal(result.selected_outfit_id, 'outfit_1');
+  });
+});
+
+describe('coerceWardrobeBrowseIntent', () => {
+  const emptyHistory: Content[] = [];
+
+  function currentInput(text: string): Part[] {
+    return [{ text }];
+  }
+
+  it('coerces clarify to wardrobe_pairing for a browse query', () => {
+    const result = coerceWardrobeBrowseIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'clarify',
+        special_requests: '',
+      }),
+      emptyHistory,
+      currentInput('我衣橱里有没有白色裙子')
+    );
+
+    assert.equal(result.request_type, 'wardrobe_pairing');
+    assert.match(result.anchor_item_summary, /白.{0,4}裙/);
+  });
+
+  it('coerces clarify when user corrects a previously shown wrong item', () => {
+    const history: Content[] = [
+      { role: 'user', parts: [{ text: '我衣橱里有没有白色裙子' }] },
+      { role: 'model', parts: [{ text: '找到了一件绿色的裙子，是这件吗？' }] },
+    ];
+
+    const result = coerceWardrobeBrowseIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'clarify',
+        special_requests: '',
+      }),
+      history,
+      currentInput('这不是绿色的裙子吗')
+    );
+
+    assert.equal(result.request_type, 'wardrobe_pairing');
+    assert.match(result.anchor_item_summary, /白.{0,4}裙/);
+  });
+
+  it('does not coerce clarify when the query is unrelated to wardrobe browsing', () => {
+    const result = coerceWardrobeBrowseIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'clarify',
+        special_requests: '',
+      }),
+      emptyHistory,
+      currentInput('你好呀')
+    );
+
+    assert.equal(result.request_type, 'clarify');
+  });
+
+  it('does not touch non-clarify request types', () => {
+    const result = coerceWardrobeBrowseIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_outfit',
+        special_requests: '',
+      }),
+      emptyHistory,
+      currentInput('我衣橱里有没有白色裙子')
+    );
+
+    assert.equal(result.request_type, 'wardrobe_outfit');
   });
 });
 

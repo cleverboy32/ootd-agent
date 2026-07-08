@@ -103,7 +103,11 @@ export function createMultiAgentStream(
       let mainError: Error | null = null;
 
       try {
-        const { historyForAI, failedMessage } = await buildContext(conversationId, finalMessageId);
+        // 并行启动 buildContext 和 getProfileLocation，两者互相独立
+        const buildContextPromise = buildContext(conversationId, finalMessageId);
+        const profileLocationPromise = getProfileLocation(clientId);
+
+        const { historyForAI, failedMessage } = await buildContextPromise;
 
         let cachedStylistResult: StylistResult | null = null;
         let cachedProfile: UserProfileResult | null = null;
@@ -151,9 +155,12 @@ export function createMultiAgentStream(
             sendEvent(controller, 'metadata', { messageId: finalMessageId });
           }
 
+          // 先发 progress 让用户看到第一步，同时等待已经并行启动的 profileLocation
+          sendEvent(controller, 'progress', { stage: 'gatekeeper', label: '正在理解你的需求...' });
+
           const gatekeeperCtx: GatekeeperContext = {
             clientIp: options.clientIp,
-            profileLocation: await getProfileLocation(clientId),
+            profileLocation: await profileLocationPromise,
             clientId,
           };
 
@@ -164,18 +171,29 @@ export function createMultiAgentStream(
             { conversationId, messageId: finalMessageId }
           );
 
+          sendEvent(controller, 'progress', {
+            stage: 'gatekeeper',
+            done: true,
+            label: '已理解需求',
+            thinking: gatekeeperResult.thinking,
+          });
+
           // --- style_advice 分支：直接给建议，不进入搭配流程 ---
           if (gatekeeperResult.extracted_intent.request_type === 'style_advice') {
             activeIntent = gatekeeperResult.extracted_intent;
             const adviceProfile = clientId
               ? await loadUserProfileFromDb(clientId)
               : buildUserProfileFallback();
+
+            sendEvent(controller, 'progress', { stage: 'stylist', label: '正在分析搭配知识...' });
             const adviceResult = await callStylistAdvice(
               historyForAI,
               initialParts,
               activeIntent,
               adviceProfile
             );
+            sendEvent(controller, 'progress', { stage: 'stylist', done: true, label: '分析完成' });
+            sendEvent(controller, 'progress', { stage: 'copywriter', label: '正在撰写建议...' });
             await callCopywriterAdviceStream(
               adviceResult,
               adviceProfile.personal_style,
@@ -256,6 +274,8 @@ export function createMultiAgentStream(
             }
           }
 
+          sendEvent(controller, 'progress', { stage: 'stylist', label: '搭配师正在为你选品...' });
+
           let stylistResult: StylistResult;
           try {
             stylistResult = await callStylistAgent(
@@ -294,6 +314,9 @@ export function createMultiAgentStream(
             console.error('[ORCHESTRATOR] Stylist 灾难性失败:', e);
             throw new Error('StylistFailed: 搭配师开小差了，请稍后再试~');
           }
+
+          sendEvent(controller, 'progress', { stage: 'stylist', done: true, label: '选品完成' });
+          sendEvent(controller, 'progress', { stage: 'copywriter', label: '正在撰写搭配方案...' });
 
           // 对比前后方案单品，检测 feedback_revision 是否真的换了品
           let revisionNoItemChange = false;

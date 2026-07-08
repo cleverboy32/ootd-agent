@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { applyVerifiedVisualFields, readVerifiedVisualProfile } from './userProfileVisual';
+import { applyVerifiedVisualFields, readVerifiedVisualProfile } from '@/server/utils/userProfileVisual';
 
 const baseResult = {
   name: '',

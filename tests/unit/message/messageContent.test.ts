@@ -8,7 +8,7 @@ import {
   extractStylistCache,
   extractTextContent,
   patchMessageImageResult,
-} from './messageContent';
+} from '@/server/utils/messageContent';
 
 describe('messageContent', () => {
   const stylistCache = {
@@ -38,7 +38,7 @@ describe('messageContent', () => {
       visual_features: { hair_color: 'unknown', detected_features: 'none' },
     },
     wardrobe_items: [],
-  } satisfies import('./messageContent').StylistCacheNode;
+  } satisfies import('@/server/utils/messageContent').StylistCacheNode;
 
   it('buildPersistedMessageContent keeps stylist_cache alongside text', () => {
     const parts = buildPersistedMessageContent({

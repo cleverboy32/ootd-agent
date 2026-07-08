@@ -11,6 +11,12 @@ import {
   buildSeasonFilterContext,
   expandedSearchLimit,
 } from '@/server/utils/ragSeasonFilter';
+import {
+  buildSlotMatchAssessments,
+  filterResultsForAthleticContext,
+  formatSlotMatchSummaryXml,
+  isAthleticOccasion,
+} from '@/server/utils/ragMatchQuality';
 import { ClothingItem } from '@prisma/client';
 import type { AnchorItemInfo, GatekeeperIntent } from '../intent';
 
@@ -73,7 +79,12 @@ export async function performRagSearch(
   userId: string,
   ragCache: Map<string, ClothingItem>,
   logContext?: RagSearchContext
-): Promise<{ xmlString: string; indexMap: Map<string, string>; items: ClothingItem[] }> {
+): Promise<{
+  xmlString: string;
+  indexMap: Map<string, string>;
+  items: ClothingItem[];
+  matchSummaryXml: string;
+}> {
   console.log('[RAG_HANDLER] Starting RAG search process...');
 
   const queries = searchQueries
@@ -81,7 +92,7 @@ export async function performRagSearch(
     .filter((item) => item.query.length > 0);
   if (queries.length === 0) {
     console.log('[RAG_HANDLER] No search queries provided. Skipping RAG search.');
-    return { xmlString: '', indexMap: new Map(), items: [] };
+    return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
   }
 
   console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
@@ -111,11 +122,20 @@ export async function performRagSearch(
       results: WardrobeSearchResult[];
     }> = [];
 
+    const athletic = isAthleticOccasion(logContext?.intent, logContext?.userMessage);
+    if (athletic) {
+      console.log('[RAG_HANDLER] Athletic occasion detected — applying slot fitness filter');
+    }
+
     for (const { query, slot } of queries) {
       const mainCategory = resolveMainCategoryForSlot(slot);
       const parsedSlot = parseWardrobeSearchSlot(slot);
-      const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory);
-      const searchResults = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
+      const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
+        slot: parsedSlot,
+        intent: logContext?.intent,
+      });
+      const seasonFiltered = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
+      const searchResults = filterResultsForAthleticContext(seasonFiltered, parsedSlot, athletic);
       perQueryResults.push({
         query,
         slot,
@@ -156,7 +176,7 @@ export async function performRagSearch(
 
     if (mergedResults.length === 0) {
       console.log('[RAG_HANDLER] No relevant items found in wardrobe.');
-      return { xmlString: '', indexMap: new Map(), items: [] };
+      return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
     }
 
     console.log(`[RAG_HANDLER] Found ${mergedResults.length} unique items. Caching and formatting to XML.`);
@@ -174,13 +194,24 @@ export async function performRagSearch(
 
     clothingItems.forEach((item) => ragCache.set(item.id, item));
 
+    const slotAssessments = buildSlotMatchAssessments(perQueryResults, logContext?.intent, logContext?.userMessage);
+    const matchSummaryXml = formatSlotMatchSummaryXml(slotAssessments, athletic);
+    if (matchSummaryXml) {
+      console.log('[RAG_HANDLER] Slot match summary:', slotAssessments);
+    }
+
     const { xml: xmlString, indexMap } = formatResultsToXml(mergedResults);
     console.log('[RAG_HANDLER] Index map:', Object.fromEntries(indexMap));
 
-    return { xmlString, indexMap, items: clothingItems };
+    return {
+      xmlString: matchSummaryXml + xmlString,
+      indexMap,
+      items: clothingItems,
+      matchSummaryXml,
+    };
   } catch (error) {
     console.error('[RAG_HANDLER] Error during RAG search:', error);
-    return { xmlString: '', indexMap: new Map(), items: [] };
+    return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
   }
 }
 
