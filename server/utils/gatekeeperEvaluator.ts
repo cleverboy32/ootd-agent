@@ -112,18 +112,11 @@ function appendDressingClimateWarnings(
 ): void {
   if (!isComplete || !isOutfitGeneratingIntent(intent)) return;
 
-  if (!parseDressingClimate(intent.dressing_climate)) {
-    issues.push({
-      code: 'MISSING_DRESSING_CLIMATE',
-      severity: 'warn',
-      message: 'Outfit flow marked complete but dressing_climate is empty',
-    });
-  }
+  const current = parseDressingClimate(intent.dressing_climate);
+  if (!current) return;
 
   const fromAnchor = inferDressingClimateFromAnchor(intent);
-  const current = parseDressingClimate(intent.dressing_climate);
   if (
-    current &&
     fromAnchor &&
     ((fromAnchor === 'cold' && current === 'warm') || (fromAnchor === 'warm' && current === 'cold'))
   ) {

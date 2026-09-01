@@ -27,7 +27,7 @@ import {
  *   1. correctAnchorSlot                — anchor_slot 与文本描述矛盾时纠正
  *   2. correctDressingClimate           — dressing_climate 与锚点描述矛盾时纠正
  *   3. coerceWardrobeBrowseIntent       — clarify → wardrobe_pairing（衣橱浏览类误判）
- *   4. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景误判为微调）
+ *   4. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景/整轮重做误判为微调）
  *   5. resolveWardrobeAnchorIdFromHistory — 口头确认/幻觉 id 时用上轮展示的候选纠偏
  *
  * 新增 B 类规则前请先确认：
@@ -62,6 +62,8 @@ const REVISION_TARGET_PATTERN =
   /第一套|第二套|这套|那套|上一套|刚才那套|上面那套|方案一|方案二|outfit_[12]|第\s*[12]\s*套/;
 const REVISION_ACTION_PATTERN =
   /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
+const FULL_REGEN_PATTERN =
+  /都不好|都不满意|都不喜欢|全都不|全部重(?:做|来|新)|换一批|重新生成|再来一套|再来几套|重新(?:搭配|推荐|出方案)|搭配得?太烂|搭配太烂|太丑|太差|不喜欢这套|这套不行/;
 const NEW_OUTFIT_REQUEST_PATTERN =
   /穿啥|穿什么|怎么穿|怎么搭|搭配一套|配一套|来一套|出一套|穿搭方案|应该穿|适合穿/;
 const OCCASION_KEYWORDS =
@@ -570,6 +572,20 @@ export function coerceWardrobeBrowseIntent(
   };
 }
 
+export function looksLikeFullRegenRequest(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+
+  if (FULL_REGEN_PATTERN.test(normalized)) return true;
+
+  // 「重新搭配/重做」且未指定要改哪一套 → 整轮重做，不是微调
+  if (/重新(?:搭配|做|来|推荐)/.test(normalized) && !REVISION_TARGET_PATTERN.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function hasExplicitRevisionSignal(text: string): boolean {
   const normalized = text.trim();
   if (!normalized) return false;
@@ -594,6 +610,17 @@ export function adjudicateNewTaskVsRevisionIntent(
   if (intent.request_type !== 'feedback_revision') return intent;
 
   const currentText = extractTextFromParts(currentInput);
+
+  if (looksLikeFullRegenRequest(currentText)) {
+    console.log('[GATEKEEPER] Adjudicated feedback_revision → wardrobe_outfit (full regen request)');
+    return {
+      ...intent,
+      request_type: 'wardrobe_outfit',
+      selected_outfit_id: '',
+      special_requests: intent.special_requests.trim() || currentText,
+    };
+  }
+
   if (!looksLikeNewOutfitTask(currentText) || hasExplicitRevisionSignal(currentText)) {
     return intent;
   }
@@ -663,10 +690,6 @@ export function enrichIntentFromContext(
     }
     correctAnchorSlot(normalized, contextText);
     normalized.anchor_item_image_data = collectLatestImageData(history, currentInput);
-  }
-
-  if (isOutfitGeneratingIntent(normalized)) {
-    correctDressingClimate(normalized);
   }
 
   return normalized;

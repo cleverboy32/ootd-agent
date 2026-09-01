@@ -63,6 +63,17 @@ export function buildSeedreamImagePrompt(
     lines.push(`穿着：${outfitDesc}。`);
   }
 
+  const hasAccessory = outfit.selected_items.some(
+    (item) =>
+      item.layer === 'accessory' ||
+      ragCache?.get(item.id)?.mainCategory === 'ACCESSORY'
+  );
+  if (hasAccessory) {
+    lines.push(
+      '配饰尺寸：项链/耳环/choker/小配饰必须按真人佩戴正常比例，落在耳垂或锁骨等自然位置；配饰参考图多为商品特写，只还原款式与颜色，禁止按特写画面占比放大成夸张巨物。'
+    );
+  }
+
   if (scene) lines.push(`场景：${scene}，日常真实环境，背景自然不喧宾夺主。`);
   if (pose) lines.push(`姿态：${pose}，放松自然，非 T 台摆拍。`);
 
@@ -75,4 +86,5 @@ export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '生成真实摄影风格的穿搭展示图，不要插画、3D 或明显 AI 合成感。',
   '模特必须是东亚/中国面孔，禁止生成欧美模特。',
   '服装必须与参考图及描述一致，不得改变裤长、裙长、领型与配色。',
+  '配饰必须按真人佩戴尺寸绘制，禁止把商品特写参考图的画面占比照搬放大。',
 ].join('');

@@ -48,6 +48,9 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 - 【只输出 1 套】方案，id 必须与 selected_outfit_id 一致（如 outfit_1）。
 - 在上一轮方案基础上【精准修改】：保留用户未提及的单品 id 不变，仅调整 special_requests 中要求的槽位。
 - 禁止重新推荐完全无关的全新方案；禁止输出 2 套。
+- 【替换单品必须来自本轮 RAG XML】：用户要求更换的槽位，必须从本轮 <relevant_wardrobe_items> 中选；name 必须等于该条 XML 的 subCategory，禁止自行改写品类（例如把 Earrings 写成 Necklace）。
+- outfit_details / overall_concept 的品类用词必须与所选 subCategory 一致；禁止把耳环描述成项链，或把包描述成围巾。
+- 衣橱 XML 中无匹配目标品类的候选时：该槽位用 "new_item" 补位并在 reason 说明缺口；【禁止】从其它套方案或其他历史单品借用不同品类的 id 来冒充。
 
 【多轮对话与反馈微调模式】
 - 仔细阅读历史对话。如果用户在上一轮已经得到了推荐，而当前输入是针对上一轮方案的修改反馈（例如："第一套太正式了，换成裤装"、"外套不要红色的"）。
@@ -56,7 +59,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 【视觉构想指南 (Visual Composition)】
 - 为后续的绘图智能体提供清晰的画面构想，包含模特姿态、服装细节、背景场景。
 - 描述必须使用英文，且细节丰富。
-- 确保 visual_composition 中的服装细节（outfit_details）与你选用的 selected_items 保持 100% 的色彩与款式一致。
+- 确保 visual_composition 中的服装细节（outfit_details）与你选用的 selected_items 保持 100% 的色彩、款式与【品类】一致。
 - 若用户档案【无可靠外形数据】（无肤色/身材/发色分析）：model_pose 只描述姿态与场景，使用 "a fashion model" 等通用表述，禁止编造具体发色、眼镜、五官、体型、年龄。
 - 若档案中有视觉分析数据：model_pose 才可引用发色等已知特征以保持一致。
 `;
@@ -106,6 +109,16 @@ export const WARDROBE_PAIRING_SEARCH_ADDENDUM = `
 - 用户指定了【衣橱已有锚定单品】（真实 id），你只为【互补槽位】生成 query。
 - 【禁止】检索与锚定单品相同槽位的衣物。
 - 规则同待购单品搭配：锚定为 dress 时只检索 shoes/outerwear/accessory；top 时检索 bottom+shoes 等。
+`;
+
+export const REVISION_SEARCH_ADDENDUM = `
+【反馈微调模式 — 仅检索要改的槽位】
+- 当前为 feedback_revision：用户只改上一套方案中的部分单品。
+- 【只】为 special_requests 明确要求更换/调整的槽位生成 query；未提及的槽位【禁止】检索。
+- 例：换项链/choker/耳环/配饰 → 仅 1 条 accessory query，query 应体现目标品类（necklace / choker / earrings 等），不要搜 top/bottom/shoes。
+- 例：换鞋 → 仅 shoes；换外套 → 仅 outerwear；换裤子 → 仅 bottom。
+- 若用户同时改多个槽位，可为每个槽位各出 1 条 query，总数尽量少。
+- 不要为「保留不变」的单品重新检索。
 `;
 
 export const STYLE_ADVICE_SYSTEM_INSTRUCTION = `

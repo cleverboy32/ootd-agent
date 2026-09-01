@@ -37,7 +37,7 @@ export function AccessBanner() {
         variant="outline"
         size="sm"
         onClick={() => void logout()}
-        className="fixed right-3 top-3 z-50 gap-1.5 bg-background/90 shadow-sm backdrop-blur"
+        className="fixed right-3 top-16 z-50 gap-1.5 bg-background/90 shadow-sm backdrop-blur"
       >
         <LogOut className="h-3.5 w-3.5" />
         退出完整模式
@@ -46,7 +46,7 @@ export function AccessBanner() {
   }
 
   return (
-    <aside className="fixed right-3 top-3 z-50 w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
+    <aside className="fixed right-3 top-16 z-50 w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
       <div className="flex items-center gap-2">
         <LockKeyhole className="h-4 w-4 shrink-0 text-amber-600" />
         <p className="min-w-0 flex-1 text-sm">

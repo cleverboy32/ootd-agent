@@ -22,7 +22,27 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Generate a fashion editorial photo.',
   'Strictly reproduce each wardrobe item silhouette, hem length, neckline, and fit from reference images and text.',
   'Do NOT change shorts to pants, alter skirt/dress lengths, or modify garment proportions.',
+  'Accessories (necklace, earrings, choker, bag, belt, etc.) must be worn at real-life scale — never enlarge jewelry or small accessories to match product close-up reference framing.',
 ].join(' ');
+
+/** 配饰商品图多为特写，需显式约束真人佩戴比例 */
+export const ACCESSORY_SCALE_HINT =
+  'product close-up ref — wear at realistic on-body scale, do NOT enlarge to fill frame';
+
+export function isAccessoryReferenceItem(
+  layer?: string,
+  mainCategory?: string | null
+): boolean {
+  if (layer === 'accessory') return true;
+  return (mainCategory ?? '').toUpperCase() === 'ACCESSORY';
+}
+
+export function outfitHasAccessory(outfit: StylistOutfit, ragCache?: Map<string, ClothingItem>): boolean {
+  return outfit.selected_items.some((item) => {
+    const cached = ragCache?.get(item.id);
+    return isAccessoryReferenceItem(item.layer, cached?.mainCategory);
+  });
+}
 
 export function buildOutfitReferenceInputs(
   outfit: StylistOutfit,
@@ -56,6 +76,9 @@ export function buildOutfitReferenceInputs(
       cached?.silhouette?.length ? `silhouette: ${cached.silhouette.join(', ')}` : undefined,
       cached?.description,
     ].filter(Boolean);
+    if (isAccessoryReferenceItem(item?.layer, cached?.mainCategory)) {
+      parts.push(ACCESSORY_SCALE_HINT);
+    }
     referenceLabels.push(parts.join(' | ') || `wardrobe item ${idx + 1}`);
   });
 
@@ -80,6 +103,12 @@ export function buildImagePrompt(
     'Fashion editorial photography, photorealistic, highly detailed fabric textures.',
     'CRITICAL GARMENT FIDELITY: Every item must match its exact silhouette, hemline length, and fit as described. Do NOT alter proportions or lengths.',
   ];
+
+  if (outfitHasAccessory(outfit, ragCache)) {
+    lines.push(
+      'CRITICAL ACCESSORY SCALE: Jewelry and small accessories must appear at natural worn size relative to the body (earrings on earlobes, necklace at collarbone, choker snug on neck). Accessory reference photos are product close-ups — copy style/color only, NEVER scale the accessory up to match the reference image size.'
+    );
+  }
 
   if (referenceLabels?.length) {
     lines.push(

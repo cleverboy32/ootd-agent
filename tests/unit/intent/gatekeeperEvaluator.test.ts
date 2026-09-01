@@ -155,7 +155,7 @@ describe('evaluateGatekeeperOutput', () => {
     assert.ok(evalResult.issues.some((i) => i.code === 'STYLE_NOT_IN_CONTEXT'));
   });
 
-  it('warns when outfit flow is complete without dressing_climate', () => {
+  it('does not warn when outfit flow has empty dressing_climate (server derives later)', () => {
     const result = {
       is_complete: true,
       extracted_intent: normalizeGatekeeperIntent({
@@ -167,7 +167,10 @@ describe('evaluateGatekeeperOutput', () => {
     };
 
     const evalResult = evaluateGatekeeperOutput(result);
-    assert.ok(evalResult.issues.some((i) => i.code === 'MISSING_DRESSING_CLIMATE'));
+    assert.equal(
+      evalResult.issues.some((i) => i.code === 'MISSING_DRESSING_CLIMATE'),
+      false
+    );
   });
 
   it('warns when purchase_pairing requests weather lookup', () => {

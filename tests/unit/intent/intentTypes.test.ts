@@ -389,6 +389,66 @@ describe('adjudicateNewTaskVsRevisionIntent', () => {
     assert.equal(result.request_type, 'feedback_revision');
     assert.equal(result.selected_outfit_id, 'outfit_1');
   });
+
+  it('coerces full regen dissatisfaction away from feedback_revision', () => {
+    const result = adjudicateNewTaskVsRevisionIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '国庆青海旅行',
+        special_requests: '在上一轮基础上调整',
+        selected_outfit_id: '',
+      }),
+      [{ text: '额 重新搭配，搭配的太烂了' }]
+    );
+
+    assert.equal(result.request_type, 'wardrobe_outfit');
+    assert.equal(result.selected_outfit_id, '');
+  });
+
+  it('coerces explicit regenerate request away from feedback_revision', () => {
+    const result = adjudicateNewTaskVsRevisionIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '国庆青海旅行',
+        special_requests: '',
+        selected_outfit_id: '',
+      }),
+      [{ text: '都不好，给我重新生成' }]
+    );
+
+    assert.equal(result.request_type, 'wardrobe_outfit');
+    assert.match(result.special_requests, /重新生成/);
+  });
+
+  it('full regen after adjudicate completes wardrobe_outfit without outfit clarify', () => {
+    const multiOutfitHistory: Content[] = [
+      { role: 'user', parts: [{ text: '国庆去青海' }] },
+      {
+        role: 'model',
+        parts: [{ text: '### 方案一\n白天游览\n### 方案二\n日出' }],
+      },
+    ];
+
+    const adjudicated = adjudicateNewTaskVsRevisionIntent(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '国庆青海旅行',
+        special_requests: '',
+      }),
+      [{ text: '都不好，给我重新生成' }]
+    );
+
+    const result = finalizeGatekeeperResult({
+      extracted_intent: adjudicated,
+      modelIsComplete: true,
+      currentMessageText: '都不好，给我重新生成',
+      history: multiOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.request_type, 'wardrobe_outfit');
+    assert.equal(result.gatekeeper_reply ?? '', '');
+  });
 });
 
 describe('coerceWardrobeBrowseIntent', () => {

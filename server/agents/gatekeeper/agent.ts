@@ -12,6 +12,7 @@ import {
   finalizeGatekeeperResult,
   coerceWardrobeBrowseIntent,
   adjudicateNewTaskVsRevisionIntent,
+  isOutfitGeneratingIntent,
 } from '../intent';
 import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
@@ -19,6 +20,8 @@ import { resolveWardrobeAnchor } from './wardrobeResolver';
 import type { WardrobeAnchorCandidate } from '../intent';
 import { gatekeeperSchema, WeatherLookup } from './schema';
 import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
+import { resolveDressingClimateForIntent } from '@/server/utils/ragSeasonFilter';
+import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
 
 export type { WeatherLookup } from './schema';
 
@@ -73,6 +76,11 @@ async function finalizeGatekeeperIntent(
       profileLocation: ctx.profileLocation,
       contextText,
     });
+  }
+
+  // 服务端统一解析 dressing_climate（实况温度 / 锚点 / 活动；忽略 Gatekeeper LLM 推断）
+  if (isOutfitGeneratingIntent(enriched)) {
+    enriched = resolveDressingClimateForIntent(enriched, contextText);
   }
 
   const suggestCityForWeather = Boolean(weatherLookup?.needed) && !enriched.weather.trim();
@@ -157,10 +165,30 @@ export async function callGatekeeperAgent(
     });
 
     const contextText = buildContextText(history, currentInput);
+    const cityGate = evaluateCityWeatherGate({
+      requestType: result.extracted_intent.request_type,
+      weatherLookupNeeded: Boolean(parsed.weather_lookup?.needed),
+      weather: result.extracted_intent.weather,
+      city: result.extracted_intent.city || parsed.weather_lookup?.city,
+      profileLocation: ctx.profileLocation,
+      contextText,
+    });
+
+    let gatedResult = result;
+    if (result.is_complete && cityGate.blocked) {
+      console.log('[GATEKEEPER] city weather gate — missing city, ask before outfit');
+      gatedResult = {
+        ...result,
+        is_complete: false,
+        followup_questions: cityGate.followup ? [cityGate.followup] : result.followup_questions,
+        gatekeeper_reply: cityGate.followup || result.gatekeeper_reply,
+      };
+    }
+
     const l1 = evaluateGatekeeperOutput(
       {
-        ...result,
-        wardrobe_candidates: result.wardrobe_candidates,
+        ...gatedResult,
+        wardrobe_candidates: gatedResult.wardrobe_candidates,
       },
       {
         contextText,
@@ -173,19 +201,19 @@ export async function callGatekeeperAgent(
       conversationId: auditMeta?.conversationId,
       messageId: auditMeta?.messageId,
       contextTextLength: contextText.length,
-      requestType: result.extracted_intent.request_type,
-      is_complete: result.is_complete,
-      gatekeeper_reply: result.gatekeeper_reply,
-      followup_questions: result.followup_questions,
-      extracted_intent: result.extracted_intent,
+      requestType: gatedResult.extracted_intent.request_type,
+      is_complete: gatedResult.is_complete,
+      gatekeeper_reply: gatedResult.gatekeeper_reply,
+      followup_questions: gatedResult.followup_questions,
+      extracted_intent: gatedResult.extracted_intent,
       weather_lookup: parsed.weather_lookup,
-      wardrobe_candidates: result.wardrobe_candidates,
+      wardrobe_candidates: gatedResult.wardrobe_candidates,
       l1,
       thinking: thinkingText || undefined,
     });
 
     return {
-      ...result,
+      ...gatedResult,
       weather_lookup: parsed.weather_lookup,
       thinking: thinkingText || undefined,
     };

@@ -71,7 +71,7 @@ export const gatekeeperSchema: Schema = {
         dressing_climate: {
           type: Type.STRING,
           description:
-            '本轮搭配的穿衣气候，供衣橱检索过滤：cold（秋冬保暖，如滑雪、毛呢大衣、羽绒服）| warm（春夏轻薄，如海边、徒步、短裤吊带）| mild（过渡季或室内通勤、场合未明示冷暖）。进入搭配流程（is_complete=true 的 wardrobe_outfit / wardrobe_pairing / purchase_pairing / feedback_revision）时必须填写；style_advice 可填 mild 或留空。综合锚点单品、场合、用户提到的天气/季节判断，勿留空。',
+            '留空字符串。穿衣气候由服务端在查完天气后根据温度与锚点单品自动计算，禁止 Gatekeeper 自行填写。',
         },
       },
       required: [

@@ -71,4 +71,17 @@ describe('buildSeedreamImagePrompt', () => {
     assert.doesNotMatch(prompt, /Fashion editorial/i);
     assert.match(prompt, /避免过度磨皮|塑料感/);
   });
+
+  it('adds accessory scale constraint when outfit has accessory', () => {
+    const withAcc: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        ...outfit.selected_items,
+        { id: 'acc', name: 'Choker', layer: 'accessory', reason: 'accent' },
+      ],
+    };
+    const prompt = buildSeedreamImagePrompt(withAcc, undefined, ['Choker (accessory)'], null);
+    assert.match(prompt, /配饰尺寸/);
+    assert.match(prompt, /禁止按特写画面占比放大/);
+  });
 });
