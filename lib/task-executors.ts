@@ -1,9 +1,10 @@
-import { uploadFileToGCS, getClientId } from '@/lib/utils';
+import { uploadFileToCOS, getClientId } from '@/lib/utils';
+import { toUserFacingUploadError } from '@/lib/upload-errors';
 
 // Helper function for simulated delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const FAKE_GCS_URL_PREFIX = 'https://fake-storage.googleapis.com/test-images/';
+const FAKE_STORAGE_URL_PREFIX = 'https://fake-storage.invalid/test-images/';
 
 /**
  * Executes the file upload process.
@@ -15,10 +16,10 @@ export async function executeUpload(file: File): Promise<string> {
   if (file.name.startsWith('test_image_')) {
     console.log(`[DRY RUN] Simulating upload for: ${file.name}`);
     await sleep(1000 + Math.random() * 1000); // Simulate 1-2 second upload
-    return `${FAKE_GCS_URL_PREFIX}${file.name}`;
+    return `${FAKE_STORAGE_URL_PREFIX}${file.name}`;
   }
 
-  const publicUrl = await uploadFileToGCS(file);
+  const publicUrl = await uploadFileToCOS(file);
   return publicUrl;
 }
 
@@ -27,9 +28,20 @@ export async function executeUpload(file: File): Promise<string> {
  * If the imageUrl is a simulated test URL, it simulates the analysis.
  * Otherwise, it performs a real analysis.
  */
-export async function executeAnalysis(imageUrl: string): Promise<{ status: string; message: string; }> {
+export interface AnalysisStepStatus {
+  analysis: 'pending' | 'done' | 'skipped' | 'failed';
+  textEmbedding: 'pending' | 'done' | 'skipped' | 'failed';
+  visualEmbedding: 'pending' | 'done' | 'skipped' | 'failed';
+}
+
+/**
+ * 服务端按步骤记账：分析结果一旦入库，重试只补做失败的那一步。
+ */
+export async function executeAnalysis(
+  imageUrl: string
+): Promise<{ steps?: AnalysisStepStatus } & Record<string, unknown>> {
   // Check if it's a test URL
-  if (imageUrl.startsWith(FAKE_GCS_URL_PREFIX)) {
+  if (imageUrl.startsWith(FAKE_STORAGE_URL_PREFIX)) {
     console.log(`[DRY RUN] Simulating AI analysis for: ${imageUrl}`);
     await sleep(2000 + Math.random() * 2000); // Simulate 2-4 second analysis
 
@@ -60,12 +72,12 @@ export async function executeAnalysis(imageUrl: string): Promise<{ status: strin
       error?: string;
       code?: string;
     };
-    const message =
+    const rawMessage =
       errorData.error ||
       (analyzeResponse.status === 429
         ? 'AI 服务请求过于频繁，请稍后再试'
         : `AI 分析失败 (${analyzeResponse.status})`);
-    throw new Error(message);
+    throw new Error(toUserFacingUploadError(rawMessage));
   }
 
   return analyzeResponse.json();

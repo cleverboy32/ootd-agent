@@ -16,15 +16,20 @@ type RouteParams = {
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
 
-  if (!conversationId) {
-    return NextResponse.json({ error: 'Conversation ID is required' }, { status: 400 });
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
   }
 
   try {
     const messages = await prismadb.message.findMany({
       where: {
-        conversationId: conversationId,
+        conversationId,
+        conversation: { clientId },
       },
       orderBy: {
         createdAt: 'asc', // Order messages chronologically
@@ -47,12 +52,24 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
 
-  if (!conversationId) {
-    return NextResponse.json({ error: 'Conversation ID is required' }, { status: 400 });
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
   }
 
   try {
+    const ownedConversation = await prismadb.conversation.findFirst({
+      where: { id: conversationId, clientId },
+      select: { id: true },
+    });
+    if (!ownedConversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+
     const body: { role: 'user' | 'ai', content: MessageContentPart[] } = await req.json();
     const { role, content } = body;
 

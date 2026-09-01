@@ -7,6 +7,7 @@ import { WardrobeGrid } from '@/components/wardrobe/wardrobe-grid';
 import { Button } from '@/components/ui/button';
 import { getClientId } from '@/lib/utils';
 import { deleteWardrobeItem, deleteWardrobeItems } from '@/lib/api/wardrobe';
+import { useAccess } from '@/components/access/AccessProvider';
 
 const categories = [
   { value: 'all', label: '全部' },
@@ -36,6 +37,7 @@ async function requestWardrobeItems(): Promise<{ items: ClothingItem[] } | { err
 }
 
 export function DisplayView() {
+  const { canMutate } = useAccess();
   const [items, setItems] = useState<ClothingItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -155,7 +157,7 @@ export function DisplayView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">共 {items.length} 件衣物</p>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {canMutate && <div className="flex flex-wrap items-center gap-2">
           {selectionMode ? (
             <>
               <Button
@@ -191,7 +193,7 @@ export function DisplayView() {
               批量管理
             </Button>
           )}
-        </div>
+        </div>}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -214,6 +216,7 @@ export function DisplayView() {
               onToggleSelect={toggleSelect}
               onDeleteItem={handleDeleteItem}
               isDeleting={isDeleting}
+              readOnly={!canMutate}
             />
           </TabsContent>
         ))}

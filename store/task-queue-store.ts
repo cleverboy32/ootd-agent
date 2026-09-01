@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { useWardrobeStore } from './wardrobe-store';
 import { executeUpload, executeAnalysis } from '@/lib/task-executors';
+import { toUserFacingUploadError } from '@/lib/upload-errors';
 
 // --- Constants ---
 const MAX_CONCURRENT_UPLOADS = 10;
-const MAX_CONCURRENT_ANALYSES = 1;
+const MAX_CONCURRENT_ANALYSES = 2;
 const ANALYZE_RATE_LIMIT_RETRY_MS = 8000;
 
 function isRateLimitMessage(message: string): boolean {
@@ -149,7 +150,10 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
         get().resetTask(fileId);
         setTimeout(() => get().addTask(fileId, 'analyze'), ANALYZE_RATE_LIMIT_RETRY_MS);
       } else {
-        updateFileStatus(fileId, { status: 'error', error: errorMessage });
+        updateFileStatus(fileId, {
+          status: 'error',
+          error: toUserFacingUploadError(errorMessage),
+        });
       }
     } finally {
       // Decrement the active count for the completed task type and trigger the scheduler again.

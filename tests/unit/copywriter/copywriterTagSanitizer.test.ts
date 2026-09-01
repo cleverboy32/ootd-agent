@@ -87,15 +87,37 @@ describe('sanitizeCopywriterTags — image variants', () => {
 });
 
 describe('sanitizeCopywriterTags — unknown ids', () => {
-  it('still emits canonical tag and warns for unknown wardrobe id', () => {
+  it('recovers garbled wardrobe id with short character insertion (real earring bug)', () => {
+    const realId = 'cmqhl8x14000hbis86akg7xwi';
+    const garbled = 'cmqg5hl8x14000hbis86akg7xwi'; // inserted "g5"
+    const ctx: CopywriterTagContext = {
+      wardrobeIds: new Set([realId, WARDROBE_ID]),
+      outfitIds: new Set([OUTFIT_ID]),
+    };
+    const warn = mock.fn();
+    const original = console.warn;
+    console.warn = warn;
+
+    try {
+      const result = sanitizeCopywriterTags(`[衣橱物品:id=${garbled}]`, ctx);
+      assert.equal(result, `[衣橱物品:id=${realId}]`);
+      assert.equal(warn.mock.calls.length, 1);
+      assert.match(String(warn.mock.calls[0].arguments[0]), /Recovered garbled/);
+    } finally {
+      console.warn = original;
+    }
+  });
+
+  it('drops unrecoverable unknown wardrobe id instead of emitting Item-not-found tag', () => {
     const ctx = makeContext();
     const warn = mock.fn();
     const original = console.warn;
     console.warn = warn;
 
     try {
-      const result = sanitizeCopywriterTags('[衣橱物品:unknown_id]', ctx);
-      assert.equal(result, '[衣橱物品:id=unknown_id]');
+      const result = sanitizeCopywriterTags('配饰：戴上这对[衣橱物品:unknown_id]，很衬肤色。', ctx);
+      assert.equal(result.includes('[衣橱物品'), false);
+      assert.match(result, /配饰：戴上这对，很衬肤色。/);
       assert.equal(warn.mock.calls.length, 1);
       assert.match(String(warn.mock.calls[0].arguments[0]), /Unknown wardrobe id/);
     } finally {

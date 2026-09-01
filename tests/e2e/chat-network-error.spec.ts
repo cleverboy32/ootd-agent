@@ -1,26 +1,10 @@
 import { expect, test } from '@playwright/test';
-
-/** 复用：mock 会话接口，避免打真实数据库 */
-async function mockConversationApis(page: import('@playwright/test').Page) {
-  await page.route('**/api/conversations**', async (route) => {
-    const req = route.request();
-    const { pathname } = new URL(req.url());
-
-    if (req.method() === 'GET' && pathname === '/api/conversations') {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
-    }
-    if (req.method() === 'POST' && pathname === '/api/conversations') {
-      return route.fulfill({
-        status: 201, contentType: 'application/json',
-        body: JSON.stringify({ id: 'e2e-conv-1', title: '测试', messages: [] }),
-      });
-    }
-    return route.fulfill({ status: 201, contentType: 'application/json', body: '{}' });
-  });
-}
+import { mockVerifiedAccess } from './helpers/mock-access';
+import { mockConversationApis } from './helpers/mock-apis';
 
 test.describe('chat network error handling', () => {
-  test('shows send failure below the user message and allows retry', async ({ page }) => {
+  test('[ACC-C2] shows send failure below the user message and allows retry', async ({ page }) => {
+    await mockVerifiedAccess(page);
     let shouldFail = true;
 
     await page.route('**/api/generate-with-image', async (route) => {
@@ -62,7 +46,8 @@ test.describe('chat network error handling', () => {
     await expect(page.getByText('重试成功')).toBeVisible();
   });
 
-  test('shows retry on AI message when stream errors mid-response', async ({ page }) => {
+  test('[ACC-C3] shows retry on AI message when stream errors mid-response', async ({ page }) => {
+    await mockVerifiedAccess(page);
     let callCount = 0;
 
     await page.route('**/api/generate-with-image', async (route) => {

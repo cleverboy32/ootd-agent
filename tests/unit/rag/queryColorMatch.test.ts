@@ -2,14 +2,17 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractQueryColorFamilies,
+  extractQueryEmbeddingColors,
   filterItemsByQueryColor,
   itemMatchesQueryColorFamilies,
   normalizeWardrobeSearchQuery,
 } from '@/server/utils/queryColorMatch';
 
 describe('queryColorMatch', () => {
-  it('extracts white family from 白裙子', () => {
+  it('extracts colors for embedding from Chinese and English', () => {
     assert.deepEqual(extractQueryColorFamilies('白色裙子'), ['white']);
+    assert.deepEqual(extractQueryEmbeddingColors('beige dress'), ['beige']);
+    assert.deepEqual(extractQueryEmbeddingColors('grey wool coat'), ['gray']);
   });
 
   it('rejects light green item for white query', () => {

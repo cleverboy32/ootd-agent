@@ -34,9 +34,18 @@ export async function formatHistoryAsync(messages: Message[]): Promise<Content[]
     // 2. 内容部分（Parts）转换：遍历消息中的每个内容部分
     for (const part of message.content) {
       if (part.type === 'text') {
-        // 如果是文本部分，创建 text part
-        apiParts.push({ text: part.content });
-      } else if (part.type.startsWith('image/')) {
+        if (typeof part.content === 'string' && part.content.length > 0) {
+          apiParts.push({ text: part.content });
+        }
+      } else if (part.type === 'wardrobe_candidates') {
+        // Keep candidate ids in model history so verbal confirm can bind to the shown item.
+        const ids = (part.items ?? [])
+          .map((item) => (typeof item?.id === 'string' ? item.id.trim() : ''))
+          .filter(Boolean);
+        if (ids.length > 0) {
+          apiParts.push({ text: `[wardrobe_candidates:id=${ids.join(',')}]` });
+        }
+      } else if (part.type.startsWith('image/') && typeof part.content === 'string') {
         // 如果是图片部分（假设 type 是 mimeType，如 'image/jpeg'）
         // 则创建 inlineData part，其中 content 是 Base64 编码的图片数据
         apiParts.push({
@@ -46,7 +55,6 @@ export async function formatHistoryAsync(messages: Message[]): Promise<Content[]
           },
         });
       }
-      // 你可以在这里添加对其他 type 的处理，例如 'video' 等
     }
 
     // 3. 只有在成功转换出内容部分后，才将该条消息添加到历史记录中

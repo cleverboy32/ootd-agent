@@ -6,10 +6,11 @@ import { Upload, Loader2, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { uploadFileToGCS } from '@/lib/utils';
+import { uploadFileToCOS } from '@/lib/utils';
 import { analyzeVisualProfile, type ProfileData } from '@/lib/api/profile';
 import { getFriendlyErrorMessage } from '@/lib/api/errorMessage';
 import { ProfileErrorState } from '@/components/profile/ProfileErrorState';
+import { useAccess } from '@/components/access/AccessProvider';
 
 interface VisualAnalysisSectionProps {
   profile: ProfileData;
@@ -17,6 +18,7 @@ interface VisualAnalysisSectionProps {
 }
 
 export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnalysisSectionProps) {
+  const { canMutate } = useAccess();
   const inputRef = useRef<HTMLInputElement>(null);
   const lastFileRef = useRef<File | null>(null);
   const pendingImageUrlRef = useRef<string | null>(null);
@@ -53,7 +55,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
     setStatus('uploading');
 
     try {
-      const publicUrl = await uploadFileToGCS(file);
+      const publicUrl = await uploadFileToCOS(file);
       await analyzeUploadedImage(publicUrl);
     } catch (error) {
       setRetryMode('upload');
@@ -94,7 +96,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {status === 'error' && errorMessage && (
+        {canMutate && status === 'error' && errorMessage && (
           <ProfileErrorState
             message={errorMessage}
             onRetry={handleRetry}
@@ -154,15 +156,19 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
               </p>
             )}
 
-            <Button variant="outline" size="sm" onClick={triggerUpload} disabled={isBusy}>
+            {canMutate && <Button variant="outline" size="sm" onClick={triggerUpload} disabled={isBusy}>
               {isBusy ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-2 h-4 w-4" />
               )}
               重新上传
-            </Button>
+            </Button>}
           </div>
+        ) : !canMutate ? (
+          <p className="text-sm text-muted-foreground">
+            当前为浏览模式，验证访问码后可上传自拍并生成外形分析。
+          </p>
         ) : status !== 'error' ? (
           <div className="flex w-full flex-col items-start gap-4 p-6 border border-dashed rounded-lg">
             {isBusy ? (
@@ -192,7 +198,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
           accept="image/*"
           onChange={handleFileChange}
           className="sr-only"
-          disabled={isBusy}
+          disabled={!canMutate || isBusy}
         />
       </CardContent>
     </Card>

@@ -1,21 +1,25 @@
 /**
  * Searches a user's wardrobe for clothing items that semantically match a given text query.
- *
- * @param clientProfileId The ID of the user whose wardrobe to search.
- * @param queryText The natural language query (e.g., "something warm and cozy for a rainy day").
- * @param limit The maximum number of items to return. Defaults to 5.
- * @param minSimilarity The minimum similarity score (0 to 1) for an item to be included. Defaults to 0.5.
- * @returns A promise that resolves to an array of matching clothing items, sorted by relevance.
  */
 import prismadb from '@/server/db';
 import type { GatekeeperIntent } from '@/server/agents/intent';
 import {
+  buildWardrobeDocumentEmbeddingText,
   buildWardrobeQueryEmbeddingText,
   type WardrobeQueryEmbeddingContext,
 } from '@/server/utils/embeddingText';
+import {
+  buildVisualEmbeddingDocumentText,
+  clothingItemToEmbeddingFields,
+} from '@/server/utils/wardrobeAnalysis';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
-import { generateQueryEmbedding } from './embedding';
-import { ClothingMainCategory } from '@prisma/client'; // 导入 Prisma 的枚举类型
+import {
+  generateTextEmbedding,
+  generateVisualEmbedding,
+  getTextSimilarityThresholds,
+} from './embedding';
+import { withRetryOn429 } from '@/server/utils/retryOn429';
+import { ClothingMainCategory } from '@prisma/client';
 
 export interface WardrobeSearchEmbeddingContext extends WardrobeQueryEmbeddingContext {
   /** 脚本对比用：跳过 query 文本格式化，使用原始 query 生成向量 */
@@ -28,7 +32,6 @@ export interface WardrobeSearchOptions {
   embedding?: WardrobeSearchEmbeddingContext;
 }
 
-// 定义一个精确的返回类型，包含处理器需要的所有字段以及相似度分数
 export type WardrobeSearchResult = {
   id: string;
   imageUrl: string;
@@ -42,13 +45,6 @@ export type WardrobeSearchResult = {
   similarity: number;
 };
 
-/**
- * 根据文本在用户的衣橱中进行语义搜索
- * @param searchText - 经过提炼的搜索关键词
- * @param userId - 用户的 ID (对应 clientProfileId)
- * @param limit - 返回结果的最大数量
- * @returns - 返回一个包含衣物信息和相似度分数的数组
- */
 export async function searchWardrobeItemsByText(
   searchText: string,
   userId: string,
@@ -77,19 +73,16 @@ export async function searchWardrobeItemsByText(
       ? searchText.trim()
       : buildWardrobeQueryEmbeddingText(searchText, embeddingContext);
 
-    console.log(`[RAG-SEARCH] Embedding text: "${textForEmbedding}"`);
+    console.log(`[RAG-SEARCH] Text embedding input: "${textForEmbedding}"`);
 
-    const queryEmbedding = await generateQueryEmbedding(textForEmbedding);
+    const queryEmbedding = await generateTextEmbedding(textForEmbedding);
     if (!queryEmbedding || queryEmbedding.length === 0) {
       console.error('[RAG-SEARCH] Failed to generate query embedding.');
       return [];
     }
-    console.log(`[RAG-SEARCH] Generated query embedding (first 3 dims): ${queryEmbedding.slice(0, 3)}...`);
 
-    // [FIX] Manually format the embedding array into a string that pgvector understands.
     const vectorQueryString = `[${queryEmbedding.join(',')}]`;
 
-    // pgvector: <=> 是 cosine distance，similarity = 1 - cosine_distance
     const results: WardrobeSearchResult[] = mainCategory
       ? await prismadb.$queryRaw`
           SELECT
@@ -102,15 +95,15 @@ export async function searchWardrobeItemsByText(
             "season",
             "material",
             "tags",
-            1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
+            1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"
           WHERE
             "clientProfileId" = ${userId}
-            AND "embedding" IS NOT NULL
+            AND "textEmbedding" IS NOT NULL
             AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
           ORDER BY
-            "embedding" <=> ${vectorQueryString}::vector
+            "textEmbedding" <=> ${vectorQueryString}::vector
           LIMIT ${limit};
         `
       : await prismadb.$queryRaw`
@@ -124,13 +117,13 @@ export async function searchWardrobeItemsByText(
             "season",
             "material",
             "tags",
-            1 - ("embedding" <=> ${vectorQueryString}::vector) as similarity
+            1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"
           WHERE
-            "clientProfileId" = ${userId} AND "embedding" IS NOT NULL
+            "clientProfileId" = ${userId} AND "textEmbedding" IS NOT NULL
           ORDER BY
-            "embedding" <=> ${vectorQueryString}::vector
+            "textEmbedding" <=> ${vectorQueryString}::vector
           LIMIT ${limit};
         `;
 
@@ -141,11 +134,12 @@ export async function searchWardrobeItemsByText(
       return [];
     }
 
-    const SIMILARITY_THRESHOLD = 0.5;
+    const SIMILARITY_THRESHOLD = getTextSimilarityThresholds().search;
+    const filteredResults = results.filter((item) => item.similarity > SIMILARITY_THRESHOLD);
 
-    const filteredResults = results.filter(item => item.similarity > SIMILARITY_THRESHOLD);
-
-    console.log(`[RAG-SEARCH] Found ${filteredResults.length} items after filtering by threshold (${SIMILARITY_THRESHOLD}).`);
+    console.log(
+      `[RAG-SEARCH] Found ${filteredResults.length} items after filtering by threshold (${SIMILARITY_THRESHOLD}).`
+    );
 
     return filteredResults;
   } catch (error) {
@@ -154,24 +148,15 @@ export async function searchWardrobeItemsByText(
   }
 }
 
-/**
- * Retrieves the details of a single clothing item from the database.
- * NOTE: This function provides the raw data access.
- * The caller (e.g., a Server Action) is responsible for ensuring the user has permission to access the item.
- * @param itemId The ID of the clothing item to retrieve.
- * @returns A promise that resolves to the clothing item's details or null if not found.
- */
 export async function getWardrobeItemDetails(itemId: string) {
   try {
     const item = await prismadb.clothingItem.findUnique({
-      where: {
-        id: itemId,
-      },
+      where: { id: itemId },
       select: {
         id: true,
-        subCategory: true, // 使用 subCategory 作为显示名称
+        subCategory: true,
         imageUrl: true,
-        clientProfileId: true, // 关键：为安全检查包含此字段
+        clientProfileId: true,
       },
     });
     return item;
@@ -181,14 +166,7 @@ export async function getWardrobeItemDetails(itemId: string) {
   }
 }
 
-/**
- * 删除属于指定用户的衣橱单品（支持批量）。
- * 仅删除数据库记录；GCS 图片不做清理。
- */
-export async function deleteWardrobeItems(
-  itemIds: string[],
-  clientId: string
-): Promise<number> {
+export async function deleteWardrobeItems(itemIds: string[], clientId: string): Promise<number> {
   const uniqueIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
   if (uniqueIds.length === 0) return 0;
 
@@ -202,3 +180,101 @@ export async function deleteWardrobeItems(
   return result.count;
 }
 
+export async function findWardrobeItemByImageUrl(clientId: string, imageUrl: string) {
+  return prismadb.clothingItem.findFirst({
+    where: { clientProfileId: clientId, imageUrl },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function clothingItemHasTextEmbedding(itemId: string): Promise<boolean> {
+  const rows = await prismadb.$queryRaw<{ has_text_embedding: boolean }[]>`
+    SELECT ("textEmbedding" IS NOT NULL) AS has_text_embedding
+    FROM "ClothingItem"
+    WHERE id = ${itemId}
+    LIMIT 1
+  `;
+  return rows[0]?.has_text_embedding === true;
+}
+
+export async function clothingItemHasVisualEmbedding(itemId: string): Promise<boolean> {
+  const rows = await prismadb.$queryRaw<{ has_visual_embedding: boolean }[]>`
+    SELECT (embedding IS NOT NULL) AS has_visual_embedding
+    FROM "ClothingItem"
+    WHERE id = ${itemId}
+    LIMIT 1
+  `;
+  return rows[0]?.has_visual_embedding === true;
+}
+
+/** @deprecated 使用 clothingItemHasVisualEmbedding */
+export async function clothingItemHasEmbedding(itemId: string): Promise<boolean> {
+  return clothingItemHasVisualEmbedding(itemId);
+}
+
+export async function persistTextEmbedding(itemId: string): Promise<number> {
+  const item = await prismadb.clothingItem.findUnique({ where: { id: itemId } });
+  if (!item) {
+    throw new Error(`Clothing item not found: ${itemId}`);
+  }
+
+  const textForEmbedding = buildWardrobeDocumentEmbeddingText(
+    clothingItemToEmbeddingFields(item)
+  );
+
+  const startedAt = Date.now();
+  const embeddingVector = await withRetryOn429(
+    () => generateTextEmbedding(textForEmbedding),
+    { label: 'Wardrobe text embedding', maxRetries: 4 }
+  );
+
+  const vectorString = `[${embeddingVector.join(',')}]`;
+  await prismadb.$executeRaw`
+    UPDATE "ClothingItem"
+    SET "textEmbedding" = ${vectorString}::vector
+    WHERE id = ${itemId};
+  `;
+
+  console.log('[TEXT_EMBED] Text embedding persisted', {
+    itemId,
+    dims: embeddingVector.length,
+    ms: Date.now() - startedAt,
+  });
+
+  return embeddingVector.length;
+}
+
+export async function persistVisualEmbedding(itemId: string): Promise<number> {
+  const item = await prismadb.clothingItem.findUnique({ where: { id: itemId } });
+  if (!item) {
+    throw new Error(`Clothing item not found: ${itemId}`);
+  }
+
+  const textForEmbedding = buildVisualEmbeddingDocumentText(item);
+
+  const startedAt = Date.now();
+  const embeddingVector = await withRetryOn429(
+    () => generateVisualEmbedding(textForEmbedding, item.imageUrl),
+    { label: 'Wardrobe visual embedding', maxRetries: 4 }
+  );
+
+  const vectorString = `[${embeddingVector.join(',')}]`;
+  await prismadb.$executeRaw`
+    UPDATE "ClothingItem"
+    SET "embedding" = ${vectorString}::vector
+    WHERE id = ${itemId};
+  `;
+
+  console.log('[VISUAL_EMBED] Visual embedding persisted', {
+    itemId,
+    dims: embeddingVector.length,
+    ms: Date.now() - startedAt,
+  });
+
+  return embeddingVector.length;
+}
+
+/** @deprecated 使用 persistVisualEmbedding */
+export async function persistWardrobeItemEmbedding(itemId: string): Promise<number> {
+  return persistVisualEmbedding(itemId);
+}

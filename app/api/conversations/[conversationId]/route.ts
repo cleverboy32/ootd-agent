@@ -14,12 +14,24 @@ type RouteParams = {
  */
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
 
-  if (!conversationId) {
-    return NextResponse.json({ error: 'Conversation ID is required' }, { status: 400 });
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
   }
 
   try {
+    const ownedConversation = await prismadb.conversation.findFirst({
+      where: { id: conversationId, clientId },
+      select: { id: true },
+    });
+    if (!ownedConversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+
     // Attempt to delete the conversation by its ID.
     // Thanks to `onDelete: Cascade` in the schema, all related messages
     // will be automatically deleted as well.

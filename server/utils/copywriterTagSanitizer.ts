@@ -33,12 +33,69 @@ function warnUnknownId(kind: 'wardrobe' | 'outfit', id: string): void {
   console.warn(`[COPYWRITER_SANITIZER] Unknown ${kind} id not in stylist result: ${id}`);
 }
 
-function toWardrobeTag(id: string, context: CopywriterTagContext): string {
-  const trimmed = id.trim();
-  if (!context.wardrobeIds.has(trimmed)) {
-    warnUnknownId('wardrobe', trimmed);
+/**
+ * Recover a stylist wardrobe id from a garbled Copywriter id.
+ * Common failure: short insertions (e.g. inserted "g5" mid-cuid) causing Item not found.
+ */
+export function resolveWardrobeIdAgainstAllowlist(
+  rawId: string,
+  wardrobeIds: Set<string>
+): string | null {
+  const trimmed = rawId.trim();
+  if (!trimmed) return null;
+  if (wardrobeIds.has(trimmed)) return trimmed;
+
+  const substringHits = [...wardrobeIds].filter(
+    (id) => trimmed.includes(id) || id.includes(trimmed)
+  );
+  if (substringHits.length === 1) {
+    console.warn(
+      `[COPYWRITER_SANITIZER] Recovered garbled wardrobe id: ${trimmed} → ${substringHits[0]}`
+    );
+    return substringHits[0];
   }
-  return `[衣橱物品:id=${trimmed}]`;
+
+  const insertionHits = [...wardrobeIds].filter((id) => isShortInsertionOf(trimmed, id));
+  if (insertionHits.length === 1) {
+    console.warn(
+      `[COPYWRITER_SANITIZER] Recovered garbled wardrobe id: ${trimmed} → ${insertionHits[0]}`
+    );
+    return insertionHits[0];
+  }
+
+  warnUnknownId('wardrobe', trimmed);
+  return null;
+}
+
+/** True when `garbled` equals `canonical` plus at most 3 inserted characters. */
+function isShortInsertionOf(garbled: string, canonical: string, maxInsert = 3): boolean {
+  if (garbled.length < canonical.length) return false;
+  if (garbled.length - canonical.length > maxInsert) return false;
+
+  let gi = 0;
+  let ci = 0;
+  let insertions = 0;
+  while (gi < garbled.length && ci < canonical.length) {
+    if (garbled[gi] === canonical[ci]) {
+      gi += 1;
+      ci += 1;
+      continue;
+    }
+    gi += 1;
+    insertions += 1;
+    if (insertions > maxInsert) return false;
+  }
+  insertions += garbled.length - gi;
+  return ci === canonical.length && insertions <= maxInsert;
+}
+
+function toWardrobeTag(id: string, context: CopywriterTagContext): string {
+  const resolved = resolveWardrobeIdAgainstAllowlist(id, context.wardrobeIds);
+  if (!resolved) {
+    // Drop the tag so the frontend never requests a 404 "Item not found".
+    return '';
+  }
+  return `[衣橱物品:id=${resolved}]`;
 }
 
 function toImageTag(id: string, context: CopywriterTagContext): string {
@@ -52,6 +109,7 @@ function toImageTag(id: string, context: CopywriterTagContext): string {
 /**
  * Normalize all known wardrobe / image tag variants to canonical frontend format.
  * Source of truth for valid ids is stylistResult (via context).
+ * Unknown / unrecoverable wardrobe ids are removed (not emitted).
  */
 export function sanitizeCopywriterTags(text: string, context: CopywriterTagContext): string {
   let result = text;
@@ -78,6 +136,9 @@ export function sanitizeCopywriterTags(text: string, context: CopywriterTagConte
     /\[IMAGE\s*[=:]\s*([^\]]+)\]/gi,
     (_, id) => toImageTag(id, context)
   );
+
+  // Collapse awkward double spaces left by dropped tags (keep newlines)
+  result = result.replace(/[^\S\n]{2,}/g, ' ');
 
   return result;
 }

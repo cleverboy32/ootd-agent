@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
 import { useImageHandler } from '@/hooks/useImageHandler'; // 1. 导入我们重构好的 hook
+import { useAccess } from '@/components/access/AccessProvider';
 
 // 2. 大大简化 props，父组件不再需要管理任何图片状态
 interface ChatInputAreaProps {
@@ -19,6 +20,7 @@ export function ChatInputArea({
   isLoading, 
   handleSend, 
 }: ChatInputAreaProps) {
+  const { canInvokeAI } = useAccess();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 4. 在组件内部直接使用 useImageHandler 来管理所有图片相关的状态和逻辑
@@ -33,6 +35,7 @@ export function ChatInputArea({
 
   // 5. 封装发送逻辑
   const onSend = () => {
+    if (!canInvokeAI) return;
     // 如果图片正在上传但还没上传完 (uploadedImageUrl 还不存在)，则阻止发送
     if (previewUrl && !uploadedImageUrl) {
         console.log("图片正在上传，请稍候...");
@@ -62,7 +65,7 @@ export function ChatInputArea({
 
   // 6. 决定“发送”按钮是否应该被禁用
   // 正在发送消息(isLoading) 或 正在上传图片(isUploading) 或 (没有文字且没有上传成功的图片) 时，禁用按钮
-  const isSendDisabled = isLoading || isUploading || (!input.trim() && !uploadedImageUrl);
+  const isSendDisabled = !canInvokeAI || isLoading || isUploading || (!input.trim() && !uploadedImageUrl);
 
   return (
     <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-20">
@@ -111,7 +114,7 @@ export function ChatInputArea({
               className="hidden"
               ref={fileInputRef}
               onChange={handleFileSelect} // 直接连接到 hook 的处理器
-              disabled={isUploading} // 上传时禁用文件选择
+              disabled={!canInvokeAI || isUploading} // 上传时禁用文件选择
             />
             <Button
               variant="ghost"
@@ -119,7 +122,7 @@ export function ChatInputArea({
               aria-label="上传图片"
               className="h-10 w-10 text-muted-foreground hover:text-foreground rounded-full shrink-0"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading} // 上传时禁用
+              disabled={!canInvokeAI || isUploading} // 上传时禁用
             >
               <Upload className="h-5 w-5" />
             </Button>
@@ -129,7 +132,8 @@ export function ChatInputArea({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown} // 使用封装后的 onKeyDown
-              placeholder="上传衣服照片，获取搭配建议..."
+              disabled={!canInvokeAI}
+              placeholder={canInvokeAI ? "上传衣服照片，获取搭配建议..." : "浏览模式下不可发送消息"}
               className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg resize-none min-h-[40px]"
             />
             <Button

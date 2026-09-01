@@ -4,6 +4,7 @@ import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
 import { callVisualDirectorAgent } from '@/server/agents/visual/director';
 import { AnchorItemImageData } from '@/server/agents/intent';
 import { StylistOutfit } from '@/server/agents/stylist';
+import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import {
   applyImageResultsToText,
   buildImageStates,
@@ -23,7 +24,8 @@ export async function runOutfitImageGeneration(
   failedImageIds: Set<string>,
   messageId?: string,
   trigger: 'initial' | 'user_retry' = 'initial',
-  ragCache?: Map<string, ClothingItem>
+  ragCache?: Map<string, ClothingItem>,
+  userProfile?: UserProfileResult | null
 ): Promise<void> {
   const imageId = outfit.id;
 
@@ -38,7 +40,7 @@ export async function runOutfitImageGeneration(
         imageMap.set(id, url);
         console.log(`[ORCHESTRATOR] 效果图生成成功: ${id} -> ${url}`);
       },
-      { trigger, messageId, ragCache }
+      { trigger, messageId, ragCache, userProfile }
     );
   } catch (e) {
     failedImageIds.add(outfit.id);

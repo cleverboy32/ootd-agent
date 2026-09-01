@@ -94,12 +94,20 @@ model ClothingItem {
   subCategory  String               // 子类别 (AI 自动生成, e.g., 'T-shirt', 'Jeans')
   season       String[]             @default([]) // 新增：季节
   material     String[]             @default([]) // 新增：材质
-  description  String?
-  colors       String[]
-  tags         String[]
-  embedding    Unsupported("vector(3072)")? // [MODIFIED] Update dimension to 3072
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  description         String?
+  colors                String[]
+  tags                  String[]
+  /// 检索导向：面向 embedding 的英文描述（场合 + 搭配语境）
+  searchDescription     String?
+  occasions             String[]             @default([])
+  formality             String?
+  silhouette            String[]             @default([])
+  /// 图文混合向量 — 图搜图 / 以图搜相似款；不参与 Stylist 文本 RAG
+  embedding             Unsupported("vector(2048)")?
+  /// 纯文本检索向量 — Stylist / Gatekeeper 文本 RAG
+  textEmbedding         Unsupported("vector(2048)")?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
 
   // 建立与 ClientProfile 的关联

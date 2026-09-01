@@ -1,4 +1,4 @@
-import { genAI } from '@/server/services/ai';
+import { llmStream } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { sendEvent } from '@/server/utils/stream-helpers';
@@ -56,13 +56,11 @@ ${pointsList}${personalNoteBlock}${followupBlock}
   try {
     const responseStream = await withRetryOn429(
       () =>
-        genAI.models.generateContentStream({
+        llmStream({
           model: AGENT_MODELS.copywriter,
           contents: prompt,
-          config: {
-            systemInstruction: COPYWRITER_ADVICE_SYSTEM_INSTRUCTION,
-            temperature: 0.7,
-          },
+          systemInstruction: COPYWRITER_ADVICE_SYSTEM_INSTRUCTION,
+          temperature: 0.7,
         }),
       { label: 'Copywriter advice' }
     );
@@ -106,10 +104,11 @@ export async function callCopywriterAgentStream(
   try {
     const responseStream = await withRetryOn429(
       () =>
-        genAI.models.generateContentStream({
+        llmStream({
           model: AGENT_MODELS.copywriter,
           contents: prompt,
-          config: { systemInstruction, temperature: 0.7 },
+          systemInstruction,
+          temperature: 0.7,
         }),
       { label: 'Copywriter' }
     );

@@ -18,6 +18,7 @@ interface WardrobeGridProps {
   onToggleSelect?: (id: string) => void;
   onDeleteItem?: (id: string) => void;
   isDeleting?: boolean;
+  readOnly?: boolean;
 }
 
 export function WardrobeGrid({
@@ -29,6 +30,7 @@ export function WardrobeGrid({
   onToggleSelect,
   onDeleteItem,
   isDeleting = false,
+  readOnly = false,
 }: WardrobeGridProps) {
   if (isLoading) {
     return (
@@ -83,7 +85,7 @@ export function WardrobeGrid({
                     {isSelected && <Check className="size-3.5" />}
                   </span>
                 </button>
-              ) : (
+              ) : !readOnly ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -95,7 +97,7 @@ export function WardrobeGrid({
                 >
                   <Trash2 className="size-3.5" />
                 </Button>
-              )}
+              ) : null}
 
               <Image
                 src={item.imageUrl}

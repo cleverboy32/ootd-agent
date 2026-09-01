@@ -28,6 +28,7 @@ import {
  *   2. correctDressingClimate           — dressing_climate 与锚点描述矛盾时纠正
  *   3. coerceWardrobeBrowseIntent       — clarify → wardrobe_pairing（衣橱浏览类误判）
  *   4. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景误判为微调）
+ *   5. resolveWardrobeAnchorIdFromHistory — 口头确认/幻觉 id 时用上轮展示的候选纠偏
  *
  * 新增 B 类规则前请先确认：
  *   - 能否通过调整 Gatekeeper prompt/schema 描述解决？优先改 prompt。
@@ -74,6 +75,16 @@ const ANCHOR_OUTERWEAR_HINT = /外套|大衣|风衣|夹克|coat|jacket|parka|bla
 
 const WARDROBE_ID_CONFIRM_PATTERN =
   /(?:确认选择这件单品|就是这件|选这件|id=)\s*[（(]?([a-z0-9]{20,})/i;
+
+/** History marker written by formatHistoryAsync for wardrobe candidate pickers. */
+const WARDROBE_CANDIDATES_HISTORY_PATTERN = /\[wardrobe_candidates:id=([a-z0-9,]+)\]/gi;
+
+/** User verbally accepts the (usually single) presented candidate without clicking id=. */
+const VERBAL_ANCHOR_ACCEPT_PATTERN =
+  /这个也行|那件也行|这件也行|也可以|就这件|就这个|就是它|用这件|穿这件|帮我(?:搭|配)|按这个|选这个|确认这|对这件|好吧这/;
+
+const VERBAL_ANCHOR_REJECT_PATTERN =
+  /不是这|不要这|不对|错了|换一|重新找|不是我要|我要别的/;
 
 const COMMON_CITY_NAMES = [
   '北京', '上海', '广州', '深圳', '杭州', '南京', '苏州', '成都', '重庆', '武汉',
@@ -365,6 +376,70 @@ export function extractConfirmedWardrobeId(text: string): string {
   return match?.[1]?.trim() ?? '';
 }
 
+/**
+ * Latest wardrobe_candidates ids shown by the assistant (from formatHistoryAsync markers).
+ * Returns [] when none found.
+ */
+export function extractLatestPresentedWardrobeCandidateIds(history: Content[]): string[] {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.role !== 'model') continue;
+    const text = extractTextFromParts(msg.parts ?? []);
+    const matches = [...text.matchAll(WARDROBE_CANDIDATES_HISTORY_PATTERN)];
+    if (matches.length === 0) continue;
+    const last = matches[matches.length - 1];
+    return last[1]
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length >= 20);
+  }
+  return [];
+}
+
+export function isVerbalWardrobeAnchorAccept(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (VERBAL_ANCHOR_REJECT_PATTERN.test(trimmed)) return false;
+  return VERBAL_ANCHOR_ACCEPT_PATTERN.test(trimmed);
+}
+
+/**
+ * Bind wardrobe_pairing anchor id from explicit confirm or last presented singleton candidate.
+ * Overrides Gatekeeper hallucinations when they conflict with the last shown singleton.
+ */
+export function resolveWardrobeAnchorIdFromHistory(
+  intent: GatekeeperIntent,
+  history: Content[],
+  currentText: string
+): GatekeeperIntent {
+  if (!isWardrobePairingIntent(intent)) return intent;
+
+  const explicitId = extractConfirmedWardrobeId(currentText);
+  if (explicitId) {
+    if (intent.anchor_wardrobe_id?.trim() !== explicitId) {
+      console.warn(
+        `[INTENT] Overriding anchor_wardrobe_id with explicit confirm: ${intent.anchor_wardrobe_id || '(empty)'} → ${explicitId}`
+      );
+    }
+    return { ...intent, anchor_wardrobe_id: explicitId };
+  }
+
+  const presented = extractLatestPresentedWardrobeCandidateIds(history);
+  if (presented.length !== 1) return intent;
+
+  const singletonId = presented[0];
+  const currentId = intent.anchor_wardrobe_id?.trim() ?? '';
+  if (!isVerbalWardrobeAnchorAccept(currentText)) return intent;
+
+  // Verbal accept of the only shown item — fill or override Gatekeeper hallucination.
+  if (currentId !== singletonId) {
+    console.warn(
+      `[INTENT] Binding verbal confirm to last singleton candidate: ${currentId || '(empty)'} → ${singletonId}`
+    );
+  }
+  return { ...intent, anchor_wardrobe_id: singletonId };
+}
+
 export function buildPurchasePairingSpecialRequest(anchorSummary: string): string {
   const anchor = anchorSummary.trim() || '用户上传/提及的待购单品';
   return `用户待购单品（${anchor}）需作为搭配锚点，从衣橱中选取互补单品与之搭配`;
@@ -562,6 +637,8 @@ export function enrichIntentFromContext(
   }
 
   if (isWardrobePairingIntent(normalized)) {
+    const withAnchor = resolveWardrobeAnchorIdFromHistory(normalized, history, currentText);
+    normalized.anchor_wardrobe_id = withAnchor.anchor_wardrobe_id;
     if (!normalized.occasion.trim()) {
       normalized.occasion = inferOccasionFromText(contextText) || '';
     }

@@ -2,12 +2,14 @@ import React from 'react';
 import Image from 'next/image';
 import { Briefcase, Shirt, Heart, Palette } from 'lucide-react';
 import { FeatureCard } from './FeatureCard';
+import { useAccess } from '@/components/access/AccessProvider';
 
 interface GreetingSectionProps {
   handleSend: (prompt: string) => void;
 }
 
 export function GreetingSection({ handleSend }: GreetingSectionProps) {
+  const { canInvokeAI } = useAccess();
   return (
     <div className="max-w-4xl mx-auto pt-16 px-6 sm:px-12">
       <div className="flex flex-col items-start mb-12">
@@ -22,7 +24,7 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+      {canInvokeAI ? <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         <FeatureCard 
           icon={<Briefcase className="h-6 w-6 text-blue-500" />}
           iconBg="bg-blue-50"
@@ -51,7 +53,11 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
           description="专业色彩搭配指导"
           onClick={() => handleSend("如何进行高级感的色彩搭配？请教我一些色彩搭配的公式。")}
         />
-      </div>
+      </div> : (
+        <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
+          当前可浏览历史对话。输入访问码后即可开始新的搭配咨询。
+        </p>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Content, Part } from '@google/genai';
-import { genAI } from '@/server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
@@ -70,15 +70,12 @@ ${userMessage || '（请根据历史对话推断咨询主题）'}
 
   const response = await withRetryOn429(
     () =>
-      genAI.models.generateContent({
+      llmGenerate({
         model: AGENT_MODELS.stylist,
         contents,
-        config: {
-          systemInstruction: STYLE_ADVICE_SYSTEM_INSTRUCTION,
-          temperature: 0.5,
-          responseMimeType: 'application/json',
-          responseSchema: styleAdviceSchema,
-        },
+        systemInstruction: STYLE_ADVICE_SYSTEM_INSTRUCTION,
+        temperature: 0.5,
+        jsonSchema: styleAdviceSchema,
       }),
     { label: 'Stylist advice' }
   );
@@ -177,21 +174,18 @@ ${athleticOccasion ? '- 当前为【运动场合】：检索 query 必须体现 
 
   const response = await withRetryOn429(
     () =>
-      genAI.models.generateContent({
+      llmGenerate({
         model: AGENT_MODELS.stylist,
         contents,
-        config: {
-          systemInstruction: isPairing
-            ? `${WARDROBE_SEARCH_INSTRUCTION}\n${
-                isWardrobePairingIntent(intent)
-                  ? WARDROBE_PAIRING_SEARCH_ADDENDUM
-                  : PURCHASE_PAIRING_SEARCH_ADDENDUM
-              }`
-            : WARDROBE_SEARCH_INSTRUCTION,
-          temperature: 0.3,
-          responseMimeType: 'application/json',
-          responseSchema: wardrobeSearchSchema,
-        },
+        systemInstruction: isPairing
+          ? `${WARDROBE_SEARCH_INSTRUCTION}\n${
+              isWardrobePairingIntent(intent)
+                ? WARDROBE_PAIRING_SEARCH_ADDENDUM
+                : PURCHASE_PAIRING_SEARCH_ADDENDUM
+            }`
+          : WARDROBE_SEARCH_INSTRUCTION,
+        temperature: 0.3,
+        jsonSchema: wardrobeSearchSchema,
       }),
     { label: 'Stylist wardrobe search' }
   );
@@ -375,20 +369,18 @@ ${wardrobeXml || (isRevision && previousCache ? '*(微调模式：优先复用�
 ${isAthleticOccasion(intent, extractUserMessage(initialParts)) ? '\n【提醒】当前为运动场合：请先阅读 <wardrobe_match_summary>，对 status=weak/none 的核心槽位使用 new_item，禁止硬选时装类单品。' : ''}
 `;
 
-  const chat = genAI.chats.create({
-    model: AGENT_MODELS.stylist,
-    history: history.length > 0 ? history : undefined,
-    config: {
-      systemInstruction: STYLIST_SYSTEM_INSTRUCTION,
-      temperature: 0.4,
-      responseMimeType: 'application/json',
-      responseSchema: stylistSchema,
-    },
-  });
+  const contents: Content[] = [...history, { role: 'user', parts: [{ text: contextPrompt }] }];
 
   try {
     const response = await withRetryOn429(
-      () => chat.sendMessage({ message: contextPrompt }),
+      () =>
+        llmGenerate({
+          model: AGENT_MODELS.stylist,
+          contents,
+          systemInstruction: STYLIST_SYSTEM_INSTRUCTION,
+          temperature: 0.4,
+          jsonSchema: stylistSchema,
+        }),
       { label: 'Stylist' }
     );
     const responseText = response.text;

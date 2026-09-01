@@ -62,17 +62,17 @@ export function normalizeWardrobeSearchQuery(raw: string): string {
 }
 
 const COLOR_FAMILY_PATTERNS: Record<string, RegExp[]> = {
-  white: [/白|white|cream|ivory|米白|奶油|off[\s-]?white/i],
-  black: [/黑|black/i],
-  green: [/绿|green|olive|橄榄/i],
-  blue: [/蓝|blue|denim|牛仔/i],
-  red: [/红|red|酒红|枣红/i],
-  gray: [/灰|gray|grey|heather/i],
-  yellow: [/黄|yellow|姜黄/i],
-  pink: [/粉|pink|rose/i],
-  brown: [/棕|褐|brown|卡其|khaki|大地/i],
-  purple: [/紫|purple|violet/i],
-  orange: [/橙|orange/i],
+  white: [/\b(white|cream|ivory|off[\s-]?white)\b/i, /白|米白|奶油/i],
+  black: [/\bblack\b/i, /黑/i],
+  green: [/\b(green|olive)\b/i, /绿|橄榄/i],
+  blue: [/\b(blue|denim|navy)\b/i, /蓝|牛仔/i],
+  red: [/\b(red|maroon|burgundy)\b/i, /红|酒红|枣红/i],
+  gray: [/\b(gray|grey|heather)\b/i, /灰/i],
+  yellow: [/\b(yellow|mustard)\b/i, /黄|姜黄/i],
+  pink: [/\b(pink|rose)\b/i, /粉/i],
+  brown: [/\b(brown|khaki|tan)\b/i, /棕|褐|卡其|大地/i],
+  purple: [/\b(purple|violet)\b/i, /紫/i],
+  orange: [/\borange\b/i, /橙/i],
 };
 
 export function extractQueryColorFamilies(query: string): string[] {
@@ -83,6 +83,19 @@ export function extractQueryColorFamilies(query: string): string[] {
     }
   }
   return families;
+}
+
+const ENGLISH_COLOR_WORD =
+  /\b(white|black|gray|grey|beige|cream|ivory|navy|blue|red|green|brown|khaki|pink|yellow|purple|orange|charcoal|mint|sage|olive|denim|tan|maroon|burgundy)\b/gi;
+
+/** 供 query embedding 使用的英文颜色 token（与衣橱入库 colors 字段对齐） */
+export function extractQueryEmbeddingColors(query: string): string[] {
+  const colors = new Set(extractQueryColorFamilies(query));
+  for (const match of query.matchAll(ENGLISH_COLOR_WORD)) {
+    const token = match[0].toLowerCase();
+    colors.add(token === 'grey' ? 'gray' : token);
+  }
+  return [...colors];
 }
 
 export function itemMatchesQueryColorFamilies(

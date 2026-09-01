@@ -3,8 +3,10 @@ import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
 import { streamResponse } from '@/lib/utils';
 import { Message, MessageContentPart } from '@/lib/types';
+import { useAccess } from '@/components/access/AccessProvider';
 
 export const useChatHandler = () => {
+  const { canInvokeAI } = useAccess();
   const {
     activeConversationId,
     startNewConversation,
@@ -17,6 +19,7 @@ export const useChatHandler = () => {
     promptOrMessage: string | Message,
     imageUrl?: string | null
   ) => {
+    if (!canInvokeAI) return;
 
     setWaitReply(true);
     let conversationId = activeConversationId;
@@ -189,12 +192,10 @@ export const useChatHandler = () => {
         if (currentAiMessageId) {
           updateMessages(messages => messages.map(m => {
             if (m.id !== currentAiMessageId) return m;
+            // 只把「尚未完成」的阶段留给失败态展示；不要全部标 done，否则会全变绿勾
             return {
               ...m,
               status: 'failed' as const,
-              progress: m.progress
-                ? { ...m.progress, stages: m.progress.stages.map((s) => ({ ...s, done: true })) }
-                : undefined,
             };
           }));
         } else {
@@ -272,6 +273,7 @@ export const useChatHandler = () => {
     addUserMessage,
     updateMessages,
     setWaitReply,
+    canInvokeAI,
   ]);
 
   /**
@@ -279,6 +281,7 @@ export const useChatHandler = () => {
    * 与 handleSend 的区别：不新建用户消息，直接以原始内容重起请求。
    */
   const handleRetrySend = useCallback(async (failedUserMsg: Message) => {
+    if (!canInvokeAI) return;
     const conversationId = activeConversationId;
     if (!conversationId) return;
 
@@ -363,7 +366,7 @@ export const useChatHandler = () => {
       { conversationId, content: { text: textPrompt, imageUrl } } as Parameters<typeof streamResponse>[0],
       handlers,
     );
-  }, [activeConversationId, updateMessages, setWaitReply]);
+  }, [activeConversationId, canInvokeAI, updateMessages, setWaitReply]);
 
-  return { handleSend, handleRetrySend };
+  return { handleSend, handleRetrySend, canInvokeAI };
 };

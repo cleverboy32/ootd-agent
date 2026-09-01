@@ -1,5 +1,5 @@
 import { Type, Schema } from '@google/genai';
-import { genAI } from '@/server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { logVisualAudit } from '@/server/logging/visual';
@@ -62,18 +62,15 @@ async function auditImage(
 
   const response = await withRetryOn429(
     () =>
-      genAI.models.generateContent({
+      llmGenerate({
         model: AGENT_MODELS.visualCritic,
         contents: [
           { inlineData: { data: imageBase64, mimeType } },
           { text: prompt },
         ],
-        config: {
-          systemInstruction: CRITIC_SYSTEM_INSTRUCTION,
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-          responseSchema: criticSchema,
-        },
+        systemInstruction: CRITIC_SYSTEM_INSTRUCTION,
+        temperature: 0.1,
+        jsonSchema: criticSchema,
       }),
     { label: `VisualDirector critic (${outfit.id})` }
   );

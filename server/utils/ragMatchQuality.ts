@@ -1,6 +1,7 @@
 import type { GatekeeperIntent } from '@/server/agents/intent';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import { getTextSimilarityThresholds } from '@/server/services/embedding';
 
 export type SlotMatchStatus = 'adequate' | 'weak' | 'none';
 
@@ -14,11 +15,6 @@ export interface SlotMatchAssessment {
 
 export const ATHLETIC_OCCASION_HINT =
   /篮球|打球|足球|运动|健身|跑步|瑜伽|球类|训练|athletic|basketball|workout|gym|sport/i;
-
-/** 槽位最高分低于此值 → weak */
-export const SLOT_WEAK_SIMILARITY_THRESHOLD = 0.72;
-/** 槽位最高分达到此值且品类适配 → adequate */
-export const SLOT_ADEQUATE_SIMILARITY_THRESHOLD = 0.78;
 
 const CORE_SLOTS: WardrobeSearchSlot[] = ['top', 'bottom', 'shoes'];
 
@@ -69,7 +65,7 @@ export function isItemAthleticallyAppropriate(
   if (slot === 'top') {
     if (ATHLETIC_TOP_GOOD.test(text)) return true;
     // 普通 T 恤在运动场景偏弱，但不直接判死
-    if (item.similarity >= SLOT_ADEQUATE_SIMILARITY_THRESHOLD) return true;
+    if (item.similarity >= getTextSimilarityThresholds().slotAdequate) return true;
     return false;
   }
 
@@ -81,6 +77,8 @@ export function assessSlotMatch(
   slot: WardrobeSearchSlot | string,
   athletic: boolean
 ): SlotMatchAssessment {
+  const thresholds = getTextSimilarityThresholds();
+
   if (results.length === 0) {
     return {
       slot,
@@ -93,18 +91,11 @@ export function assessSlotMatch(
 
   const sorted = [...results].sort((a, b) => b.similarity - a.similarity);
   const top = sorted[0];
+  const second = sorted[1];
   const bestSubCategory = top.subCategory;
+  const gap = second ? top.similarity - second.similarity : 1;
 
-  if (top.similarity < SLOT_WEAK_SIMILARITY_THRESHOLD) {
-    return {
-      slot,
-      status: 'weak',
-      bestSimilarity: top.similarity,
-      bestSubCategory,
-      note: `最高相似度仅 ${top.similarity.toFixed(2)}，低于可用阈值`,
-    };
-  }
-
+  // 运动场合品类硬过滤（保留原有逻辑）
   if (athletic && CORE_SLOTS.includes(slot as WardrobeSearchSlot)) {
     const appropriate = sorted.find((item) => isItemAthleticallyAppropriate(item, slot));
     if (!appropriate) {
@@ -117,7 +108,7 @@ export function assessSlotMatch(
       };
     }
     if (
-      appropriate.similarity < SLOT_ADEQUATE_SIMILARITY_THRESHOLD &&
+      appropriate.similarity < thresholds.slotAdequate &&
       !ATHLETIC_BOTTOM_GOOD.test(itemText(appropriate)) &&
       !ATHLETIC_SHOES_GOOD.test(itemText(appropriate)) &&
       !ATHLETIC_TOP_GOOD.test(itemText(appropriate))
@@ -132,7 +123,17 @@ export function assessSlotMatch(
     }
   }
 
-  if (top.similarity >= SLOT_ADEQUATE_SIMILARITY_THRESHOLD) {
+  if (top.similarity < thresholds.slotWeak) {
+    return {
+      slot,
+      status: 'weak',
+      bestSimilarity: top.similarity,
+      bestSubCategory,
+      note: `最高相似度仅 ${top.similarity.toFixed(2)}，低于可用阈值`,
+    };
+  }
+
+  if (top.similarity >= thresholds.slotAdequate) {
     return {
       slot,
       status: 'adequate',
@@ -142,12 +143,23 @@ export function assessSlotMatch(
     };
   }
 
+  // 灰区：分数达到 weak 线但未达 adequate 线，若 top1 明显领先 top2，可提升为 adequate
+  if (gap >= thresholds.slotConfidenceGap) {
+    return {
+      slot,
+      status: 'adequate',
+      bestSimilarity: top.similarity,
+      bestSubCategory,
+      note: `相似度 ${top.similarity.toFixed(2)} 灰区，但与第二名差距 ${gap.toFixed(2)}，可优先使用`,
+    };
+  }
+
   return {
     slot,
     status: 'weak',
     bestSimilarity: top.similarity,
     bestSubCategory,
-    note: '相似度中等，请谨慎判断是否真适配场合',
+    note: '相似度中等且与次优选项胶着，请谨慎判断是否真适配场合',
   };
 }
 

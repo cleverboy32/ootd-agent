@@ -1,5 +1,5 @@
-import { Content, Part, ThinkingLevel } from '@google/genai';
-import { genAI } from '@/server/services/ai';
+import { Content, Part } from '@google/genai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import {
@@ -96,29 +96,17 @@ export async function callGatekeeperAgent(
   try {
     const response = await withRetryOn429(
       () =>
-        genAI.models.generateContent({
+        llmGenerate({
           model: AGENT_MODELS.gatekeeper,
           contents,
-          config: {
-            systemInstruction: GATEKEEPER_SYSTEM_INSTRUCTION,
-            temperature: 0.0,
-            responseMimeType: 'application/json',
-            responseSchema: gatekeeperSchema,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM, includeThoughts: true },
-          },
+          systemInstruction: GATEKEEPER_SYSTEM_INSTRUCTION,
+          temperature: 0.0,
+          jsonSchema: gatekeeperSchema,
         }),
       { label: 'Gatekeeper', maxRetries: 4 }
     );
 
-    const parts = response.candidates?.[0]?.content?.parts ?? [];
-    const thinkingText = parts
-      .filter((p) => p.thought === true)
-      .map((p) => p.text ?? '')
-      .join('');
-    if (thinkingText) {
-      console.log('[GATEKEEPER_AGENT] Thinking:\n', thinkingText);
-    }
-
+    const thinkingText = '';
     const responseText = response.text;
     if (!responseText) {
       throw new Error('Empty response from Gatekeeper Agent');

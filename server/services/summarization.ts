@@ -1,4 +1,4 @@
-import { genAI } from 'server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { Content } from '@google/genai';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
@@ -49,30 +49,18 @@ export async function generateSummary(
 
     const result = await withRetryOn429(
       () =>
-        genAI.models.generateContent({
+        llmGenerate({
           model: AGENT_MODELS.summarization,
           contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
         }),
       { label: 'Summarization' }
     );
       
-    // --- [核心修改] --- 更健壮、类型安全的响应解析
-    const firstCandidate = result.candidates?.[0];
-    if (
-      firstCandidate &&
-      firstCandidate.content &&
-      Array.isArray(firstCandidate.content.parts) &&
-      firstCandidate.content.parts.length > 0
-    ) {
-      const firstPart = firstCandidate.content.parts[0];
-      if (firstPart.text) {
-        return firstPart.text; // 成功提取到文本，返回 string
-      }
-    }
+    const text = result.text?.trim();
+    if (text) return text;
 
-    // 如果以上任何一步失败，都意味着没有有效的文本返回
     console.warn("Summary generation returned no valid text content.");
-    return null; // 返回 null，符合函数签名
+    return null;
   } catch (error) {
     console.error('Failed to generate summary:', error);
     return null;

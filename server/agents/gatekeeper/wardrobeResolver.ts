@@ -2,6 +2,7 @@ import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
 import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
 import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
+import { getTextSimilarityThresholds } from '@/server/services/embedding';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import type {
   AnchorSlot,
@@ -11,8 +12,6 @@ import type {
 
 export type { WardrobeResolverResult };
 
-const RESOLVE_THRESHOLD = 0.72;
-const AMBIGUOUS_MIN = 0.52;
 const MAX_CANDIDATES = 4;
 
 function slotToMainCategory(slot: AnchorSlot): ClothingMainCategory | undefined {
@@ -117,20 +116,23 @@ function classifyResults(
     return { status: 'not_found' };
   }
 
+  const { resolveThreshold, ambiguousMin, slotConfidenceGap } = getTextSimilarityThresholds();
+  const resolveGap = Math.max(slotConfidenceGap * 2, 0.08);
+
   const sorted = [...results].sort((a, b) => b.similarity - a.similarity);
   const top = sorted[0];
   const candidates = sorted
-    .filter((r) => r.similarity >= AMBIGUOUS_MIN)
+    .filter((r) => r.similarity >= ambiguousMin)
     .slice(0, MAX_CANDIDATES)
     .map(toCandidate);
 
-  if (top.similarity >= RESOLVE_THRESHOLD && candidates.length === 1) {
+  if (top.similarity >= resolveThreshold && candidates.length === 1) {
     return { status: 'resolved', itemId: top.id, item: toCandidate(top) };
   }
 
-  if (top.similarity >= RESOLVE_THRESHOLD && candidates.length > 1) {
+  if (top.similarity >= resolveThreshold && candidates.length > 1) {
     const second = candidates[1];
-    if (top.similarity - (second.similarity ?? 0) >= 0.08) {
+    if (top.similarity - (second.similarity ?? 0) >= resolveGap) {
       return { status: 'resolved', itemId: top.id, item: toCandidate(top) };
     }
   }

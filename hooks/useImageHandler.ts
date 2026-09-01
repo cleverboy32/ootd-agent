@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { uploadFileToGCS } from '@/lib/utils';
+import { uploadFileToCOS } from '@/lib/utils';
 
 export const useImageHandler = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -47,7 +47,7 @@ export const useImageHandler = () => {
       setUploadError(null);
       
       try {
-        const imageUrl = await uploadFileToGCS(selectedFile);
+        const imageUrl = await uploadFileToCOS(selectedFile);
         setUploadedImageUrl(imageUrl);
       } catch (e) {
         const error = e as Error;

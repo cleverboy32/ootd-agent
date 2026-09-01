@@ -1,4 +1,4 @@
-import React, { memo, useState } from "react";
+import React, { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import Image from "next/image";
 import remarkGfm from "remark-gfm";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { WardrobeItem } from "./WardrobeItem";
 import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
+import { useAccess } from "@/components/access/AccessProvider";
 
 const IMAGE_MARKER_REGEX = /\[IMAGE=([^\]]+)\]/g;
 
@@ -71,7 +72,7 @@ function InlineImageMarker({
   outfitId: string;
   messageId: string;
   imageStates?: Record<string, ImageState>;
-  onRetryImage: (messageId: string, outfitId: string) => void;
+  onRetryImage?: (messageId: string, outfitId: string) => void;
 }) {
   const state = imageStates?.[outfitId];
 
@@ -84,7 +85,7 @@ function InlineImageMarker({
   if (state === "failed") {
     return (
       <ImageFailedPlaceholder
-        onRetry={() => onRetryImage(messageId, outfitId)}
+        onRetry={onRetryImage ? () => onRetryImage(messageId, outfitId) : undefined}
         isRetrying={false}
       />
     );
@@ -147,7 +148,7 @@ const ContentRenderer = ({
   text: string;
   messageId: string;
   imageStates?: Record<string, ImageState>;
-  onRetryImage: (messageId: string, outfitId: string) => void;
+  onRetryImage?: (messageId: string, outfitId: string) => void;
 }) => {
   const segments: Array<{ type: "text"; content: string } | { type: "image"; outfitId: string }> = [];
   let lastIndex = 0;
@@ -200,20 +201,26 @@ function ThinkingPanel({
 
   if (!stages.length) return null;
 
+  const firstIncompleteIdx = stages.findIndex((s) => !s.done);
+
   return (
     <div className="mb-2 w-full">
-      <div className="rounded-2xl border border-border/20 bg-muted/50 px-3.5 py-2.5 space-y-2">
+      <div className={`rounded-2xl border px-3.5 py-2.5 space-y-2 ${
+        isFailed ? 'border-destructive/30 bg-destructive/5' : 'border-border/20 bg-muted/50'
+      }`}>
         {stages.map((stage, i) => {
-          const isDone = stage.done || isFailed;
-          const isActive = !isDone && i === stages.findIndex((s) => !s.done && !isFailed);
-          const showThinking = false; // reserved for future Chinese thinking support
+          const isFailedStep = isFailed && !stage.done && i === firstIncompleteIdx;
+          const isDone = stage.done;
+          const isActive = !isFailed && !isDone && i === firstIncompleteIdx;
 
           return (
             <div key={stage.key} className="space-y-1.5">
               <div className="flex items-center gap-2 text-xs">
                 <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                  {isDone ? (
-                    <Check className={`h-3.5 w-3.5 ${isFailed && !stage.done ? 'text-destructive' : 'text-emerald-500'}`} />
+                  {isFailedStep ? (
+                    <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                  ) : isDone ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
                   ) : isActive ? (
                     <Loader2 className="h-3.5 w-3.5 text-muted-foreground/50 animate-spin" />
                   ) : (
@@ -221,6 +228,7 @@ function ThinkingPanel({
                   )}
                 </div>
                 <span className={`leading-none ${
+                  isFailedStep ? 'text-destructive' :
                   isActive ? 'text-muted-foreground' :
                   isDone ? 'text-muted-foreground/60' :
                   'text-muted-foreground/35'
@@ -228,8 +236,6 @@ function ThinkingPanel({
                   {stage.label}
                 </span>
               </div>
-
-              {/* thinking entry point hidden until Gemini supports Chinese thinking tokens */}
             </div>
           );
         })}
@@ -245,6 +251,7 @@ interface ChatMessageProps {
 
 export const ChatMessage = memo(
   function ChatMessage({ msg, isLoading = false }: ChatMessageProps) {
+    const { canInvokeAI } = useAccess();
     const { handleSend, handleRetrySend } = useChatHandler();
     const { retryOutfitImage } = useImageRetry();
 
@@ -308,7 +315,7 @@ export const ChatMessage = memo(
                           text={part.content}
                           messageId={msg.id}
                           imageStates={msg.imageStates}
-                          onRetryImage={retryOutfitImage}
+                          onRetryImage={canInvokeAI ? retryOutfitImage : undefined}
                         />
                       );
                     } else if (part.type === "image") {
@@ -332,7 +339,7 @@ export const ChatMessage = memo(
                         <WardrobeCandidatePicker
                           key={part.id || index}
                           items={part.wardrobeCandidates}
-                          disabled={isLoading}
+                          disabled={isLoading || !canInvokeAI}
                           onSelect={(itemId) => {
                             handleSend(`确认选择这件单品（id=${itemId}）`);
                           }}
@@ -346,7 +353,7 @@ export const ChatMessage = memo(
                     text={msg.content as string}
                     messageId={msg.id}
                     imageStates={msg.imageStates}
-                    onRetryImage={retryOutfitImage}
+                    onRetryImage={canInvokeAI ? retryOutfitImage : undefined}
                   />
                 ) : (
                   msg.content
@@ -364,8 +371,8 @@ export const ChatMessage = memo(
               </div>
             )}
 
-            {/* AI 消息生成失败（已有内容/进度条，属于正常 retry 流程） */}
-            {msg.role === "ai" && msg.status === "failed" && msg.content.length > 0 && (
+            {/* AI 消息生成失败：有正文或仅有进度条都应能重试（断点续传常见场景） */}
+            {msg.role === "ai" && msg.status === "failed" && (msg.content.length > 0 || hasProgress) && (
               <div className="flex items-center gap-2 mt-2 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <span className="text-xs">消息生成失败</span>
@@ -374,6 +381,7 @@ export const ChatMessage = memo(
                   size="sm"
                   className="flex items-center gap-1.5 text-xs h-auto px-2 py-1"
                   onClick={() => handleSend(msg)}
+                  disabled={!canInvokeAI}
                 >
                   <RefreshCw className="h-3 w-3" />
                   重试
@@ -391,6 +399,7 @@ export const ChatMessage = memo(
                   size="sm"
                   className="flex items-center gap-1 text-xs h-auto px-2 py-0.5 text-destructive hover:text-destructive hover:bg-destructive/10"
                   onClick={() => handleRetrySend(msg)}
+                  disabled={!canInvokeAI}
                 >
                   <RefreshCw className="h-3 w-3" />
                   重试

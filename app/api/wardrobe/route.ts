@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server';
-// [MODIFIED] Add Prisma to the import
-import { ClothingMainCategory, Prisma } from '@prisma/client';
 import prismadb from 'server/db';
-import { genAI } from 'server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
+import { extractJsonText } from '@/server/services/llm/convert';
+import { AGENT_MODELS } from '@/server/config/models';
 import { urlToGenerativePart } from '@/server/utils/image';
-import { GenerateContentResponse } from '@google/genai';
-// [MODIFIED] Import both embedding generators
-import { buildWardrobeDocumentEmbeddingText } from '@/server/utils/embeddingText';
-import { generateDocumentEmbedding } from 'server/services/embedding';
-import { deleteWardrobeItems } from '@/server/services/wardrobeService';
+import {
+  clothingItemHasTextEmbedding,
+  clothingItemHasVisualEmbedding,
+  deleteWardrobeItems,
+  findWardrobeItemByImageUrl,
+  persistTextEmbedding,
+  persistVisualEmbedding,
+} from '@/server/services/wardrobeService';
 import { is429Error, withRetryOn429 } from '@/server/utils/retryOn429';
-// --- [新增] GET 请求处理函数 ---
+import { toUserFacingUploadError } from '@/lib/upload-errors';
+import {
+  normalizeWardrobeAnalysis,
+  WARDROBE_ANALYSIS_JSON_SCHEMA,
+  WARDROBE_ANALYSIS_PROMPT,
+  type WardrobeAnalysisResult,
+} from '@/server/utils/wardrobeAnalysis';
+
 export async function GET(req: Request) {
   try {
-    // 1. 从请求头获取 clientId
     const clientId = req.headers.get('X-Client-ID');
     if (!clientId) {
       return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
@@ -21,17 +30,11 @@ export async function GET(req: Request) {
 
     console.log(`[API /api/wardrobe] GET request for clientId: ${clientId}`);
 
-    // 2. 从数据库查询该用户的所有衣物，按创建时间倒序排列
     const clothingItems = await prismadb.clothingItem.findMany({
-      where: {
-        clientProfileId: clientId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      where: { clientProfileId: clientId },
+      orderBy: { createdAt: 'desc' },
     });
 
-    // 3. 返回查询结果
     return NextResponse.json(clothingItems, { status: 200 });
   } catch (error) {
     console.error('Error in GET /api/wardrobe:', error);
@@ -39,59 +42,56 @@ export async function GET(req: Request) {
   }
 }
 
-// 定义 AI 返回的 JSON 对象的 TypeScript 接口，用于类型检查
-interface AiClothingAnalysis {
-  mainCategory: ClothingMainCategory;
-  subCategory: string;
-  season: string[]; // <-- 新增
-  material: string[]; // <-- 新增
-  colors: string[];
-  tags: string[];
-  description: string;
+type StepState = 'pending' | 'done' | 'skipped' | 'failed';
+
+export interface WardrobeStepStatus {
+  analysis: StepState;
+  textEmbedding: StepState;
+  visualEmbedding: StepState;
 }
 
-// 精心设计的 AI 指令，告诉模型如何分析图片并以特定 JSON 格式返回结果
-const aiPrompt = `You are an expert fashion assistant responsible for analyzing clothing items. Your task is to analyze the user-provided image and return a structured JSON object with the item's details.
-
-**JSON Output Format:**
-You MUST respond with a single, minified JSON object and nothing else. Do not include markdown backticks (\`\`\`json), explanations, or any text outside of the JSON object.
-
-The JSON object must have the following structure:
-{
-  "mainCategory": "string",
-  "subCategory": "string",
-  "season": ["string"],
-  "material": ["string"],
-  "colors": ["string"],
-  "tags": ["string"],
-  "description": "string"
+function failStep(
+  timer: ReturnType<typeof createStepTimer>,
+  steps: WardrobeStepStatus,
+  step: keyof WardrobeStepStatus,
+  message: string,
+  status: number,
+  extra?: Record<string, unknown>
+) {
+  const finalSteps: WardrobeStepStatus = { ...steps, [step]: 'failed' };
+  timer.log('error', { steps: finalSteps, ...extra });
+  return NextResponse.json({ error: message, steps: finalSteps, ...extra }, { status });
 }
 
-**Field Descriptions & Constraints:**
+function createStepTimer() {
+  const startedAt = Date.now();
+  let lastMark = startedAt;
+  const ms: Record<string, number> = {};
 
-1.  **mainCategory**: The primary category of the item. It MUST be one of the following exact string values: "TOP", "BOTTOM", "OUTERWEAR", "FOOTWEAR", "ACCESSORY", "ONE_PIECE".
+  return {
+    mark(step: string) {
+      const now = Date.now();
+      ms[step] = now - lastMark;
+      lastMark = now;
+    },
+    log(outcome: 'success' | 'error', extra?: Record<string, unknown>) {
+      ms.total = Date.now() - startedAt;
+      console.log('[API /api/wardrobe] timing', JSON.stringify({ outcome, ...extra, ms }));
+    },
+  };
+}
 
-2.  **subCategory**: A specific, descriptive sub-category in English (e.g., "T-shirt", "Skinny Jeans", "Trench Coat", "Ankle Boots").
-
-3.  **season**: An array of applicable seasons in English. It MUST contain one or more of the following: "Spring", "Summer", "Autumn", "Winter".
-
-4.  **material**: An array of 1-2 primary materials in English (e.g., ["cotton"], ["polyester", "spandex"]).
-5.  **colors**: An array of 1-3 dominant colors present in the item, in English (e.g., ["black", "white", "gray"]).
-
-6.  **tags**: An array of 3-5 descriptive tags in English that capture the style or occasion (e.g., ["casual", "formal", "sporty", "vintage"]).
-
-7.  **description**: A concise, one-sentence description of the item in English (e.g., "A white short-sleeve cotton t-shirt with a crew neck.").
-
-**Example Input Image:** A picture of a blue denim jacket.
-**Example Correct Output:**
-{"mainCategory":"OUTERWEAR","subCategory":"Denim Jacket","season":["Spring","Autumn"],"material":["denim"],"colors":["blue"],"tags":["casual","streetwear"],"description":"A classic blue denim jacket with metal buttons."}
-
-Now, analyze the following image and provide the JSON object.`;
-
+function isRateLimitResponse(error: unknown, steps: WardrobeStepStatus, item: { id: string }) {
+  if (!is429Error(error)) return null;
+  return NextResponse.json(
+    { error: 'AI 服务请求过于频繁，请稍后再试', code: 'RATE_LIMIT', steps, item },
+    { status: 429 }
+  );
+}
 
 export async function POST(req: Request) {
+  const timer = createStepTimer();
   try {
-    // 1. 从请求中获取 clientId 和 imageUrl
     const clientId = req.headers.get('X-Client-ID');
     if (!clientId) {
       return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
@@ -103,118 +103,151 @@ export async function POST(req: Request) {
     }
 
     console.log(`[API /api/wardrobe] Received request for clientId: ${clientId}, imageUrl: ${imageUrl}`);
-    
 
-    const imagePart = await urlToGenerativePart(imageUrl);
-    const textPart = { text: aiPrompt };
+    let item = await findWardrobeItemByImageUrl(clientId, imageUrl);
+    const steps: WardrobeStepStatus = {
+      analysis: item ? 'skipped' : 'pending',
+      textEmbedding: 'pending',
+      visualEmbedding: 'pending',
+    };
+    timer.mark('lookup_existing');
 
-    // [MODIFIED] 使用最新的 genAI.models.generateContent 方式调用 AI
-    console.log('[API /api/wardrobe] Calling Gemini API for analysis with genAI.models.generateContent...');
-    const result: GenerateContentResponse = await withRetryOn429(
-      () =>
-        genAI.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [{ role: 'user', parts: [imagePart, textPart] }],
-        }),
-      { label: 'Wardrobe analysis', maxRetries: 4 }
-    );
+    if (!item) {
+      const imagePart = await urlToGenerativePart(imageUrl);
+      timer.mark('fetch_image');
 
-    // 3. 获取分析结果
-    const responseText = result.text;
-    console.log(`[API /api/wardrobe] Gemini response received: ${responseText}`);
+      console.log('[API /api/wardrobe] Calling LLM for analysis...', {
+        model: AGENT_MODELS.wardrobeAnalysis,
+      });
+      const result = await withRetryOn429(
+        () =>
+          llmGenerate({
+            model: AGENT_MODELS.wardrobeAnalysis,
+            contents: [{ role: 'user', parts: [imagePart, { text: WARDROBE_ANALYSIS_PROMPT }] }],
+            jsonSchema: WARDROBE_ANALYSIS_JSON_SCHEMA,
+          }),
+        { label: 'Wardrobe analysis', maxRetries: 4 }
+      );
+      timer.mark('llm_analysis');
 
-    // 4. 解析和验证 AI 返回的 JSON
-    if (!responseText) {
-      console.error('[API /api/wardrobe] Received empty response from Gemini.');
-      return NextResponse.json({ error: 'Received empty response from AI service.' }, { status: 500 });
+      const responseText = result.text;
+      console.log(`[API /api/wardrobe] LLM response received: ${responseText}`);
+
+      if (!responseText) {
+        return failStep(timer, steps, 'analysis', 'AI 分析没有返回内容，请重试', 502);
+      }
+
+      let parsed: WardrobeAnalysisResult;
+      try {
+        parsed = JSON.parse(extractJsonText(responseText));
+      } catch {
+        console.error('[API /api/wardrobe] Failed to parse JSON from AI response:', responseText);
+        return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
+      }
+
+      const analysis = normalizeWardrobeAnalysis(parsed);
+      if (!analysis) {
+        console.error('[API /api/wardrobe] Invalid analysis payload:', parsed);
+        return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
+      }
+      timer.mark('parse_and_validate');
+
+      console.log('[API /api/wardrobe] Storing new clothing item to database...');
+      item = await prismadb.clothingItem.create({
+        data: {
+          clientProfileId: clientId,
+          imageUrl,
+          mainCategory: analysis.mainCategory,
+          subCategory: analysis.subCategory,
+          season: analysis.season,
+          material: analysis.material,
+          colors: analysis.colors,
+          tags: analysis.tags,
+          description: analysis.description,
+          searchDescription: analysis.searchDescription,
+          occasions: analysis.occasions,
+          formality: analysis.formality,
+          silhouette: analysis.silhouette,
+        },
+      });
+      steps.analysis = 'done';
+      timer.mark('db_write');
     }
 
-    let analysis: AiClothingAnalysis;
-    try {
-      analysis = JSON.parse(responseText);
-    } catch (e) {
-      console.error('[API /api/wardrobe] Failed to parse JSON from AI response:', responseText);
-      return NextResponse.json({ error: 'Failed to parse AI response. The response was not valid JSON.' }, { status: 500 });
+    if (await clothingItemHasTextEmbedding(item.id)) {
+      steps.textEmbedding = 'skipped';
+    } else {
+      try {
+        await persistTextEmbedding(item.id);
+        steps.textEmbedding = 'done';
+        timer.mark('text_embedding');
+      } catch (error) {
+        console.error('[API /api/wardrobe] Text embedding step failed', { itemId: item.id, error });
+        const rateLimit = isRateLimitResponse(error, steps, item);
+        if (rateLimit) {
+          timer.log('error', { itemId: item.id, steps: { ...steps, textEmbedding: 'failed' } });
+          return rateLimit;
+        }
+        return failStep(
+          timer,
+          steps,
+          'textEmbedding',
+          '文本检索向量生成失败，点击重试即可（分析结果已保存）',
+          502,
+          { item }
+        );
+      }
     }
 
-    // 对解析出的数据进行严格验证
-    const { mainCategory, subCategory, season, material, colors, tags, description } = analysis;
-    if (!mainCategory || !subCategory || !Array.isArray(season) || !Array.isArray(material) || !Array.isArray(colors) || !Array.isArray(tags) || !description) {
-      return NextResponse.json({ error: 'Invalid data structure from AI analysis' }, { status: 500 });
-    }
-    if (!Object.values(ClothingMainCategory).includes(mainCategory)) {
-        return NextResponse.json({ error: `Invalid mainCategory "${mainCategory}" from AI analysis` }, { status: 500 });
+    if (await clothingItemHasVisualEmbedding(item.id)) {
+      steps.visualEmbedding = 'skipped';
+    } else {
+      try {
+        await persistVisualEmbedding(item.id);
+        steps.visualEmbedding = 'done';
+        timer.mark('visual_embedding');
+      } catch (error) {
+        console.error('[API /api/wardrobe] Visual embedding step failed', { itemId: item.id, error });
+        const rateLimit = isRateLimitResponse(error, steps, item);
+        if (rateLimit) {
+          timer.log('error', { itemId: item.id, steps: { ...steps, visualEmbedding: 'failed' } });
+          return rateLimit;
+        }
+        return failStep(
+          timer,
+          steps,
+          'visualEmbedding',
+          '图片向量生成失败，点击重试即可（分析与文本向量已保存）',
+          502,
+          { item }
+        );
+      }
     }
 
-    // --- [MODIFIED] Switched to Multimodal Embedding ---
-    console.log('[API /api/wardrobe] Generating multimodal embedding...');
-    // 1. Prepare the text part from AI analysis
-    const textForEmbedding = buildWardrobeDocumentEmbeddingText({
-      subCategory,
-      description,
-      colors,
-      tags,
-      season,
-      material,
+    timer.log('success', {
+      model: AGENT_MODELS.wardrobeAnalysis,
+      itemId: item.id,
+      subCategory: item.subCategory,
+      steps,
     });
-    // 2. Prepare the image part (we already have it from the start)
-    const imagePartForEmbedding = await urlToGenerativePart(imageUrl);
-    const embeddingVector = await withRetryOn429(
-      () => generateDocumentEmbedding(textForEmbedding, imagePartForEmbedding),
-      { label: 'Wardrobe embedding', maxRetries: 4 }
-    );
-    console.log('[API /api/wardrobe] Multimodal embedding generated successfully.');
-    // --- [END MODIFIED] ---
 
-    // --- [CORRECTED IMPLEMENTATION] 2-Step Write for Unsupported 'vector' Type ---
-    // 5. 将结果存入数据库 (in 2 steps)
-    console.log('[API /api/wardrobe] Storing new clothing item to database...');
-
-    // Step 1: Create the item WITHOUT the 'embedding' field.
-    const createdItem = await prismadb.clothingItem.create({
-      data: {
-        clientProfileId: clientId,
-        imageUrl: imageUrl,
-        mainCategory: mainCategory,
-        subCategory: subCategory,
-        season: season.map(s => s.toLowerCase()),
-        material: material.map(m => m.toLowerCase()),
-        colors: colors.map(c => c.toLowerCase()),
-        tags: tags.map(t => t.toLowerCase()),
-        description: description,
-      },
-    });
-
-    // Step 2: Use a raw SQL query to UPDATE the item with the vector embedding.
-    const vectorString = `[${embeddingVector.join(',')}]`;
-    await prismadb.$executeRaw`
-      UPDATE "ClothingItem"
-      SET "embedding" = ${vectorString}::vector
-      WHERE id = ${createdItem.id};
-    `;
-    console.log(`[API /api/wardrobe] Successfully created item ${createdItem.id} and added embedding.`);
-
-    // 6. 返回成功的响应 (Prisma Client still can't read the embedding from the createdItem object)
-    return NextResponse.json(createdItem, { status: 201 });
-
+    return NextResponse.json({ ...item, steps }, { status: 201 });
   } catch (error) {
+    timer.log('error', { model: AGENT_MODELS.wardrobeAnalysis });
     console.error('Error in POST /api/wardrobe:', error);
     if (is429Error(error)) {
       return NextResponse.json(
-        {
-          error: 'AI 服务请求过于频繁，请稍后再试',
-          code: 'RATE_LIMIT',
-        },
+        { error: 'AI 服务请求过于频繁，请稍后再试', code: 'RATE_LIMIT' },
         { status: 429 }
       );
     }
     if (error instanceof Error && error.message.includes('GoogleGenerativeAI')) {
-      return NextResponse.json({ error: 'An error occurred with the AI service.', details: error.message }, { status: 502 });
+      return NextResponse.json({ error: 'AI 服务暂时不可用，请稍后重试' }, { status: 502 });
     }
     if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: toUserFacingUploadError(error.message) }, { status: 500 });
     }
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: '处理失败，请重试' }, { status: 500 });
   }
 }
 

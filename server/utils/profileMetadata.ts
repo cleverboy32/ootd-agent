@@ -1,5 +1,6 @@
 import type { UserProfileResult } from '@/server/agents/user-profile';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
+import { buildCosObjectKey, getCosPublicUrl } from '@/server/services/cos';
 
 export const PROFILE_METADATA_KEYS = [
   'visual_profile_verified',
@@ -32,18 +33,18 @@ export function mergeChatProfileForPersistence(
   };
 }
 
-/** 校验上传 URL 属于当前 client 的 GCS 路径，防 SSRF */
+/** 校验上传 URL 属于当前 client 的 COS 路径，防 SSRF */
 export function isClientOwnedUploadUrl(imageUrl: string, clientId: string): boolean {
-  const bucketName = process.env.GCS_BUCKET_NAME;
-  if (!bucketName) return false;
-
   try {
     const url = new URL(imageUrl);
-    if (url.protocol !== 'https:' || url.hostname !== 'storage.googleapis.com') {
-      return false;
-    }
-    const expectedPrefix = `/${bucketName}/user-uploads/${clientId}/`;
-    return url.pathname.startsWith(expectedPrefix);
+    const expectedPrefixUrl = new URL(
+      `${getCosPublicUrl(buildCosObjectKey(`user-uploads/${clientId}`))}/`
+    );
+    return (
+      url.protocol === 'https:' &&
+      url.origin === expectedPrefixUrl.origin &&
+      url.pathname.startsWith(expectedPrefixUrl.pathname)
+    );
   } catch {
     return false;
   }

@@ -1,12 +1,15 @@
 import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
 import { streamResponse } from '@/lib/utils';
+import { useAccess } from '@/components/access/AccessProvider';
 
 export function useImageRetry() {
+  const { canInvokeAI } = useAccess();
   const { activeConversationId, updateMessages } = useChatStore();
 
   const retryOutfitImage = useCallback(
     async (messageId: string, outfitId: string) => {
+      if (!canInvokeAI) return;
       if (!activeConversationId) {
         console.error('[IMAGE_RETRY] No active conversation');
         return;
@@ -74,8 +77,8 @@ export function useImageRetry() {
         }
       );
     },
-    [activeConversationId, updateMessages]
+    [activeConversationId, canInvokeAI, updateMessages]
   );
 
-  return { retryOutfitImage };
+  return { retryOutfitImage, canRetryImage: canInvokeAI };
 }

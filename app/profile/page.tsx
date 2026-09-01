@@ -1,9 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
-import { MessageSquare, LayoutDashboard, PlusSquare, UserCircle } from 'lucide-react';
 import { ProfileOverview } from '@/components/profile/ProfileOverview';
 import { StyleSection } from '@/components/profile/StyleSection';
 import { VisualAnalysisSection } from '@/components/profile/VisualAnalysisSection';
@@ -11,6 +8,7 @@ import { fetchProfile, type ProfileData } from '@/lib/api/profile';
 import { getFriendlyErrorMessage } from '@/lib/api/errorMessage';
 import { ProfileErrorState } from '@/components/profile/ProfileErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AppSidebar } from '@/components/AppSidebar';
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -49,48 +47,10 @@ export default function ProfilePage() {
 
   return (
     <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-      <div className="hidden border-r bg-muted/40 md:block">
-        <div className="flex h-full max-h-screen flex-col gap-2">
-          <div className="flex h-14 items-center px-4 lg:h-[60px] lg:px-6">
-            <Link href="/" className="flex items-center gap-2 font-semibold">
-              <Image src="/logo.png" alt="Fashion AI Logo" width={28} height={28} className="rounded-md" />
-              <span className="font-semibold text-lg tracking-tight">Fashion AI</span>
-            </Link>
-          </div>
-          <div className="flex-1">
-            <nav className="grid items-start gap-1 px-2 text-sm font-medium lg:px-4">
-              <Link
-                href="/"
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
-              >
-                <MessageSquare className="h-4 w-4" />
-                AI 搭配
-              </Link>
-              <Link
-                href="/wardrobe"
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                衣橱总览
-              </Link>
-              <Link
-                href="/wardrobe"
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
-              >
-                <PlusSquare className="h-4 w-4" />
-                添加衣物
-              </Link>
-              <span className="flex w-full items-center gap-3 rounded-lg px-3 py-2 bg-muted text-primary">
-                <UserCircle className="h-4 w-4" />
-                我的档案
-              </span>
-            </nav>
-          </div>
-        </div>
-      </div>
+      <AppSidebar activeSection="profile" />
 
       <div className="flex flex-col">
-        <header className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
+        <header className="flex h-14 items-center border-b px-4 lg:h-15 lg:px-6">
           <h1 className="text-lg font-semibold">我的档案</h1>
         </header>
 

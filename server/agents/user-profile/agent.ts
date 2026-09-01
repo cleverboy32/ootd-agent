@@ -1,5 +1,5 @@
 import { Content, Part } from '@google/genai';
-import { genAI } from '@/server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { evaluateUserProfileOutput } from '@/server/utils/userProfileEvaluator';
@@ -181,17 +181,6 @@ ${USER_PROFILE_SYSTEM_INSTRUCTION}
 ${JSON.stringify(dbProfile, null, 2)}
 `;
 
-  const chat = genAI.chats.create({
-    model: AGENT_MODELS.userProfile,
-    history: history.length > 0 ? history : undefined,
-    config: {
-      systemInstruction: systemInstructionWithContext,
-      temperature: 0.0,
-      responseMimeType: 'application/json',
-      responseSchema: userProfileSchema,
-    },
-  });
-
   const textParts = extractTextParts(currentInput);
   const currentMessageText = extractCurrentMessageText(currentInput);
   const turnPrompt = `
@@ -204,10 +193,18 @@ ${currentMessageText || '（无文字）'}
     textParts.length > 0
       ? [{ text: turnPrompt }, ...textParts]
       : [{ text: `${turnPrompt}\n（无文字输入，若无新档案信息则原样返回旧档案）` }];
+  const contents: Content[] = [...history, { role: 'user', parts: messageParts }];
 
   try {
     const response = await withRetryOn429(
-      () => chat.sendMessage({ message: messageParts }),
+      () =>
+        llmGenerate({
+          model: AGENT_MODELS.userProfile,
+          contents,
+          systemInstruction: systemInstructionWithContext,
+          temperature: 0.0,
+          jsonSchema: userProfileSchema,
+        }),
       { label: 'UserProfile' }
     );
     const responseText = response.text;

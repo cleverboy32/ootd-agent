@@ -11,6 +11,7 @@ import {
   finalizeGatekeeperResult,
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
+  resolveWardrobeAnchorIdFromHistory,
 } from '@/server/agents/intent';
 import type { Content, Part } from '@google/genai';
 
@@ -42,6 +43,93 @@ describe('extractConfirmedWardrobeId', () => {
       extractConfirmedWardrobeId('确认选择这件单品（id=cmqg5ec6b0000pvs8q5kp2358）'),
       'cmqg5ec6b0000pvs8q5kp2358'
     );
+  });
+});
+
+describe('resolveWardrobeAnchorIdFromHistory', () => {
+  const dressId = 'cmqg5edih0002pvs8c3035d6a';
+  const wrongTshirtId = 'cmqg5gtn4000bpvs8083yhqfh';
+
+  const historyWithSingletonCandidate: Content[] = [
+    {
+      role: 'model',
+      parts: [
+        {
+          text: `衣橱里没有找到符合「白色连衣裙」的单品。不过有一件light green的裙子，你看看是不是这件？\n[wardrobe_candidates:id=${dressId}]`,
+        },
+      ],
+    },
+  ];
+
+  it('overrides Gatekeeper hallucinated id with last singleton candidate', () => {
+    const result = resolveWardrobeAnchorIdFromHistory(
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '绿色无袖连衣裙',
+        anchor_slot: 'dress',
+        occasion: '出门吃饭',
+        anchor_wardrobe_id: wrongTshirtId,
+      }),
+      historyWithSingletonCandidate,
+      '额 这个也行吧。这个帮我搭配一下 我穿出门吃饭'
+    );
+
+    assert.equal(result.anchor_wardrobe_id, dressId);
+  });
+
+  it('fills missing id on verbal accept of singleton candidate', () => {
+    const result = resolveWardrobeAnchorIdFromHistory(
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '绿色无袖连衣裙',
+        anchor_slot: 'dress',
+        occasion: '出门吃饭',
+        anchor_wardrobe_id: '',
+      }),
+      historyWithSingletonCandidate,
+      '这个也行吧，帮我搭配一下'
+    );
+
+    assert.equal(result.anchor_wardrobe_id, dressId);
+  });
+
+  it('prefers explicit confirmation id over history singleton', () => {
+    const picked = 'cmqg5aaaaaaaaaaaaaaaaa';
+    const result = resolveWardrobeAnchorIdFromHistory(
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '绿色无袖连衣裙',
+        anchor_slot: 'dress',
+        occasion: '出门吃饭',
+        anchor_wardrobe_id: wrongTshirtId,
+      }),
+      historyWithSingletonCandidate,
+      `确认选择这件单品（id=${picked}）`
+    );
+
+    assert.equal(result.anchor_wardrobe_id, picked);
+  });
+
+  it('does not guess when multiple candidates were presented', () => {
+    const multi: Content[] = [
+      {
+        role: 'model',
+        parts: [{ text: `[wardrobe_candidates:id=${dressId},${wrongTshirtId}]` }],
+      },
+    ];
+    const result = resolveWardrobeAnchorIdFromHistory(
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        anchor_item_summary: '裙子',
+        anchor_slot: 'dress',
+        occasion: '吃饭',
+        anchor_wardrobe_id: wrongTshirtId,
+      }),
+      multi,
+      '这个也行吧'
+    );
+
+    assert.equal(result.anchor_wardrobe_id, wrongTshirtId);
   });
 });
 

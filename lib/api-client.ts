@@ -1,7 +1,8 @@
 import { getClientId } from '@/lib/utils';
 
 /**
- * A base fetch wrapper that automatically injects the clientId from localStorage into the headers.
+ * A base fetch wrapper that sends the configured owner id as a routing hint.
+ * The server proxy always overwrites this header and remains the identity authority.
  * @param url The request URL.
  * @param options The standard `fetch` options object.
  * @returns A Promise that resolves to the fetch Response.
@@ -25,6 +26,7 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   const newOptions: RequestInit = {
     ...options,
     headers,
+    credentials: 'same-origin',
   };
 
   // 4. Make the actual fetch request

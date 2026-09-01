@@ -1,56 +1,40 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { v4 as uuidv4 } from 'uuid';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function getClientId ()  {
-  const CLIENT_ID_STORAGE_KEY = 'ootd-agent-client-id'; // It's a good practice to define the key as a constant
-  let clientId = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
-
-  if (!clientId) {
-    clientId = uuidv4();
-    localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
+export function getClientId(): string {
+  const ownerClientId = process.env.NEXT_PUBLIC_OWNER_CLIENT_ID?.trim();
+  if (!ownerClientId) {
+    throw new Error('NEXT_PUBLIC_OWNER_CLIENT_ID is missing.');
   }
-
-  return clientId;
+  return ownerClientId;
 }
 
 /**
- * [NEW] Handles the direct upload of a file from the client to Google Cloud Storage.
- * 1. Fetches a signed URL from our backend.
- * 2. Uploads the file to GCS using the signed URL.
- * 3. Returns the public URL of the uploaded file.
- * @param file The file object to upload.
- * @param conversationId The current conversation ID.
- * @returns A promise that resolves to the public URL of the file.
+ * Uploads a file through the BFF; the server writes to COS server-side (no browser CORS).
  */
-export async function uploadFileToGCS(file: File): Promise<string> {
-  const clientId = getClientId(); 
+export async function uploadFileToCOS(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
 
-  // 1. 从我们的后端获取签名 URL
-  const response = await fetch(`/api/upload-url?fileType=${encodeURIComponent(file.type)}&clientId=${clientId}`);
-  if (!response.ok) {
-    throw new Error('Failed to get signed URL.');
-  }
-  const { signedUrl, publicUrl } = await response.json();
-
-  // 2. 使用 PUT 方法将文件直接上传到 GCS
-  const uploadResponse = await fetch(signedUrl, {
-    method: 'PUT',
+  const response = await fetch('/api/upload', {
+    method: 'POST',
+    credentials: 'same-origin',
     headers: {
-      'Content-Type': file.type,
+      'X-Client-ID': getClientId(),
     },
-    body: file,
+    body: formData,
   });
 
-  if (!uploadResponse.ok) {
-    throw new Error('Failed to upload file to GCS.');
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error || 'Failed to upload file to COS.');
   }
 
-  // 3. 上传成功，返回公开 URL
+  const { publicUrl } = (await response.json()) as { publicUrl: string };
   console.log('File uploaded successfully:', publicUrl);
   return publicUrl;
 }
@@ -102,7 +86,7 @@ export const streamResponse = async (
         const errorJson = JSON.parse(errorText);
         if (errorJson.message) errorMessage = errorJson.message;
         else if (errorJson.error) errorMessage = errorJson.error;
-      } catch (_e) {
+      } catch {
         if (errorText.trim().length > 0) errorMessage = errorText;
       }
       throw new Error(errorMessage);

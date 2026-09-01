@@ -1,5 +1,5 @@
 import { Type, Schema } from '@google/genai';
-import { genAI } from '@/server/services/ai';
+import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { urlToGenerativePart } from '@/server/utils/image';
@@ -79,14 +79,11 @@ export async function analyzeVisualProfileFromImage(imageUrl: string): Promise<V
 
   const response = await withRetryOn429(
     () =>
-      genAI.models.generateContent({
+      llmGenerate({
         model: AGENT_MODELS.userProfile,
-        config: {
-          systemInstruction: VISUAL_PROFILE_SYSTEM_INSTRUCTION,
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-          responseSchema: visualProfileSchema,
-        },
+        systemInstruction: VISUAL_PROFILE_SYSTEM_INSTRUCTION,
+        temperature: 0.2,
+        jsonSchema: visualProfileSchema,
         contents: [
           {
             role: 'user',

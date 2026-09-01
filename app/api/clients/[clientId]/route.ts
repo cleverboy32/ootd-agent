@@ -40,7 +40,8 @@ function mergeProfileData(currentProfile: Prisma.JsonObject, newData: Prisma.Jso
  * It intelligently merges the new data with the existing data.
  */
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
-  const { clientId } = await params;
+  await params;
+  const clientId = req.headers.get('x-client-id');
 
   if (!clientId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
@@ -87,7 +88,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
  * (此函数保持不变)
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
-    const { clientId } = await params;
+    await params;
+    const clientId = req.headers.get('x-client-id');
 
     if (!clientId) {
         return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });

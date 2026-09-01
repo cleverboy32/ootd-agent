@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import React from "react";
 import { useChatStore } from "@/store/chat";
+import { useAccess } from "@/components/access/AccessProvider";
 
 // The Conversation type is no longer needed here as it's managed by the store
 // import { Conversation } from "@/lib/types";
@@ -18,6 +19,7 @@ interface SidebarLeftProps {
 export function SidebarLeft({ 
   onNewChat,
 }: SidebarLeftProps) {
+  const { canMutate } = useAccess();
   // Get state and actions directly from the store
   const { conversations, activeConversationId, setActiveConversationId, deleteConversation, isLoading } = useChatStore();
 
@@ -50,7 +52,7 @@ export function SidebarLeft({
       </div>
 
       {/* --- New Chat Button (unchanged) --- */}
-      <div className="px-4 mb-6">
+      {canMutate && <div className="px-4 mb-6">
         <Button
           variant="outline"
           onClick={onNewChat}
@@ -61,7 +63,7 @@ export function SidebarLeft({
           </div>
           <span className="font-medium text-sm">新建对话</span>
         </Button>
-      </div>
+      </div>}
 
       {/* --- Conversation History List (Updated) --- */}
       <div className="flex-1 overflow-y-auto px-4">
@@ -88,7 +90,7 @@ export function SidebarLeft({
                 }
               >
                 <span className="truncate pr-2">{convo.title}</span>
-                <Button
+                {canMutate && <Button
                   variant="ghost"
                   size="icon"
                   onClick={(e) => handleDelete(e, convo.id)}
@@ -96,7 +98,7 @@ export function SidebarLeft({
                 >
                   <Trash2 className="h-4 w-4" />
                   <span className="sr-only">Delete Conversation</span>
-                </Button>
+                </Button>}
               </div>
             ))
           ) : (
