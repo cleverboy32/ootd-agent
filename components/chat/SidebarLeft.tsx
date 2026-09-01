@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import React from "react";
 import { useChatStore } from "@/store/chat";
 import { useAccess } from "@/components/access/AccessProvider";
+import { LOGO_SRC } from "@/lib/utils";
 
 // The Conversation type is no longer needed here as it's managed by the store
 // import { Conversation } from "@/lib/types";
@@ -36,7 +37,7 @@ export function SidebarLeft({
     <aside className="w-72 flex flex-col bg-muted/30 border-r border-border shrink-0">
       {/* --- Top Logo and Title (unchanged) --- */}
       <div className="p-4 flex items-center gap-3">
-        <Image src="/logo.png" alt="Fashion AI Logo" width={32} height={32} className="rounded-md" />
+        <Image src={LOGO_SRC} alt="Fashion AI Logo" width={32} height={32} className="rounded-md" />
         <span className="font-semibold text-lg tracking-tight">Fashion AI</span>
       </div>
 

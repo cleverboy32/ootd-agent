@@ -11,6 +11,7 @@ import { WardrobeItem } from "./WardrobeItem";
 import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
 import { useAccess } from "@/components/access/AccessProvider";
+import { LOGO_SRC } from "@/lib/utils";
 
 const IMAGE_MARKER_REGEX = /\[IMAGE=([^\]]+)\]/g;
 
@@ -282,7 +283,7 @@ export const ChatMessage = memo(
               <User className="h-5 w-5" />
             ) : (
               <Image
-                src="/logo.png"
+                src={LOGO_SRC}
                 alt="Fashion AI Logo"
                 width={48}
                 height={48}

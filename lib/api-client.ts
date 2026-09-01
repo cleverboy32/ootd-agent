@@ -1,4 +1,4 @@
-import { getClientId } from '@/lib/utils';
+import { getClientId, withBasePath } from '@/lib/utils';
 
 /**
  * A base fetch wrapper that sends the configured owner id as a routing hint.
@@ -32,7 +32,8 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   // 4. Make the actual fetch request
   let response: Response;
   try {
-    response = await fetch(url, newOptions);
+    const resolvedUrl = url.startsWith("/") ? withBasePath(url) : url;
+    response = await fetch(resolvedUrl, newOptions);
   } catch {
     throw new Error('Failed to fetch');
   }

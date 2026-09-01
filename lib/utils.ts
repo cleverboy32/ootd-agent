@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Prefix app-relative paths with Next.js basePath (e.g. /ootd). */
+export function withBasePath(path: string): string {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  if (!path.startsWith("/")) return `${basePath}/${path}`;
+  return `${basePath}${path}`;
+}
+
+/** Local public asset; must include basePath for next/image optimizer behind subpath deploy. */
+export const LOGO_SRC = withBasePath("/logo.png");
+
 export function getClientId(): string {
   const ownerClientId = process.env.NEXT_PUBLIC_OWNER_CLIENT_ID?.trim();
   if (!ownerClientId) {
@@ -20,7 +30,7 @@ export async function uploadFileToCOS(file: File): Promise<string> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch('/api/upload', {
+  const response = await fetch(withBasePath('/api/upload'), {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
@@ -73,7 +83,7 @@ export const streamResponse = async (
 ) => {
   try {
     const clientId = getClientId();
-    const res = await fetch("/api/generate-with-image", {
+    const res = await fetch(withBasePath("/api/generate-with-image"), {
       method: "POST",
       headers: { 'Content-Type': 'application/json', 'X-Client-ID': clientId },
       body: JSON.stringify(payload), // payload 现在可能包含 messageId

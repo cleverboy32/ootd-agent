@@ -1,5 +1,6 @@
 "use client";
 
+import { withBasePath } from "@/lib/utils";
 import {
   createContext,
   useCallback,
@@ -29,7 +30,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/access/status", { credentials: "same-origin" })
+    fetch(withBasePath("/api/access/status"), { credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Unable to load access status");
         return response.json() as Promise<{
@@ -51,7 +52,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const verify = useCallback(async (code: string): Promise<void> => {
-    const response = await fetch("/api/access/verify", {
+    const response = await fetch(withBasePath("/api/access/verify"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -63,7 +64,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async (): Promise<void> => {
-    await fetch("/api/access/logout", {
+    await fetch(withBasePath("/api/access/logout"), {
       method: "POST",
       credentials: "same-origin",
     });

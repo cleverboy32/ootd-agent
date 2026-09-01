@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import Image from 'next/image';
 import { ChatMessage } from './ChatMessage';
 import { useChatStore } from '@/store/chat';
+import { LOGO_SRC } from '@/lib/utils';
 interface ChatMessagesListProps {
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -26,7 +27,7 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
     return (
       <div className="flex-1 flex h-full items-center justify-center text-muted-foreground">
         <div className="flex items-center gap-3 animate-pulse">
-          <Image src="/logo.png" alt="Loading..." width={24} height={24} className='animate-spin' />
+          <Image src={LOGO_SRC} alt="Loading..." width={24} height={24} className='animate-spin' />
           <span>正在加载历史消息...</span>
         </div>
       </div>
@@ -47,7 +48,7 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
         <div className="flex justify-start">
           <div className="flex items-start gap-3">
             <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <Image src="/logo.png" alt="Fashion AI Logo" width={48} height={48} className='animate-spin' />
+              <Image src={LOGO_SRC} alt="Fashion AI Logo" width={48} height={48} className='animate-spin' />
             </div>
             {/* 在旋转头像旁边，添加一个空的、样式化的气泡 */}
             <div className="flex flex-col gap-1 items-start">

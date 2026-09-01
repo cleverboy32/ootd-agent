@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAccess } from "@/components/access/AccessProvider";
+import { LOGO_SRC } from "@/lib/utils";
 
 export type AppSidebarSection = "chat" | "wardrobe" | "add" | "profile";
 
@@ -76,7 +77,7 @@ export function AppSidebar({
         <div className="flex h-14 items-center px-4 lg:h-15 lg:px-6">
           <Link href="/" className="flex items-center gap-2 font-semibold">
             <Image
-              src="/logo.png"
+              src={LOGO_SRC}
               alt="Fashion AI Logo"
               width={28}
               height={28}

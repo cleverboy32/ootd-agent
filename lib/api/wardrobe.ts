@@ -1,4 +1,4 @@
-import { getClientId } from '@/lib/utils';
+import { getClientId, withBasePath } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 
 const API_BASE = '/api';
@@ -19,7 +19,7 @@ export const deleteWardrobeItem = async (itemId: string): Promise<{ deletedCount
 };
 
 export const deleteWardrobeItems = async (itemIds: string[]): Promise<{ deletedCount: number }> => {
-  const response = await fetch('/api/wardrobe', {
+  const response = await fetch(withBasePath('/api/wardrobe'), {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
