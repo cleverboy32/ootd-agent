@@ -80,22 +80,22 @@ export const useChatHandler = () => {
 
     // --- 2. 定义流处理程序 ---
     let currentAiMessageId = messageToRetry ? messageToRetry.id : '';
-    let streamHasError = false; 
+    let streamHasError = false;
     const handlers = {
       onMetadata: (data: { messageId: string }) => {
         console.log(`[METADATA RECEIVED] AI Message ID is: ${data.messageId}`);
         currentAiMessageId = data.messageId;
-    
+
         // 如果是新消息（重试时不会走这里），就在收到 metadata 后创建 AI 消息
         if (!messageToRetry) {
           const initialAiMessage: Message = {
-            id: currentAiMessageId, // 使用后端给的真实ID
+            id: currentAiMessageId,
             status: 'generating',
             role: 'ai',
-            content: [], // 开始时是空的
+            content: [],
             timestamp: Date.now(),
           };
-          updateMessages(messages => [...messages, initialAiMessage]);
+          updateMessages((messages) => [...messages, initialAiMessage]);
         }
       },
       onTextChunk: (text: string) => {
@@ -114,7 +114,14 @@ export const useChatHandler = () => {
               const newTextPart: MessageContentPart = { type: 'text', content: text };
               newContent = [...msg.content, newTextPart];
             }
-            return { ...msg, content: newContent };
+            const hadText = msg.content.some((p) => p.type === 'text' && p.content.length > 0);
+            return {
+              ...msg,
+              content: newContent,
+              progress: !hadText && msg.progress?.thinking
+                ? { ...msg.progress, thinking: undefined }
+                : msg.progress,
+            };
           }
           return msg;
         }));
@@ -163,7 +170,7 @@ export const useChatHandler = () => {
             ...msg,
             progress: {
               stages: newStages,
-              thinking: data.thinking ?? existing.thinking,
+              thinking: data.thinking !== undefined ? data.thinking : existing.thinking,
             },
           };
         }));
@@ -351,7 +358,7 @@ export const useChatHandler = () => {
           const stages = hasStage
             ? existing.map(s => s.key === data.stage ? { ...s, done: data.done ?? false, label: data.label ?? s.label } : s)
             : [...existing, { key: data.stage, label: data.label ?? '', done: data.done ?? false }];
-          return { ...m, progress: { stages, thinking: data.thinking ?? m.progress?.thinking } };
+          return { ...m, progress: { stages, thinking: data.thinking !== undefined ? data.thinking : m.progress?.thinking } };
         }));
       },
       onError: () => {

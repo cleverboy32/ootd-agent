@@ -107,20 +107,23 @@ pm2 save
 在 `meetu.online` 的 `server` 块中增加（与 `/video_bd` 同级）：
 
 ```nginx
-location ^~ /ootd {
-    proxy_pass http://127.0.0.1:3002;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection $connection_upgrade;
-    client_max_body_size 50m;
-    proxy_read_timeout 600s;
-    proxy_send_timeout 600s;
-    add_header X-App ootd-agent always;
-}
+        location ^~ /ootd {
+            proxy_pass http://127.0.0.1:3002;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_buffering off;
+            proxy_cache off;
+            chunked_transfer_encoding on;
+            client_max_body_size 50m;
+            proxy_read_timeout 600s;
+            proxy_send_timeout 600s;
+            add_header X-App ootd-agent always;
+        }
 ```
 
 重载：
@@ -148,6 +151,7 @@ nginx -t && nginx -s reload
 | `IMAGE_VENDOR` |  | 如 `ark` / `minimax` |
 | `ARK_API_KEY` | ✅* | 火山方舟生图（`IMAGE_VENDOR=ark` 时） |
 | `EMBEDDING_VENDOR` |  | 如 `bytedance` |
+| `AMAP_WEB_SERVICE_KEY` | ✅ | 高德天气 Web 服务 Key（实时气温查询） |
 | `NODE_ENV` |  | 生产设为 `production` |
 
 \* 按实际选用的 LLM / 生图 / 向量供应商配置，详见 `design/openai_compatible_llm.md`。
@@ -278,7 +282,29 @@ pnpm 严格隔离下 Prisma 运行时依赖未提升。仓库已在 `package.jso
 2. 确认 `OWNER_CLIENT_ID` 与数据库里 `ClientProfile.id` 一致。
 3. 确认 `/ootd/api/conversations` 返回 200。
 
-### 10.5 构建 OOM
+### 10.5 天气查不到 / 回复说「没拿到温度」
+
+1. 确认 `.env` 已配置 `AMAP_WEB_SERVICE_KEY`（高德开放平台 Web 服务）。
+2. 修改 `.env` 后必须带环境变量重启：`pm2 restart ootd-agent --update-env`。
+3. 日志出现 `[AMAP_WEATHER] AMAP_WEB_SERVICE_KEY not configured` 即 key 未生效。
+4. 若日志已有 `[WEATHER] Result: ...` 但回复仍说没温度，属 Gatekeeper 在 enrich 前写了话术——已服务端用实况覆盖（见 `buildWeatherAwareClarifyReply`）。
+
+### 10.6 SSE 进度条不显示 / `Controller is already closed`
+
+日志若出现 `流被客户端取消 ResponseAborted` 后紧跟 `progress` / `text_chunk` 发送失败，说明 **浏览器先断开了 SSE 连接**，不是前端进度组件写错。常见原因：
+
+1. nginx 未关闭缓冲（必须 `proxy_buffering off`，API 响应头 `X-Accel-Buffering: no`）
+2. 客户端刷新/重复发消息导致上一个流被 abort
+
+nginx `/ootd` 需包含：
+
+```nginx
+proxy_buffering off;
+proxy_cache off;
+chunked_transfer_encoding on;
+```
+
+### 10.7 构建 OOM
 
 ```bash
 NODE_OPTIONS='--max-old-space-size=1536' pnpm build

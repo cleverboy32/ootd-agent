@@ -8,7 +8,6 @@ import { ReadableStreamDefaultController } from 'stream/web';
  */
 export function sendEvent(controller: ReadableStreamDefaultController, eventName: string, data: object) {
   if (controller.desiredSize === null) {
-    console.warn(`[CONTROLLER_LOG] 事件 '${eventName}' 被阻止，因为控制器已经关闭。`);
     return;
   }
   try {
@@ -16,6 +15,11 @@ export function sendEvent(controller: ReadableStreamDefaultController, eventName
     controller.enqueue(encoder.encode(`event: ${eventName}\n`));
     controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
   } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ERR_INVALID_STATE') {
+      // Client disconnected (ResponseAborted) — expected on nginx/proxy cancel.
+      return;
+    }
     console.error(`[CONTROLLER_LOG] 发送事件 '${eventName}' 失败:`, e);
   }
 }

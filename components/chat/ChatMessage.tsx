@@ -198,11 +198,12 @@ function ThinkingPanel({
   isCompleted: boolean;
   isFailed: boolean;
 }) {
-  const { stages } = progress;
+  const { stages, thinking } = progress;
 
   if (!stages.length) return null;
 
   const firstIncompleteIdx = stages.findIndex((s) => !s.done);
+  const showThinking = Boolean(thinking) && !isFailed && firstIncompleteIdx >= 0;
 
   return (
     <div className="mb-2 w-full">
@@ -240,6 +241,11 @@ function ThinkingPanel({
             </div>
           );
         })}
+        {showThinking && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground/70 pl-5">
+            {thinking}
+          </p>
+        )}
       </div>
     </div>
   );

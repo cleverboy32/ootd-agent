@@ -61,6 +61,20 @@ export function buildWardrobeBrowseReply(itemCount: number): string {
   return '在衣橱里找到了几件相似的单品，请点击确认你想穿的是哪一件～';
 }
 
+/** LLM 在天气 enrich 之前写了「没查到温度」时，用已拉到的实况覆盖。 */
+export function buildWeatherAwareClarifyReply(
+  modelReply: string,
+  weather: string,
+  currentMessageText: string
+): string {
+  const asksTemperature = /温度|多少度|几度|冷|热|外套|穿衣|暖和|凉快/.test(currentMessageText);
+  const modelClaimsNoWeather = /没拿到|暂时没有|无法|没有.*温度|没.*实时|查不到/.test(modelReply);
+  if (!weather.trim() || !asksTemperature || !modelClaimsNoWeather) {
+    return modelReply;
+  }
+  return `查到了，${weather}。结合这个气温来看，之前建议的轻薄外套主要是应对早晚温差——中午觉得热可以随时脱掉。要是你希望完全不要外套，告诉我一声，我可以马上改成无外套版本。`;
+}
+
 export const PURCHASE_PAIRING_ANCHOR_FOLLOWUP =
   '方便描述一下您想搭配的单品吗？或者再发一张清晰的服装图片～';
 
@@ -105,13 +119,17 @@ function blockForMissingOccasion(ctx: FinalizeContext): GatekeeperFinalizeResult
 
 // ─── Per-type handlers ─────────────────────────────────────────────────────────
 
-const handleClarify: RequestTypeHandler = ({ intent, modelReply, modelFollowups }) => {
+const handleClarify: RequestTypeHandler = ({ intent, modelReply, modelFollowups, currentMessageText }) => {
   console.log('[GATEKEEPER] clarify — Gatekeeper 直接追问意图，短路下游');
+  let reply = modelReply || modelFollowups.join(' ') || CLARIFY_INTENT_FOLLOWUP;
+  if (modelReply && intent.weather.trim() && currentMessageText) {
+    reply = buildWeatherAwareClarifyReply(modelReply, intent.weather, currentMessageText);
+  }
   return {
     is_complete: false,
     extracted_intent: intent,
     followup_questions: [],
-    gatekeeper_reply: modelReply || modelFollowups.join(' ') || CLARIFY_INTENT_FOLLOWUP,
+    gatekeeper_reply: reply,
   };
 };
 

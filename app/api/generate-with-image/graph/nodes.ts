@@ -13,7 +13,7 @@ import { callStylistAgent, callStylistAdvice } from '@/server/agents/stylist';
 import { callCopywriterAgentStream, callCopywriterAdviceStream } from '@/server/agents/copywriter';
 import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
 import { mapWithConcurrency } from '@/server/utils/concurrency';
-import { buildPersistedMessageContent } from '@/server/utils/messageContent';
+import { buildPersistedMessageContent, type StylistCacheNode } from '@/server/utils/messageContent';
 import { runOutfitImageGeneration, extractSelectedItemUrls } from '../imageRetry';
 import { getPreviousStylistCache } from '../helpers';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
@@ -24,6 +24,34 @@ function getRuntime(config: LangGraphRunnableConfig): OutfitRuntime {
     throw new Error('OutfitRuntime missing from LangGraph configurable');
   }
   return runtime;
+}
+
+function sendCopywriterStartProgress(controller: ReadableStreamDefaultController): void {
+  sendEvent(controller, 'progress', {
+    stage: 'copywriter',
+    label: '正在撰写搭配方案...',
+    thinking: '正在组织语言，马上开始输出...',
+  });
+}
+
+function persistStylistCacheAsync(messageId: string, stylistCache: StylistCacheNode): void {
+  void prismadb.message
+    .update({
+      where: { id: messageId },
+      data: {
+        content: buildPersistedMessageContent({
+          text: '',
+          stylistCache,
+          imageStates: {},
+        }) as Prisma.InputJsonValue,
+      },
+    })
+    .then(() => {
+      console.log('[ORCHESTRATOR:LANGGRAPH] 搭配师方案与衣橱缓存成功保存。');
+    })
+    .catch((e) => {
+      console.warn('[ORCHESTRATOR:LANGGRAPH] stylist cache persist failed:', e);
+    });
 }
 
 async function executeParallelAgents(
@@ -345,25 +373,12 @@ export async function stylistNode(
   runtime.setStylistCache(stylistCache);
   runtime.setActiveStylist(stylistResult);
 
-  if (messageId) {
-    await prismadb.message.update({
-      where: { id: messageId },
-      data: {
-        content: buildPersistedMessageContent({
-          text: '',
-          stylistCache,
-          imageStates: {},
-        }) as Prisma.InputJsonValue,
-      },
-    });
-    console.log('[ORCHESTRATOR:LANGGRAPH] 搭配师方案与衣橱缓存成功保存。');
-  }
-
   sendEvent(runtime.controller, 'progress', {
     stage: 'stylist',
     done: true,
     label: '选品完成',
   });
+  sendCopywriterStartProgress(runtime.controller);
 
   let revisionNoItemChange = false;
   if (
@@ -389,6 +404,10 @@ export async function stylistNode(
     }
   }
 
+  if (messageId) {
+    persistStylistCacheAsync(messageId, stylistCache);
+  }
+
   return {
     stylistResult,
     revisionNoItemChange,
@@ -400,10 +419,6 @@ export async function parallelOutfitsNode(
   config: LangGraphRunnableConfig
 ): Promise<OutfitPipelineUpdate> {
   const runtime = getRuntime(config);
-  sendEvent(runtime.controller, 'progress', {
-    stage: 'copywriter',
-    label: '正在撰写搭配方案...',
-  });
   await executeParallelAgents(state, runtime);
   return {};
 }
@@ -413,6 +428,7 @@ export async function parallelFromCacheNode(
   config: LangGraphRunnableConfig
 ): Promise<OutfitPipelineUpdate> {
   const runtime = getRuntime(config);
+  sendCopywriterStartProgress(runtime.controller);
   await executeParallelAgents(state, runtime);
   return {};
 }

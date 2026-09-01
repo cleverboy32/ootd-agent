@@ -113,36 +113,36 @@ export async function performRagSearch(
       );
     }
 
-    const seenIds = new Set<string>();
-    const mergedResults: WardrobeSearchResult[] = [];
-    const perQueryResults: Array<{
-      query: string;
-      slot?: string;
-      mainCategory?: string;
-      results: WardrobeSearchResult[];
-    }> = [];
-
     const athletic = isAthleticOccasion(logContext?.intent, logContext?.userMessage);
     if (athletic) {
       console.log('[RAG_HANDLER] Athletic occasion detected — applying slot fitness filter');
     }
 
-    for (const { query, slot } of queries) {
-      const mainCategory = resolveMainCategoryForSlot(slot);
-      const parsedSlot = parseWardrobeSearchSlot(slot);
-      const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
-        slot: parsedSlot,
-        intent: logContext?.intent,
-      });
-      const seasonFiltered = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
-      const searchResults = filterResultsForAthleticContext(seasonFiltered, parsedSlot, athletic);
-      perQueryResults.push({
-        query,
-        slot,
-        mainCategory,
-        results: searchResults,
-      });
-      for (const item of searchResults) {
+    console.log(`[RAG_HANDLER] Running ${queries.length} slot queries in parallel...`);
+
+    const perQueryResults = await Promise.all(
+      queries.map(async ({ query, slot }) => {
+        const mainCategory = resolveMainCategoryForSlot(slot);
+        const parsedSlot = parseWardrobeSearchSlot(slot);
+        const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
+          slot: parsedSlot,
+          intent: logContext?.intent,
+        });
+        const seasonFiltered = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
+        const searchResults = filterResultsForAthleticContext(seasonFiltered, parsedSlot, athletic);
+        return {
+          query,
+          slot,
+          mainCategory,
+          results: searchResults,
+        };
+      })
+    );
+
+    const seenIds = new Set<string>();
+    const mergedResults: WardrobeSearchResult[] = [];
+    for (const { results } of perQueryResults) {
+      for (const item of results) {
         if (!seenIds.has(item.id)) {
           seenIds.add(item.id);
           mergedResults.push(item);
