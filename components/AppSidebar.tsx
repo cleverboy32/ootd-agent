@@ -5,18 +5,16 @@ import Link from "next/link";
 import {
   LayoutDashboard,
   MessageSquare,
-  PlusSquare,
   UserCircle,
   type LucideIcon,
 } from "lucide-react";
-import { useAccess } from "@/components/access/AccessProvider";
 import { LOGO_SRC } from "@/lib/utils";
 
-export type AppSidebarSection = "chat" | "wardrobe" | "add" | "profile";
+export type AppSidebarSection = "chat" | "wardrobe" | "profile";
 
 interface AppSidebarProps {
   activeSection: AppSidebarSection;
-  onWardrobeViewChange?: (view: "display" | "add") => void;
+  onSelectWardrobe?: () => void;
 }
 
 const itemClassName =
@@ -40,36 +38,20 @@ function NavLabel({
 
 export function AppSidebar({
   activeSection,
-  onWardrobeViewChange,
+  onSelectWardrobe,
 }: AppSidebarProps) {
-  const { canMutate } = useAccess();
-  const wardrobeItem = (view: "display" | "add", label: string, Icon: LucideIcon) => {
-    const section = view === "display" ? "wardrobe" : "add";
-    const className = activeSection === section ? activeItemClassName : itemClassName;
+  const wardrobeClassName =
+    activeSection === "wardrobe" ? activeItemClassName : itemClassName;
 
-    if (onWardrobeViewChange) {
-      return (
-        <button
-          key={section}
-          type="button"
-          onClick={() => onWardrobeViewChange(view)}
-          className={className}
-        >
-          <NavLabel icon={Icon}>{label}</NavLabel>
-        </button>
-      );
-    }
-
-    return (
-      <Link
-        key={section}
-        href="/wardrobe"
-        className={className}
-      >
-        <NavLabel icon={Icon}>{label}</NavLabel>
-      </Link>
-    );
-  };
+  const wardrobeNav = onSelectWardrobe ? (
+    <button type="button" onClick={onSelectWardrobe} className={wardrobeClassName}>
+      <NavLabel icon={LayoutDashboard}>衣橱总览</NavLabel>
+    </button>
+  ) : (
+    <Link href="/wardrobe" className={wardrobeClassName}>
+      <NavLabel icon={LayoutDashboard}>衣橱总览</NavLabel>
+    </Link>
+  );
 
   return (
     <div className="hidden border-r bg-muted/40 md:block">
@@ -95,8 +77,7 @@ export function AppSidebar({
             <NavLabel icon={MessageSquare}>AI 搭配</NavLabel>
           </Link>
 
-          {wardrobeItem("display", "衣橱总览", LayoutDashboard)}
-          {canMutate && wardrobeItem("add", "添加衣物", PlusSquare)}
+          {wardrobeNav}
 
           <Link
             href="/profile"

@@ -22,6 +22,8 @@ if (cosPublicBaseUrl) {
 
 const basePath = "/ootd";
 
+const prefix = basePath.slice(1);
+
 const nextConfig: NextConfig = {
   basePath,
   env: {
@@ -29,6 +31,24 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns,
+  },
+  async redirects() {
+    if (process.env.NODE_ENV !== "development") return [];
+
+    return [
+      {
+        source: "/",
+        destination: basePath,
+        basePath: false,
+        permanent: false,
+      },
+      {
+        source: `/:path((?!${prefix}(?:/|$)).*)`,
+        destination: `${basePath}/:path`,
+        basePath: false,
+        permanent: false,
+      },
+    ];
   },
 };
 

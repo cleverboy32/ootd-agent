@@ -36,7 +36,11 @@ async function requestWardrobeItems(): Promise<{ items: ClothingItem[] } | { err
   }
 }
 
-export function DisplayView() {
+interface DisplayViewProps {
+  onAddItems?: () => void;
+}
+
+export function DisplayView({ onAddItems }: DisplayViewProps) {
   const { canMutate } = useAccess();
   const [items, setItems] = useState<ClothingItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -183,15 +187,22 @@ export function DisplayView() {
               </Button>
             </>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isLoading || items.length === 0}
-              onClick={() => setSelectionMode(true)}
-            >
-              批量管理
-            </Button>
+            <>
+              {onAddItems && (
+                <Button type="button" size="sm" onClick={onAddItems}>
+                  添加衣物
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isLoading || items.length === 0}
+                onClick={() => setSelectionMode(true)}
+              >
+                批量管理
+              </Button>
+            </>
           )}
         </div>}
       </div>

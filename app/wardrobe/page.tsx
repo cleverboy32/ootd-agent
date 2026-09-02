@@ -18,13 +18,17 @@ export default function WardrobePage() {
   return (
     <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
       <AppSidebar
-        activeSection={visibleView === 'display' ? 'wardrobe' : 'add'}
-        onWardrobeViewChange={setActiveView}
+        activeSection="wardrobe"
+        onSelectWardrobe={switchToDisplay}
       />
       <div className="flex flex-col">
         <MainHeader activeView={visibleView} />
         <main className="flex flex-1 flex-col overflow-y-auto">
-            {visibleView === 'display' && <div className="p-4 lg:p-6"><DisplayView /></div>}
+            {visibleView === 'display' && (
+              <div className="p-4 lg:p-6">
+                <DisplayView onAddItems={() => setActiveView('add')} />
+              </div>
+            )}
             {visibleView === 'add' && <AddView onSwitchToDisplay={switchToDisplay} />}
         </main>
       </div>

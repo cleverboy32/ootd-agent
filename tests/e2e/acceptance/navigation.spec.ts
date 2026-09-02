@@ -36,7 +36,7 @@ test.describe('navigation', () => {
     await expect(page.getByText('E2E Tester')).toBeVisible();
   });
 
-  test('[ACC-N4] browse mode hides add wardrobe nav item', async ({ page }) => {
+  test('[ACC-N4] browse mode hides add clothing on wardrobe overview', async ({ page }) => {
     await mockBrowseAccess(page);
     await mockWardrobeApi(page);
     await page.goto('/wardrobe');
@@ -45,11 +45,20 @@ test.describe('navigation', () => {
     await expect(page.getByRole('button', { name: '添加衣物' })).toBeHidden();
   });
 
-  test('[ACC-N5] verified mode shows add wardrobe nav item', async ({ page }) => {
+  test('[ACC-N5] verified mode shows add clothing next to batch manage, not in sidebar', async ({ page }) => {
     await mockVerifiedAccess(page);
     await mockWardrobeApi(page);
     await page.goto('/wardrobe');
 
-    await expect(page.getByRole('button', { name: '添加衣物' })).toBeVisible();
+    const sidebar = page.locator('nav');
+    await expect(sidebar.getByRole('button', { name: '添加衣物' })).toHaveCount(0);
+    await expect(sidebar.getByRole('link', { name: '添加衣物' })).toHaveCount(0);
+
+    const addButton = page.getByRole('button', { name: '添加衣物' });
+    await expect(addButton).toBeVisible();
+    await expect(page.getByRole('button', { name: '批量管理' })).toBeVisible();
+    await addButton.click();
+    await expect(page.getByRole('heading', { name: '添加衣物', exact: true })).toBeVisible();
+    await expect(page.getByText('批量添加衣物')).toBeVisible();
   });
 });

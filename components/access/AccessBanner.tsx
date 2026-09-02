@@ -1,17 +1,26 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { usePathname } from "next/navigation";
 import { LockKeyhole, LogOut, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { useAccess } from "./AccessProvider";
 
 export function AccessBanner() {
+  const pathname = usePathname();
   const { mode, configured, verify, logout } = useAccess();
   const [expanded, setExpanded] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Chat home has header actions on the right, so sit below it.
+  // Other pages have an empty header corner — sit there instead of covering content actions.
+  const overlayClass = pathname === "/"
+    ? "fixed right-3 top-16 z-50"
+    : "fixed right-4 top-3 z-50 lg:right-6";
 
   if (mode === "loading") return null;
 
@@ -37,7 +46,7 @@ export function AccessBanner() {
         variant="outline"
         size="sm"
         onClick={() => void logout()}
-        className="fixed right-3 top-16 z-50 gap-1.5 bg-background/90 shadow-sm backdrop-blur"
+        className={cn(overlayClass, "gap-1.5 bg-background/90 shadow-sm backdrop-blur")}
       >
         <LogOut className="h-3.5 w-3.5" />
         退出完整模式
@@ -46,7 +55,7 @@ export function AccessBanner() {
   }
 
   return (
-    <aside className="fixed right-3 top-16 z-50 w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
+    <aside className={cn(overlayClass, "w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur")}>
       <div className="flex items-center gap-2">
         <LockKeyhole className="h-4 w-4 shrink-0 text-amber-600" />
         <p className="min-w-0 flex-1 text-sm">
