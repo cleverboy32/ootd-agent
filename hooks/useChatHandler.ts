@@ -2,6 +2,7 @@
 import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
 import { streamResponse } from '@/lib/utils';
+import { extractUserMessageMedia } from '@/lib/messageMedia';
 import { Message, MessageContentPart } from '@/lib/types';
 import { useAccess } from '@/components/access/AccessProvider';
 
@@ -63,6 +64,7 @@ export const useChatHandler = () => {
         role: 'user',
         content: userMessageContent,
         timestamp: Date.now(),
+        imageUrl: imageUrl || undefined,
       };
 
       if (!conversationId) {
@@ -257,17 +259,22 @@ export const useChatHandler = () => {
       // 假设用户消息就在AI消息之前
       const originalUserMessage = messages[retryMsgIndex - 1]; 
 
-      if (originalUserMessage && originalUserMessage.role === 'user' && Array.isArray(originalUserMessage.content)) {
-          textPrompt = originalUserMessage.content.find(p => p.type === 'text')?.content || '';
-          imageForPayload = originalUserMessage.imageUrl;
+      if (originalUserMessage && originalUserMessage.role === 'user') {
+          const media = extractUserMessageMedia(originalUserMessage);
+          textPrompt = media.text;
+          imageForPayload = media.imageUrl;
       } else {
         console.warn("Could not reliably find original user prompt for retry.");
       }
     } else {
       // 对于新消息，用户消息就是最后一条
       const lastMessage = useChatStore.getState().messages.at(-1);
-      if (lastMessage && lastMessage.role === 'user' && Array.isArray(lastMessage.content)) {
-        textPrompt = lastMessage.content.find(p => p.type === 'text')?.content || '';
+      if (lastMessage && lastMessage.role === 'user') {
+        const media = extractUserMessageMedia(lastMessage);
+        textPrompt = media.text;
+        if (!imageForPayload && media.imageUrl) {
+          imageForPayload = media.imageUrl;
+        }
       }
     }
 
@@ -297,8 +304,7 @@ export const useChatHandler = () => {
       messages.map(m => m.id === failedUserMsg.id ? { ...m, sendFailed: false } : m)
     );
 
-    const textPrompt = failedUserMsg.content.find(p => p.type === 'text')?.content ?? '';
-    const imageUrl = failedUserMsg.imageUrl ?? undefined;
+    const { text: textPrompt, imageUrl } = extractUserMessageMedia(failedUserMsg);
 
     setWaitReply(true);
 

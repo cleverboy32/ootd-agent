@@ -29,6 +29,8 @@ export interface AnchorItemInfo {
   summary: string;
   slot: AnchorSlot;
   imageData?: AnchorItemImageData;
+  /** 待购锚点 COS URL（优先于 base64，跨轮稳定） */
+  imageUrl?: string;
 }
 
 export interface GatekeeperIntent {
@@ -43,6 +45,13 @@ export interface GatekeeperIntent {
   wardrobe_search_query?: string;
   anchor_slot: AnchorSlot | '';
   anchor_item_image_data?: AnchorItemImageData;
+  /** 待购锚点图 COS URL；purchase_pairing / 微调继承时写入 */
+  anchor_image_url?: string;
+  /**
+   * purchase_pairing：本会话待购清单中的 id（si_1…）；
+   * feedback_revision 必须为空（绑定方案上的锚点，不绑「最新上传」）
+   */
+  session_item_id?: string;
   /** outfit_selection 时用户选中的方案 id，如 outfit_1 */
   selected_outfit_id?: string;
   /** wardrobe_pairing 时已确认的衣橱单品 id */
@@ -107,5 +116,7 @@ export const DEFAULT_GATEKEEPER_INTENT: GatekeeperIntent = {
   request_type: 'wardrobe_outfit',
   anchor_item_summary: '',
   anchor_slot: '',
+  session_item_id: '',
+  anchor_image_url: '',
   dressing_climate: '',
 };

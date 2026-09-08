@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
 
     const readableStream = createMultiAgentStream(initialParts, clientId, conversationId, messageId, {
       clientIp: resolveClientIp(req),
+      currentImageUrl: imageUrl || undefined,
     });
     return new Response(readableStream, { headers: SSE_HEADERS });
   } catch (e) {

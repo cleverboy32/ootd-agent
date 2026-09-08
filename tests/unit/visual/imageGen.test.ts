@@ -65,14 +65,76 @@ describe('buildOutfitReferenceInputs', () => {
   });
 
   it('prepends anchor garment as 图1 when anchor image data exists', () => {
+    const purchaseOutfit: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'item-top', name: 'White Linen Shirt', layer: 'top', reason: 'light top' },
+        {
+          id: 'new_item',
+          name: '深灰色高腰阔腿裤',
+          layer: 'bottom',
+          reason: 'purchase anchor',
+        },
+      ],
+    };
     const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
-      outfit,
+      purchaseOutfit,
       ['https://example.com/top.jpg'],
       { data: 'abc123', mimeType: 'image/jpeg' }
     );
 
     assert.equal(referenceUrls[0], 'data:image/jpeg;base64,abc123');
+    assert.match(referenceLabels[0], /深灰色高腰阔腿裤/);
+    assert.match(referenceLabels[0], /bottom/);
     assert.match(referenceLabels[0], /anchor garment/);
+  });
+
+  it('prefers anchor_image_url over base64 for Seedream refs', () => {
+    const purchaseOutfit: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '深灰色高腰阔腿裤',
+          layer: 'bottom',
+          reason: 'purchase anchor',
+        },
+      ],
+    };
+    const { referenceUrls } = buildOutfitReferenceInputs(
+      purchaseOutfit,
+      ['https://example.com/top.jpg'],
+      { data: 'abc123', mimeType: 'image/jpeg' },
+      undefined,
+      'https://cdn.example/pants.jpg'
+    );
+    assert.equal(referenceUrls[0], 'https://cdn.example/pants.jpg');
+    assert.equal(referenceUrls[1], 'https://example.com/top.jpg');
+  });
+
+  it('inserts additional purchase refs after primary anchor', () => {
+    const dualNew: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '黑色短款机车皮衣', layer: 'outerwear', reason: 'a' },
+        { id: 'new_item', name: '深灰色高腰阔腿裤', layer: 'bottom', reason: 'b' },
+        { id: 'item-top', name: 'Tee', layer: 'top', reason: 'c' },
+      ],
+    };
+    const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
+      dualNew,
+      ['https://example.com/tee.jpg'],
+      undefined,
+      undefined,
+      'https://cdn.example/jacket.jpg',
+      [{ url: 'https://cdn.example/pants.jpg', label: '深灰色高腰阔腿裤 (bottom) — session si_1' }]
+    );
+    assert.deepEqual(referenceUrls, [
+      'https://cdn.example/jacket.jpg',
+      'https://cdn.example/pants.jpg',
+      'https://example.com/tee.jpg',
+    ]);
+    assert.match(referenceLabels[1], /si_1/);
   });
 
   it('annotates accessory references with realistic scale hint', () => {

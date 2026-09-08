@@ -48,18 +48,37 @@ export function buildOutfitReferenceInputs(
   outfit: StylistOutfit,
   wardrobeImageUrls: string[],
   anchorImageData: AnchorItemImageData | undefined,
-  ragCache?: Map<string, ClothingItem>
+  ragCache?: Map<string, ClothingItem>,
+  anchorImageUrl?: string,
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>
 ): { referenceUrls: string[]; referenceLabels: string[] } {
   const referenceUrls: string[] = [];
   const referenceLabels: string[] = [];
   const wardrobeItems = outfit.selected_items.filter((i) => i.id !== 'new_item');
 
-  if (anchorImageData?.data) {
-    referenceUrls.push(`data:${anchorImageData.mimeType};base64,${anchorImageData.data}`);
-    const anchorItem = wardrobeItems[0];
+  const resolvedAnchorUrl =
+    anchorImageUrl?.trim() ||
+    (anchorImageData?.data
+      ? `data:${anchorImageData.mimeType};base64,${anchorImageData.data}`
+      : undefined);
+
+  if (resolvedAnchorUrl) {
+    referenceUrls.push(resolvedAnchorUrl);
+    const anchorItem =
+      outfit.selected_items.find((i) => i.id === 'new_item') ?? wardrobeItems[0];
     referenceLabels.push(
-      anchorItem ? `${anchorItem.name} (${anchorItem.layer}) — anchor garment` : 'anchor garment'
+      anchorItem
+        ? `${anchorItem.name} (${anchorItem.layer}) — anchor garment`
+        : 'anchor garment'
     );
+  }
+
+  for (const extra of additionalPurchaseRefs ?? []) {
+    if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) break;
+    const url = extra.url?.trim();
+    if (!url || referenceUrls.includes(url)) continue;
+    referenceUrls.push(url);
+    referenceLabels.push(extra.label || 'additional purchase garment');
   }
 
   wardrobeImageUrls.forEach((url, idx) => {
@@ -158,13 +177,17 @@ async function generateWithSeedream(
   anchorImageData: AnchorItemImageData | undefined,
   imgPrompt: string,
   ragCache?: Map<string, ClothingItem>,
-  userProfile?: UserProfileResult | null
+  userProfile?: UserProfileResult | null,
+  anchorImageUrl?: string,
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
   const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
     outfit,
     wardrobeImageUrls,
     anchorImageData,
-    ragCache
+    ragCache,
+    anchorImageUrl,
+    additionalPurchaseRefs
   );
   const prompt = buildSeedreamImagePrompt(outfit, ragCache, referenceLabels, userProfile);
   const fullPrompt = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
@@ -192,7 +215,9 @@ export async function attemptGenerateOutfitImage(
   anchorImageData: AnchorItemImageData | undefined,
   imgPrompt: string,
   ragCache?: Map<string, ClothingItem>,
-  userProfile?: UserProfileResult | null
+  userProfile?: UserProfileResult | null,
+  anchorImageUrl?: string,
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
   if (isSeedreamImageVendor()) {
     return generateWithSeedream(
@@ -201,22 +226,43 @@ export async function attemptGenerateOutfitImage(
       anchorImageData,
       imgPrompt,
       ragCache,
-      userProfile
+      userProfile,
+      anchorImageUrl,
+      additionalPurchaseRefs
     );
   }
 
   let imageResponse;
   let useFallback = false;
   let mode: 'multimodal' | 'text-only' = 'text-only';
+  const extraUrls = (additionalPurchaseRefs ?? []).map((r) => r.url.trim()).filter(Boolean);
+  const hasAnchor = Boolean(anchorImageData?.data || anchorImageUrl?.trim() || extraUrls.length);
 
   try {
-    if (wardrobeImageUrls.length > 0 || anchorImageData) {
+    if (wardrobeImageUrls.length > 0 || hasAnchor) {
       mode = 'multimodal';
       const multiModalParts: Part[] = [];
-      if (anchorImageData) {
+      if (anchorImageData?.data) {
         multiModalParts.push({
           inlineData: { data: anchorImageData.data, mimeType: anchorImageData.mimeType },
         });
+      } else if (anchorImageUrl?.trim()) {
+        try {
+          multiModalParts.push(await urlToGenerativePart(anchorImageUrl.trim()));
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(
+            `[VISUAL_DIRECTOR] Failed to convert anchor image URL, skipping: ${anchorImageUrl} (${message})`
+          );
+        }
+      }
+      for (const url of extraUrls) {
+        try {
+          multiModalParts.push(await urlToGenerativePart(url));
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(`[VISUAL_DIRECTOR] Failed to convert extra purchase URL, skipping: ${url} (${message})`);
+        }
       }
       for (const url of wardrobeImageUrls) {
         try {
@@ -276,7 +322,9 @@ export async function generateOutfitImage(
   trigger: ImageGenTrigger,
   messageId?: string,
   ragCache?: Map<string, ClothingItem>,
-  userProfile?: UserProfileResult | null
+  userProfile?: UserProfileResult | null,
+  anchorImageUrl?: string,
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>
 ): Promise<{ data: string; mimeType: string }> {
   return retry(
     async (bail, attemptNumber) => {
@@ -287,7 +335,9 @@ export async function generateOutfitImage(
           anchorImageData,
           imgPrompt,
           ragCache,
-          userProfile
+          userProfile,
+          anchorImageUrl,
+          additionalPurchaseRefs
         );
         void logImageGenAudit({
           timestamp: new Date().toISOString(),
@@ -306,7 +356,10 @@ export async function generateOutfitImage(
           outfitId: outfit.id,
           messageId,
           attempt: attemptNumber,
-          mode: wardrobeImageUrls.length > 0 || anchorImageData ? 'multimodal' : 'text-only',
+          mode:
+            wardrobeImageUrls.length > 0 || anchorImageData || anchorImageUrl
+              ? 'multimodal'
+              : 'text-only',
           success: false,
           error: message,
           trigger,

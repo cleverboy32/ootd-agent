@@ -7,3 +7,4 @@ export * from './imageGen';
 export * from './userProfile';
 export * from './visualProfile';
 export * from './rag';
+export * from './request';

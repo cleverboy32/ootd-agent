@@ -357,6 +357,68 @@ describe('extractOutfitIdFromText', () => {
     assert.equal(extractOutfitIdFromText('第二套鞋换一下'), 'outfit_2');
     assert.equal(extractOutfitIdFromText('去掉外套'), '');
   });
+
+  it('accepts short answers like 二套 / 1套 / 2 after clarify', () => {
+    assert.equal(extractOutfitIdFromText('二套'), 'outfit_2');
+    assert.equal(extractOutfitIdFromText('2套'), 'outfit_2');
+    assert.equal(extractOutfitIdFromText('2'), 'outfit_2');
+    assert.equal(extractOutfitIdFromText('二'), 'outfit_2');
+    assert.equal(extractOutfitIdFromText('1套'), 'outfit_1');
+    assert.equal(extractOutfitIdFromText('1'), 'outfit_1');
+    assert.equal(extractOutfitIdFromText('方案2'), 'outfit_2');
+  });
+
+  it('does not treat 一套 / 两套 / longer digits as outfit selection', () => {
+    assert.equal(extractOutfitIdFromText('帮我搭一套'), '');
+    assert.equal(extractOutfitIdFromText('两套都不行'), '');
+    assert.equal(extractOutfitIdFromText('12'), '');
+    assert.equal(extractOutfitIdFromText('20度'), '');
+  });
+});
+
+describe('finalizeGatekeeperResult — feedback_revision after outfit clarify', () => {
+  const multiOutfitHistory: Content[] = [
+    { role: 'user', parts: [{ text: '这套裙子怎么搭呢' }] },
+    {
+      role: 'model',
+      parts: [{ text: '### 方案一\n通勤风\n### 方案二\n休闲风' }],
+    },
+    {
+      role: 'model',
+      parts: [{ text: '好的～上一轮给您准备了多套方案，请问您想微调第一套还是第二套？' }],
+    },
+  ];
+
+  it('accepts 二套 as selecting outfit_2 and completes revision', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '用户反馈第二套鞋履不太协调，请更换更协调的鞋款',
+        selected_outfit_id: 'outfit_2',
+      }),
+      currentMessageText: '二套',
+      history: multiOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_2');
+  });
+
+  it('keeps LLM selected_outfit_id when special_requests corroborates it', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        special_requests: '在第二套基础上把鞋换成白色运动鞋',
+        selected_outfit_id: 'outfit_2',
+      }),
+      // 极短确认、且未命中历史选套时，靠 LLM + special_requests 印证兜底
+      currentMessageText: '嗯改这个',
+      history: multiOutfitHistory,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_2');
+  });
 });
 
 describe('adjudicateNewTaskVsRevisionIntent', () => {

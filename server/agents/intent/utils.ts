@@ -51,15 +51,18 @@ export const ACCESSORY_ANCHOR_PATTERN =
 
 const CASUAL_OCCASION_PATTERN = /平时|日常|百搭|通勤|上班|都可以穿|随便穿/i;
 
-const OUTFIT_2_IN_TEXT = /第二套|outfit_2|方案二|第\s*2\s*套/;
-const OUTFIT_1_IN_TEXT = /第一套|outfit_1|方案一|第\s*1\s*套/;
-const MULTIPLE_OUTFITS_IN_TEXT = /方案二|第二套|outfit_2|第\s*2\s*套|两套方案|两套穿搭|准备了\s*2\s*套|两套/;
+const OUTFIT_2_IN_TEXT =
+  /第二套|二套|^二$|方案二|方案\s*2|outfit[_\s-]?2|第\s*2\s*套|(?<!\d)2\s*套|^2[.、)）]?$/i;
+const OUTFIT_1_IN_TEXT =
+  /第一套|^一$|方案一|方案\s*1|outfit[_\s-]?1|第\s*1\s*套|(?<!\d)1\s*套|^1[.、)）]?$/i;
+const MULTIPLE_OUTFITS_IN_TEXT =
+  /方案二|第二套|二套|outfit_2|第\s*2\s*套|两套方案|两套穿搭|准备了\s*2\s*套|两套/;
 
 const ANCHOR_SLOT_SET = new Set<string>(['top', 'bottom', 'dress', 'shoes', 'outerwear', 'accessory']);
 const DRESSING_CLIMATE_SET = new Set<string>(['cold', 'warm', 'mild']);
 
 const REVISION_TARGET_PATTERN =
-  /第一套|第二套|这套|那套|上一套|刚才那套|上面那套|方案一|方案二|outfit_[12]|第\s*[12]\s*套/;
+  /第一套|第二套|二套|^[一二]$|这套|那套|上一套|刚才那套|上面那套|方案一|方案二|outfit_[12]|第\s*[12]\s*套|(?<!\d)[12]\s*套|^[12][.、)）]?$/i;
 const REVISION_ACTION_PATTERN =
   /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
 const FULL_REGEN_PATTERN =
@@ -463,6 +466,7 @@ export function getAnchorItemFromIntent(intent: GatekeeperIntent): AnchorItemInf
     summary,
     slot,
     imageData: intent.anchor_item_image_data,
+    imageUrl: intent.anchor_image_url?.trim() || undefined,
   };
 }
 
@@ -645,16 +649,77 @@ export function normalizeGatekeeperIntent(
   merged.dressing_climate = parseDressingClimate(
     typeof merged.dressing_climate === 'string' ? merged.dressing_climate : ''
   );
+  if (typeof merged.session_item_id !== 'string') merged.session_item_id = '';
+  if (typeof merged.anchor_image_url !== 'string') merged.anchor_image_url = '';
   return merged;
+}
+
+export interface SessionItemBindingInput {
+  id: string;
+  imageUrl: string;
+}
+
+/**
+ * 将 Gate 的 session_item_id 绑定到 COS URL。
+ * feedback_revision 清空选型（锚点跟方案，不跟最新上传）。
+ */
+export function resolveSessionItemBinding(
+  intent: GatekeeperIntent,
+  sessionItems: SessionItemBindingInput[],
+  currentImageUrl?: string
+): GatekeeperIntent {
+  const normalized = normalizeGatekeeperIntent(intent);
+
+  if (normalized.request_type === 'feedback_revision') {
+    normalized.session_item_id = '';
+    return normalized;
+  }
+
+  if (!isPurchasePairingIntent(normalized) || sessionItems.length === 0) {
+    return normalized;
+  }
+
+  const byId = sessionItems.find((item) => item.id === normalized.session_item_id?.trim());
+  if (byId) {
+    normalized.session_item_id = byId.id;
+    normalized.anchor_image_url = byId.imageUrl;
+    return normalized;
+  }
+
+  const byCurrentUrl = currentImageUrl?.trim()
+    ? sessionItems.find((item) => item.imageUrl === currentImageUrl.trim())
+    : undefined;
+  if (byCurrentUrl) {
+    normalized.session_item_id = byCurrentUrl.id;
+    normalized.anchor_image_url = byCurrentUrl.imageUrl;
+    return normalized;
+  }
+
+  if (sessionItems.length === 1) {
+    normalized.session_item_id = sessionItems[0].id;
+    normalized.anchor_image_url = sessionItems[0].imageUrl;
+    return normalized;
+  }
+
+  // 多件且未指明：不强绑 latest，仅保留本轮图 URL（若有）供下游
+  if (currentImageUrl?.trim()) {
+    normalized.anchor_image_url = currentImageUrl.trim();
+  }
+  normalized.session_item_id = '';
+  return normalized;
 }
 
 export function enrichIntentFromContext(
   intent: GatekeeperIntent,
   history: Content[],
-  currentInput: Part[]
+  currentInput: Part[],
+  options?: {
+    sessionItems?: SessionItemBindingInput[];
+    currentImageUrl?: string;
+  }
 ): GatekeeperIntent {
   const contextText = `${extractUserTextFromHistory(history)}\n${extractTextFromParts(currentInput)}`.trim();
-  const normalized = normalizeGatekeeperIntent(intent);
+  let normalized = normalizeGatekeeperIntent(intent);
 
   const currentText = extractTextFromParts(currentInput);
   const confirmedWardrobeId = extractConfirmedWardrobeId(currentText);
@@ -689,7 +754,18 @@ export function enrichIntentFromContext(
       if (match) normalized.anchor_item_summary = match[0].trim();
     }
     correctAnchorSlot(normalized, contextText);
-    normalized.anchor_item_image_data = collectLatestImageData(history, currentInput);
+    normalized = resolveSessionItemBinding(
+      normalized,
+      options?.sessionItems ?? [],
+      options?.currentImageUrl
+    );
+    // 本轮仍有 inlineData 时保留，供非 Seedream 路径；URL 优先写在 anchor_image_url
+    const latest = collectLatestImageData(history, currentInput);
+    if (latest) normalized.anchor_item_image_data = latest;
+  }
+
+  if (normalized.request_type === 'feedback_revision') {
+    normalized.session_item_id = '';
   }
 
   return normalized;

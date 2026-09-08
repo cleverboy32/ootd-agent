@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { uploadObjectToCOS } from '@/server/services/cos';
+import { ensureLlmSafeImageBuffer } from '@/server/utils/image';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+function extensionForMime(mimeType: string): string {
+  switch (mimeType) {
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/jpeg':
+    default:
+      return 'jpeg';
+  }
+}
 
 export async function POST(req: NextRequest) {
   const clientId = req.headers.get('x-client-id');
@@ -24,19 +39,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 413 });
     }
 
-    const extension = file.type.split('/')[1] || 'bin';
-    const relativeKey = `user-uploads/${clientId}/${uuidv4()}.${extension}`;
     const readStartedAt = Date.now();
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const rawBuffer = Buffer.from(await file.arrayBuffer());
     const readMs = Date.now() - readStartedAt;
+
+    const convertStartedAt = Date.now();
+    const safe = await ensureLlmSafeImageBuffer(rawBuffer, file.type);
+    const convertMs = Date.now() - convertStartedAt;
+
+    const relativeKey = `user-uploads/${clientId}/${uuidv4()}.${extensionForMime(safe.mimeType)}`;
     const cosStartedAt = Date.now();
-    const publicUrl = await uploadObjectToCOS(buffer, file.type, relativeKey);
+    const publicUrl = await uploadObjectToCOS(safe.buffer, safe.mimeType, relativeKey);
     const cosMs = Date.now() - cosStartedAt;
 
     console.log('[API /api/upload] timing', JSON.stringify({
       outcome: 'success',
-      ms: { read_file: readMs, cos_upload: cosMs, total: Date.now() - startedAt },
-      bytes: buffer.length,
+      ms: {
+        read_file: readMs,
+        convert: convertMs,
+        cos_upload: cosMs,
+        total: Date.now() - startedAt,
+      },
+      bytes: safe.buffer.length,
+      mime: safe.mimeType,
+      sourceMime: file.type,
     }));
 
     return NextResponse.json({ publicUrl });

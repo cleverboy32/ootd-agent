@@ -279,6 +279,7 @@ export async function callStylistAgent(
         summary: resolvedAnchor.summary,
         slot: resolvedAnchor.slot,
         imageData: resolvedAnchor.imageData,
+        imageUrl: resolvedAnchor.imageUrl,
       }
     : null;
 
@@ -428,6 +429,20 @@ ${isAthleticOccasion(intent, extractUserMessage(initialParts)) ? '\n【提醒】
     }
     if (anchorItem?.imageData) {
       parsed.anchor_item_image_data = anchorItem.imageData;
+    } else if (previousCache?.stylist_result.anchor_item_image_data?.data) {
+      // feedback_revision 时 Gatekeeper 不再带图；从上一轮 stylist_cache 继承待购锚点图，
+      // 否则 Seedream 只有衣橱参考、易把 new_item 下装画丢。
+      parsed.anchor_item_image_data = previousCache.stylist_result.anchor_item_image_data;
+      console.log('[STYLIST_AGENT] Inherited anchor_item_image_data from previous stylist cache');
+    }
+    const anchorUrl =
+      anchorItem?.imageUrl?.trim() ||
+      options.previousAnchorImageUrl?.trim() ||
+      previousCache?.stylist_result.anchor_image_url?.trim() ||
+      '';
+    if (anchorUrl) {
+      parsed.anchor_image_url = anchorUrl;
+      console.log('[STYLIST_AGENT] anchor_image_url bound:', anchorUrl.slice(0, 80));
     }
     return parsed;
   } catch (error) {

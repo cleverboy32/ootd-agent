@@ -6,6 +6,8 @@ import type { UserProfileResult } from '@/server/agents/user-profile';
 import type { StylistResult } from '@/server/agents/stylist';
 import type { GatekeeperIntent } from '@/server/agents/intent';
 import type { StylistCacheNode, WardrobeCandidatesNode } from '@/server/utils/messageContent';
+import type { RequestTrace } from '@/server/logging/request';
+import type { SessionPurchaseItem } from '@/server/utils/sessionItems';
 
 /** 不可序列化的运行时副作用容器，经 configurable.runtime 注入 */
 export interface OutfitRuntime {
@@ -17,7 +19,11 @@ export interface OutfitRuntime {
   clientId?: string;
   conversationId?: string;
   clientIp?: string;
+  /** 本轮请求的待购图 COS URL（与 initialParts inlineData 对应） */
+  currentImageUrl?: string;
   profileLocationPromise: Promise<string | undefined>;
+  /** 请求级 audit 追踪（与 ReadableStream.cancel 共享同一实例） */
+  trace: RequestTrace;
   appendText: (text: string) => void;
   getAccumulated: () => string;
   setMessageId: (id: string) => void;
@@ -36,6 +42,10 @@ export type PipelineRoute = 'from_cache' | 'style_advice' | 'incomplete' | 'outf
 
 export const OutfitPipelineAnnotation = Annotation.Root({
   history: Annotation<Content[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
+  sessionItems: Annotation<SessionPurchaseItem[]>({
     reducer: (_left, right) => right,
     default: () => [],
   }),

@@ -27,6 +27,27 @@ export async function getPreviousStylistCache(
   return null;
 }
 
+/** 在近期 assistant cache 中找回待购锚点 URL（跳过已丢失锚点的 revision cache） */
+export async function findPreviousAnchorImageUrl(
+  conversationId: string,
+  excludeMessageId?: string
+): Promise<string | undefined> {
+  const messages = await prismadb.message.findMany({
+    where: { conversationId, role: 'assistant' },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+    select: { id: true, content: true },
+  });
+
+  for (const msg of messages) {
+    if (excludeMessageId && msg.id === excludeMessageId) continue;
+    const cache = extractStylistCache(msg.content);
+    const url = cache?.stylist_result.anchor_image_url?.trim();
+    if (url) return url;
+  }
+  return undefined;
+}
+
 export async function getProfileLocation(clientId?: string): Promise<string | undefined> {
   if (!clientId) return undefined;
 

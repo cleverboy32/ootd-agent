@@ -4,6 +4,13 @@ import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
 import type { UserProfileResult } from '@/server/agents/user-profile';
 import type { StylistResult } from '@/server/agents/stylist';
 import type { GatekeeperIntent } from '@/server/agents/intent';
+import {
+  logRequestAudit,
+  RequestAuditKind,
+  RequestAuditOutcome,
+  RequestAuditRoute,
+  RequestTrace,
+} from '@/server/logging/request';
 import { buildContext } from './context/buildContext';
 import {
   applyImageResultsToText,
@@ -20,6 +27,7 @@ export { createImageRetryStream } from './imageRetry';
 
 export interface MultiAgentStreamOptions {
   clientIp?: string;
+  currentImageUrl?: string;
 }
 
 function createRuntime(params: {
@@ -29,7 +37,9 @@ function createRuntime(params: {
   conversationId?: string;
   messageId?: string;
   clientIp?: string;
+  currentImageUrl?: string;
   profileLocationPromise: Promise<string | undefined>;
+  trace: RequestTrace;
 }): {
   runtime: OutfitRuntime;
   getSnapshot: () => {
@@ -60,13 +70,16 @@ function createRuntime(params: {
     clientId: params.clientId,
     conversationId: params.conversationId,
     clientIp: params.clientIp,
+    currentImageUrl: params.currentImageUrl,
     profileLocationPromise: params.profileLocationPromise,
+    trace: params.trace,
     appendText: (text) => {
       accumulatedContent += text;
     },
     getAccumulated: () => accumulatedContent,
     setMessageId: (id) => {
       messageId = id;
+      params.trace.setMessageId(id);
     },
     getMessageId: () => messageId,
     setStylistCache: (value) => {
@@ -106,6 +119,13 @@ export function createMultiAgentStream(
   messageId?: string,
   options: MultiAgentStreamOptions = {}
 ): ReadableStream {
+  const trace = new RequestTrace({
+    kind: RequestAuditKind.Generate,
+    conversationId,
+    messageId,
+    clientId,
+  });
+
   return new ReadableStream({
     async start(controller) {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
@@ -118,15 +138,18 @@ export function createMultiAgentStream(
         conversationId,
         messageId,
         clientIp: options.clientIp,
+        currentImageUrl: options.currentImageUrl,
         profileLocationPromise,
+        trace,
       });
 
       let mainError: Error | null = null;
 
       try {
-        const { historyForAI, failedMessage } = await buildContext(
+        const { historyForAI, failedMessage, sessionItems } = await buildContext(
           conversationId,
-          runtime.getMessageId()
+          runtime.getMessageId(),
+          options.currentImageUrl
         );
 
         let cachedStylistResult: StylistResult | null = null;
@@ -151,9 +174,11 @@ export function createMultiAgentStream(
 
         if (cachedStylistResult && cachedProfile) {
           runtime.setActiveStylist(cachedStylistResult);
+          runtime.trace.setRoute(RequestAuditRoute.FromCache);
           await outfitCachePipeline.invoke(
             {
               history: historyForAI,
+              sessionItems,
               cacheHit: true,
               route: 'from_cache',
               messageId: runtime.getMessageId(),
@@ -167,6 +192,7 @@ export function createMultiAgentStream(
           await outfitFreshPipeline.invoke(
             {
               history: historyForAI,
+              sessionItems,
               cacheHit: false,
               messageId: runtime.getMessageId(),
             },
@@ -222,6 +248,28 @@ export function createMultiAgentStream(
           }
         }
 
+        const activeIntent = runtime.getActiveIntent();
+        if (activeIntent?.request_type) {
+          runtime.trace.setRequestType(activeIntent.request_type);
+        }
+
+        void logRequestAudit(
+          runtime.trace.finalize({
+            outcome: mainError ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
+            errorMessage: mainError?.message,
+            messageId: finalMessageId,
+            summary: {
+              outfitCount:
+                activeStylistResult?.outfits.length ??
+                stylistCacheNode?.stylist_result.outfits.length,
+              imageSuccessCount: runtime.imageMap.size,
+              imageFailedCount: runtime.failedImageIds.size,
+              ragItemCount: runtime.ragCache.size,
+              wardrobeCandidateCount: wardrobeCandidatesNode?.items.length,
+            },
+          })
+        );
+
         if (mainError) {
           handleStreamError(controller, [], mainError, 'OrchestratorProcess');
         } else {
@@ -239,6 +287,7 @@ export function createMultiAgentStream(
     },
     cancel(reason) {
       console.warn('[ORCHESTRATOR:LANGGRAPH] 流被客户端取消，原因:', reason);
+      trace.markCancelled(reason);
     },
   });
 }

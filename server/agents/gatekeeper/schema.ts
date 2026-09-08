@@ -53,6 +53,11 @@ export const gatekeeperSchema: Schema = {
           description:
             'wardrobe_pairing 时：用户已确认的衣橱单品 id（用户点选候选或明确指定）。未确认则填空，由服务端检索。',
         },
+        session_item_id: {
+          type: Type.STRING,
+          description:
+            'purchase_pairing：填写【会话待购单品】清单中的 id（如 si_1）。用户指代历史某张上传图时选对应 id；本轮新上传且未指代旧图时选清单最后一项。feedback_revision 必须填空字符串。其他类型填空字符串。',
+        },
         anchor_item_summary: {
           type: Type.STRING,
           description:
@@ -86,6 +91,7 @@ export const gatekeeperSchema: Schema = {
         'anchor_slot',
         'selected_outfit_id',
         'anchor_wardrobe_id',
+        'session_item_id',
         'dressing_climate',
       ],
     },

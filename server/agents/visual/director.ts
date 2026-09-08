@@ -24,6 +24,8 @@ export async function callVisualDirectorAgent(
     messageId?: string;
     ragCache?: Map<string, ClothingItem>;
     userProfile?: UserProfileResult | null;
+    anchorImageUrl?: string;
+    additionalPurchaseRefs?: Array<{ url: string; label: string }>;
   }
 ): Promise<void> {
   const trigger = options?.trigger ?? 'initial';
@@ -39,7 +41,9 @@ export async function callVisualDirectorAgent(
     trigger,
     options?.messageId,
     options?.ragCache,
-    options?.userProfile
+    options?.userProfile,
+    options?.anchorImageUrl,
+    options?.additionalPurchaseRefs
   );
 
   const destinationFileName = `outfits/${Date.now()}-${imageId}.png`;

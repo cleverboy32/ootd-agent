@@ -6,6 +6,13 @@ import { AnchorItemImageData } from '@/server/agents/intent';
 import { StylistOutfit } from '@/server/agents/stylist';
 import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import {
+  logRequestAudit,
+  RequestAuditKind,
+  RequestAuditOutcome,
+  RequestAuditRoute,
+  RequestTrace,
+} from '@/server/logging/request';
+import {
   applyImageResultsToText,
   buildImageStates,
   buildPersistedMessageContent,
@@ -25,7 +32,9 @@ export async function runOutfitImageGeneration(
   messageId?: string,
   trigger: 'initial' | 'user_retry' = 'initial',
   ragCache?: Map<string, ClothingItem>,
-  userProfile?: UserProfileResult | null
+  userProfile?: UserProfileResult | null,
+  anchorImageUrl?: string,
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>
 ): Promise<void> {
   const imageId = outfit.id;
 
@@ -40,7 +49,7 @@ export async function runOutfitImageGeneration(
         imageMap.set(id, url);
         console.log(`[ORCHESTRATOR] 效果图生成成功: ${id} -> ${url}`);
       },
-      { trigger, messageId, ragCache, userProfile }
+      { trigger, messageId, ragCache, userProfile, anchorImageUrl, additionalPurchaseRefs }
     );
   } catch (e) {
     failedImageIds.add(outfit.id);
@@ -59,9 +68,21 @@ export function createImageRetryStream(
   messageId: string,
   retryOutfitId: string
 ): ReadableStream {
+  const trace = new RequestTrace({
+    kind: RequestAuditKind.ImageRetry,
+    conversationId,
+    messageId,
+    route: RequestAuditRoute.ImageRetry,
+  });
+
   return new ReadableStream({
     async start(controller) {
       console.log(`[ORCHESTRATOR] --- 单图重试: message=${messageId} outfit=${retryOutfitId} ---`);
+
+      let mainError: Error | null = null;
+      const imageMap = new Map<string, string>();
+      const failedImageIds = new Set<string>();
+      let ragItemCount = 0;
 
       try {
         const message = await prismadb.message.findUnique({ where: { id: messageId } });
@@ -83,10 +104,9 @@ export function createImageRetryStream(
         for (const item of stylistCache.wardrobe_items ?? []) {
           ragCache.set(item.id, item);
         }
+        ragItemCount = ragCache.size;
 
-        const imageMap = new Map<string, string>();
-        const failedImageIds = new Set<string>();
-
+        const imageStartedAt = Date.now();
         await runOutfitImageGeneration(
           outfit,
           extractSelectedItemUrls(outfit, ragCache),
@@ -96,8 +116,11 @@ export function createImageRetryStream(
           failedImageIds,
           messageId,
           'user_retry',
-          ragCache
+          ragCache,
+          null,
+          stylistCache.stylist_result.anchor_image_url
         );
+        trace.markStage('imageGen', Date.now() - imageStartedAt);
 
         if (imageMap.has(retryOutfitId)) {
           const url = imageMap.get(retryOutfitId)!;
@@ -121,12 +144,34 @@ export function createImageRetryStream(
         }
 
         sendEvent(controller, 'stream_end', { message: '图片重试完成' });
-        controller.close();
+        try {
+          controller.close();
+        } catch (e) {
+          console.warn('[ORCHESTRATOR] 单图重试流关闭失败 (可能已被客户端取消):', e);
+        }
       } catch (error) {
-        const err = error as Error;
-        console.error('[ORCHESTRATOR] 单图重试失败:', err);
-        handleStreamError(controller, [], err, 'ImageRetry');
+        mainError = error as Error;
+        console.error('[ORCHESTRATOR] 单图重试失败:', mainError);
+        handleStreamError(controller, [], mainError, 'ImageRetry');
+      } finally {
+        void logRequestAudit(
+          trace.finalize({
+            outcome: mainError ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
+            errorMessage: mainError?.message,
+            messageId,
+            summary: {
+              outfitCount: 1,
+              imageSuccessCount: imageMap.size,
+              imageFailedCount: failedImageIds.size,
+              ragItemCount,
+            },
+          })
+        );
       }
+    },
+    cancel(reason) {
+      console.warn('[ORCHESTRATOR] 单图重试流被客户端取消，原因:', reason);
+      trace.markCancelled(reason);
     },
   });
 }

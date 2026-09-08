@@ -22,6 +22,8 @@ import { gatekeeperSchema, WeatherLookup } from './schema';
 import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
 import { resolveDressingClimateForIntent } from '@/server/utils/ragSeasonFilter';
 import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
+import { formatSessionItemsForGate } from '@/server/utils/sessionItems';
+import type { SessionPurchaseItem } from '@/server/utils/sessionItems';
 
 export type { WeatherLookup } from './schema';
 
@@ -29,6 +31,8 @@ export interface GatekeeperContext {
   clientIp?: string;
   profileLocation?: string;
   clientId?: string;
+  sessionItems?: SessionPurchaseItem[];
+  currentImageUrl?: string;
 }
 
 export interface GatekeeperAuditMeta {
@@ -64,7 +68,10 @@ async function finalizeGatekeeperIntent(
   weatherLookup?: WeatherLookup
 ): Promise<{ intent: GatekeeperIntent; suggestCityForWeather: boolean }> {
   const contextText = buildContextText(history, currentInput);
-  let enriched = enrichIntentFromContext(intent, history, currentInput);
+  let enriched = enrichIntentFromContext(intent, history, currentInput, {
+    sessionItems: ctx.sessionItems,
+    currentImageUrl: ctx.currentImageUrl,
+  });
 
   // 天气由 Gatekeeper LLM 决策（weather_lookup.needed）；服务端在此串行查询补全
   if (weatherLookup?.needed && !enriched.weather.trim()) {
@@ -99,7 +106,11 @@ export async function callGatekeeperAgent(
 ): Promise<GatekeeperResult> {
   console.log('[GATEKEEPER_AGENT] Evaluating user request...');
 
-  const contents: Content[] = [...history, { role: 'user', parts: currentInput }];
+  const sessionBlock = formatSessionItemsForGate(ctx.sessionItems ?? []);
+  const gatedInput: Part[] = sessionBlock
+    ? [{ text: sessionBlock }, ...currentInput]
+    : currentInput;
+  const contents: Content[] = [...history, { role: 'user', parts: gatedInput }];
 
   try {
     const response = await withRetryOn429(

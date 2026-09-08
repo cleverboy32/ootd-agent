@@ -3,16 +3,27 @@ import prismadb from 'server/db';
 import { generateSummary } from '@/server/services/summarization';
 import { CONTEXT_TOKEN_LIMIT, estimateTokenCount, formatHistoryAsync } from '@/server/utils/estimate-token';
 import { Message } from '@/server/types/message';
+import {
+  extractSessionItemsFromMessages,
+  mergeCurrentImageIntoSessionItems,
+  type SessionPurchaseItem,
+} from '@/server/utils/sessionItems';
 
 export async function buildContext(
   conversationId?: string,
-  finalMessageId?: string
+  finalMessageId?: string,
+  currentImageUrl?: string
 ): Promise<{
   historyForAI: Content[];
   failedMessage: Message | null;
+  sessionItems: SessionPurchaseItem[];
 }> {
   if (!conversationId) {
-    return { historyForAI: [], failedMessage: null };
+    return {
+      historyForAI: [],
+      failedMessage: null,
+      sessionItems: mergeCurrentImageIntoSessionItems([], currentImageUrl),
+    };
   }
 
   console.log(`[CONTEXT_DEBUG] --- 开始为会话构建上下文 ---`);
@@ -81,13 +92,24 @@ export async function buildContext(
       historyForAI.push(...unsummarizedHistory);
     }
 
+    const sessionItems = mergeCurrentImageIntoSessionItems(
+      extractSessionItemsFromMessages(newMessages as Message[]),
+      currentImageUrl
+    );
+    console.log(`[CONTEXT] sessionItems: ${sessionItems.length} (${sessionItems.map((i) => i.id).join(',') || 'none'})`);
+
     return {
       historyForAI,
-      failedMessage
+      failedMessage,
+      sessionItems,
     };
 
   } catch (e) {
     console.error(`[HISTORY] 加载历史消息失败:`, e);
-    return { historyForAI: [], failedMessage: null };
+    return {
+      historyForAI: [],
+      failedMessage: null,
+      sessionItems: mergeCurrentImageIntoSessionItems([], currentImageUrl),
+    };
   }
 }

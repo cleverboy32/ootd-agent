@@ -2,7 +2,7 @@ import { Content, Part } from "@google/genai";
 import { Message } from '../types/message';
 
 
-export const CONTEXT_TOKEN_LIMIT = 6000; // ~12000字，覆盖约12-15轮正常对话，远低于模型1M上下文上限
+export const CONTEXT_TOKEN_LIMIT = 500000; // 远低于模型1M上下文上限
 
 export function estimateTokenCount(history: Content[]): number {
   let totalToken = 0;

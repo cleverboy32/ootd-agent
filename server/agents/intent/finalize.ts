@@ -158,11 +158,21 @@ const handleOutfitSelection: RequestTypeHandler = ({ intent, modelReply, modelFo
 };
 
 const handleFeedbackRevision: RequestTypeHandler = (ctx) => {
-  let intent = ctx.intent;
+  let intent = { ...ctx.intent, session_item_id: '' };
   const currentText = ctx.currentMessageText?.trim() ?? '';
+  const llmSelected =
+    intent.selected_outfit_id === 'outfit_1' || intent.selected_outfit_id === 'outfit_2'
+      ? intent.selected_outfit_id
+      : '';
+  // 选套优先级：本轮原文 > 历史用户选套 > LLM（仅当 special_requests 能印证，防幻觉默认 outfit_1）
+  const corroboratedLlmSelected =
+    llmSelected && extractOutfitIdFromText(intent.special_requests) === llmSelected
+      ? llmSelected
+      : '';
   const resolvedOutfitId =
     extractOutfitIdFromText(currentText) ||
-    (ctx.history ? inferSelectedOutfitIdFromHistory(ctx.history) : '');
+    (ctx.history ? inferSelectedOutfitIdFromHistory(ctx.history) : '') ||
+    corroboratedLlmSelected;
 
   if (resolvedOutfitId) {
     intent = { ...intent, selected_outfit_id: resolvedOutfitId };

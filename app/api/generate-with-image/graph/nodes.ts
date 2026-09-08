@@ -15,7 +15,8 @@ import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
 import { mapWithConcurrency } from '@/server/utils/concurrency';
 import { buildPersistedMessageContent, type StylistCacheNode } from '@/server/utils/messageContent';
 import { runOutfitImageGeneration, extractSelectedItemUrls } from '../imageRetry';
-import { getPreviousStylistCache } from '../helpers';
+import { getPreviousStylistCache, findPreviousAnchorImageUrl } from '../helpers';
+import { resolveAnchorUrlFromSessionItems, buildAdditionalPurchaseImageRefs } from '@/server/utils/sessionItems';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
 
 function getRuntime(config: LangGraphRunnableConfig): OutfitRuntime {
@@ -55,7 +56,16 @@ function persistStylistCacheAsync(messageId: string, stylistCache: StylistCacheN
 }
 
 async function executeParallelAgents(
-  state: Pick<OutfitPipelineState, 'stylistResult' | 'intent' | 'revisionNoItemChange' | 'cachedPersonalStyle' | 'userProfile' | 'messageId'>,
+  state: Pick<
+    OutfitPipelineState,
+    | 'stylistResult'
+    | 'intent'
+    | 'revisionNoItemChange'
+    | 'cachedPersonalStyle'
+    | 'userProfile'
+    | 'messageId'
+    | 'sessionItems'
+  >,
   runtime: OutfitRuntime
 ): Promise<void> {
   const stylistResult = state.stylistResult;
@@ -70,6 +80,7 @@ async function executeParallelAgents(
 
   console.log('[ORCHESTRATOR:LANGGRAPH] 启动并行双轨执行链 (文案流 + 视觉导演并行画图)...');
 
+  const copywriterStartedAt = Date.now();
   const copywriterPromise = callCopywriterAgentStream(
     stylistResult,
     personalStyle,
@@ -81,13 +92,27 @@ async function executeParallelAgents(
     },
     state.intent ?? undefined,
     state.revisionNoItemChange
-  );
+  ).finally(() => {
+    runtime.trace.markStage('copywriter', Date.now() - copywriterStartedAt);
+  });
 
+  const imageStartedAt = Date.now();
   const imageTask = mapWithConcurrency(
     stylistResult.outfits,
     IMAGE_GEN_CONCURRENCY,
-    (outfit) =>
-      runOutfitImageGeneration(
+    (outfit) => {
+      const additionalPurchaseRefs = buildAdditionalPurchaseImageRefs(
+        outfit,
+        state.sessionItems ?? [],
+        stylistResult.anchor_image_url
+      );
+      if (additionalPurchaseRefs.length > 0) {
+        console.log(
+          `[ORCHESTRATOR:LANGGRAPH] ${outfit.id} extra purchase refs:`,
+          additionalPurchaseRefs.map((r) => r.label).join(' | ')
+        );
+      }
+      return runOutfitImageGeneration(
         outfit,
         extractSelectedItemUrls(outfit, runtime.ragCache),
         stylistResult.anchor_item_image_data,
@@ -97,9 +122,14 @@ async function executeParallelAgents(
         state.messageId ?? runtime.getMessageId(),
         'initial',
         runtime.ragCache,
-        state.userProfile
-      )
-  );
+        state.userProfile,
+        stylistResult.anchor_image_url,
+        additionalPurchaseRefs
+      );
+    }
+  ).finally(() => {
+    runtime.trace.markStage('imageGen', Date.now() - imageStartedAt);
+  });
 
   const [copywriterRes] = await Promise.allSettled([copywriterPromise, imageTask]);
   if (copywriterRes.status === 'rejected') {
@@ -152,14 +182,18 @@ export async function gatekeeperNode(
     clientIp: runtime.clientIp,
     profileLocation: await runtime.profileLocationPromise,
     clientId: runtime.clientId,
+    sessionItems: state.sessionItems,
+    currentImageUrl: runtime.currentImageUrl,
   };
 
+  const gatekeeperStartedAt = Date.now();
   const gatekeeperResult = await callGatekeeperAgent(
     state.history,
     runtime.initialParts,
     gatekeeperCtx,
     { conversationId: runtime.conversationId, messageId }
   );
+  runtime.trace.markStage('gatekeeper', Date.now() - gatekeeperStartedAt);
 
   sendEvent(runtime.controller, 'progress', {
     stage: 'gatekeeper',
@@ -177,6 +211,8 @@ export async function gatekeeperNode(
 
   const intent = gatekeeperResult.extracted_intent;
   runtime.setActiveIntent(intent);
+  runtime.trace.setRequestType(intent.request_type);
+  runtime.trace.setRoute(route);
 
   return {
     gatekeeperResult,
@@ -202,12 +238,14 @@ export async function styleAdvicePathNode(
     label: '正在分析搭配知识...',
   });
 
+  const stylistStartedAt = Date.now();
   const adviceResult = await callStylistAdvice(
     state.history,
     runtime.initialParts,
     intent,
     adviceProfile
   );
+  runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
 
   sendEvent(runtime.controller, 'progress', {
     stage: 'stylist',
@@ -219,6 +257,7 @@ export async function styleAdvicePathNode(
     label: '正在撰写建议...',
   });
 
+  const copywriterStartedAt = Date.now();
   await callCopywriterAdviceStream(
     adviceResult,
     adviceProfile.personal_style,
@@ -229,6 +268,7 @@ export async function styleAdvicePathNode(
       messageId: state.messageId ?? runtime.getMessageId(),
     }
   );
+  runtime.trace.markStage('copywriter', Date.now() - copywriterStartedAt);
 
   return { userProfile: adviceProfile };
 }
@@ -271,6 +311,7 @@ export async function loadProfileNode(
   const intent = state.intent ?? state.gatekeeperResult?.extracted_intent;
   if (!intent) throw new Error('intent missing in loadProfile');
 
+  const loadProfileStartedAt = Date.now();
   const messageId = state.messageId ?? runtime.getMessageId();
   const previousStylistCache =
     runtime.conversationId && intent.request_type === 'feedback_revision'
@@ -324,6 +365,8 @@ export async function loadProfileNode(
     }
   }
 
+  runtime.trace.markStage('loadProfile', Date.now() - loadProfileStartedAt);
+
   return {
     userProfile,
     previousStylistCache,
@@ -348,7 +391,28 @@ export async function stylistNode(
   });
 
   let stylistResult;
+  const stylistStartedAt = Date.now();
   try {
+    let previousAnchorImageUrl: string | undefined;
+    if (intent.request_type === 'feedback_revision' && runtime.conversationId) {
+      previousAnchorImageUrl = await findPreviousAnchorImageUrl(
+        runtime.conversationId,
+        messageId
+      );
+      if (!previousAnchorImageUrl) {
+        const fromSession = resolveAnchorUrlFromSessionItems(
+          state.sessionItems ?? [],
+          `${intent.special_requests}\n${intent.anchor_item_summary}`
+        );
+        if (fromSession) {
+          previousAnchorImageUrl = fromSession;
+          console.log(
+            '[ORCHESTRATOR:LANGGRAPH] revision anchor recovered from sessionItems:',
+            fromSession.slice(0, 80)
+          );
+        }
+      }
+    }
     stylistResult = await callStylistAgent(
       state.history,
       intent,
@@ -357,12 +421,17 @@ export async function stylistNode(
       runtime.clientId,
       runtime.ragCache,
       runtime.conversationId,
-      { previousStylistCache: state.previousStylistCache }
+      {
+        previousStylistCache: state.previousStylistCache,
+        previousAnchorImageUrl,
+      }
     );
   } catch (e) {
+    runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
     console.error('[ORCHESTRATOR:LANGGRAPH] Stylist 灾难性失败:', e);
     throw new Error('StylistFailed: 搭配师开小差了，请稍后再试~');
   }
+  runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
 
   const stylistCache = {
     type: 'stylist_cache' as const,

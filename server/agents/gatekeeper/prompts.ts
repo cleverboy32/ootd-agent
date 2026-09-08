@@ -42,12 +42,9 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 不要因缺天气拦截 wardrobe_pairing。
 
 【purchase_pairing 放行标准（重要）】
-- outfit_selection：只说喜欢第几套，还没表态要不要改。例：「我选第一套」「更喜欢第二套」。
-- outfit_confirmed：已表态满意/定稿/不用改。例：「我很满意不用调整」「就这套」「可以了直接穿」「不用改了」。
-- 若用户说「满意」「不用调整」「不用改」，一律 outfit_confirmed，绝不可 outfit_selection。
-
-【outfit_selection vs outfit_confirmed（极易混淆，务必区分）】
-- 你具备多模态能力，必须亲自从【历史对话中的服装图片】或【用户文字】识别锚定单品，填入 anchor_item_summary 和 anchor_slot。
+- 你具备多模态能力，必须亲自从【本轮服装图片】【会话待购单品清单】或【用户文字】识别锚定单品，填入 anchor_item_summary 和 anchor_slot。
+- 若上下文出现【会话待购单品】清单：必须填写 session_item_id 为清单中的某一项；用户说「还是那条/刚才那件」时按文字与 hint 匹配对应 id，禁止无脑填最新一项除非本轮新传了图且未指代旧图。
+- feedback_revision 时 session_item_id 必须留空（微调绑定上一套方案上的锚点，不是最新上传）。
 - anchor_item_summary 示例：「蓝白细条纹棉质衬衫，宽松版型」→ anchor_slot=top；「金色圆环耳环，铆钉细节」→ anchor_slot=accessory。
 - anchor_slot 必须是 top | bottom | dress | shoes | outerwear | accessory 之一。
 - 【重要】耳环、耳钉、项链、手链、戒指、手表、包、腰带、围巾、帽子等配饰类单品，anchor_slot 必须填 accessory，禁止填 top。
@@ -55,6 +52,11 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 只有完全无法从图片或文字识别锚定单品时，才 is_complete=false 并追问。
 - special_requests 填：用户待购单品（xxx）需作为搭配锚点，从衣橱选取互补单品与之搭配。
 - 不要因为缺少天气拦截 purchase_pairing。
+
+【outfit_selection vs outfit_confirmed（极易混淆，务必区分）】
+- outfit_selection：只说喜欢第几套，还没表态要不要改。例：「我选第一套」「更喜欢第二套」。
+- outfit_confirmed：已表态满意/定稿/不用改。例：「我很满意不用调整」「就这套」「可以了直接穿」「不用改了」。
+- 若用户说「满意」「不用调整」「不用改」，一律 outfit_confirmed，绝不可 outfit_selection。
 
 【wardrobe_outfit 放行标准】
 - 通常需要明确场合（上班、约会、徒步等）才可放行。
@@ -64,7 +66,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 上述两种情况以外，场合不明确时 is_complete=false，亲切追问 1-2 个问题。
 
 【feedback_revision】
-- is_complete=true，request_type=feedback_revision，从上下文继承场合，special_requests 写入用户的修改要求。
+- is_complete=true，request_type=feedback_revision；session_item_id 必须留空（锚点跟方案不跟最新上传）；从上下文继承场合，special_requests 写入用户的修改要求。
 - 【边界原则】：feedback_revision 必须满足「用户明确要修改上一轮某套方案或某个单品」。若用户本轮提出的是新的场合/活动/目标（例如「我还想去…」「明天去…」「应该穿啥/穿什么」），即使上一轮刚生成过方案，也必须归为 wardrobe_outfit，occasion 填新场景，special_requests 写新场景需求；禁止写「在上一轮基础上调整」。
 - 【整轮重做】：用户说「重新搭配」「重新生成」「都不好」「搭配太烂了」等表达对整套方案不满意、要求全新方案时，必须归为 wardrobe_outfit，【禁止】归为 feedback_revision，【禁止】追问选第一套还是第二套。
 - selected_outfit_id【禁止臆测】：仅当用户本轮或历史中明确说了「第一套/第二套/outfit_1/outfit_2」时填写；若用户只说修改指令（如「去掉外套」「鞋换成高跟鞋」）而未指明哪套，selected_outfit_id 必须留空，系统会追问选套。

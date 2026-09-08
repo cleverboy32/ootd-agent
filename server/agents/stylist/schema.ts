@@ -20,6 +20,8 @@ export interface StylistOutfit {
 export interface StylistResult {
   outfits: StylistOutfit[];
   anchor_item_image_data?: AnchorItemImageData;
+  /** 待购锚点 COS URL；跨轮微调优先继承此字段 */
+  anchor_image_url?: string;
 }
 
 export interface StyleAdviceResult {
@@ -31,6 +33,8 @@ export interface StyleAdviceResult {
 
 export interface StylistAgentOptions {
   previousStylistCache?: import('@/server/utils/messageContent').StylistCacheNode | null;
+  /** 当上一轮 cache 丢了 URL 时，从更早 cache 找回的待购锚点 */
+  previousAnchorImageUrl?: string;
 }
 
 export const stylistSchema: Schema = {
