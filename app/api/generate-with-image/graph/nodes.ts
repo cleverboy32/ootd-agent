@@ -15,7 +15,7 @@ import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
 import { mapWithConcurrency } from '@/server/utils/concurrency';
 import { buildPersistedMessageContent, type StylistCacheNode } from '@/server/utils/messageContent';
 import { runOutfitImageGeneration, extractSelectedItemUrls } from '../imageRetry';
-import { getPreviousStylistCache, findPreviousAnchorImageUrl } from '../helpers';
+import { getPreviousStylistCache, findPreviousAnchorImageUrl, persistProfileLocation } from '../helpers';
 import { resolveAnchorUrlFromSessionItems, buildAdditionalPurchaseImageRefs } from '@/server/utils/sessionItems';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
 
@@ -213,6 +213,11 @@ export async function gatekeeperNode(
   runtime.setActiveIntent(intent);
   runtime.trace.setRequestType(intent.request_type);
   runtime.trace.setRoute(route);
+
+  // 仅 Gate 判定 city_role=home（常住所在地）时写入档案；travel 旅游目的地不覆盖
+  if (intent.city?.trim() && intent.city_role === 'home') {
+    await persistProfileLocation(runtime.clientId, intent.city);
+  }
 
   return {
     gatekeeperResult,

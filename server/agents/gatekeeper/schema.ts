@@ -24,6 +24,11 @@ export const gatekeeperSchema: Schema = {
           type: Type.STRING,
           description: '用户主动提到的城市名。未提及则填空字符串。',
         },
+        city_role: {
+          type: Type.STRING,
+          description:
+            '本轮 city 的语义角色。home：用户在说明常住/所在城市（含回答「您在哪个城市」类追问、说「我在X」）；travel：旅游、出差、短途出行等目的地（如「去X玩/出差」）。city 为空时必须填空字符串。禁止把出行目的地标成 home。',
+        },
         occasion: {
           type: Type.STRING,
           description: '穿搭场合。若信息不全，此项填空字符串。',
@@ -82,6 +87,7 @@ export const gatekeeperSchema: Schema = {
       required: [
         'weather',
         'city',
+        'city_role',
         'occasion',
         'style_preference',
         'special_requests',

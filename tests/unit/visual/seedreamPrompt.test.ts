@@ -72,7 +72,7 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /避免过度磨皮|塑料感/);
   });
 
-  it('adds accessory fidelity constraint when outfit has accessory', () => {
+  it('emphasizes full-outfit look when accessories are present', () => {
     const withAcc: StylistOutfit = {
       ...outfit,
       selected_items: [
@@ -80,10 +80,15 @@ describe('buildSeedreamImagePrompt', () => {
         { id: 'acc', name: 'Choker', layer: 'accessory', reason: 'accent' },
       ],
     };
-    const prompt = buildSeedreamImagePrompt(withAcc, undefined, ['Choker (accessory)'], null);
-    assert.match(prompt, /配饰完整且准确/);
-    assert.match(prompt, /禁止漏画/);
-    assert.match(prompt, /禁止按特写画面占比放大/);
+    const prompt = buildSeedreamImagePrompt(
+      withAcc,
+      undefined,
+      ['Mini Dress (dress)'],
+      null
+    );
+    assert.match(prompt, /整套穿搭为主|完整造型/);
+    assert.match(prompt, /点缀|融入整体/);
+    assert.doesNotMatch(prompt, /配饰特写|配饰比例【强制】|耳垂大小/);
   });
 
   it('keeps outfit text and open-layering when refs exist but inner is text-only', () => {
@@ -106,12 +111,50 @@ describe('buildSeedreamImagePrompt', () => {
       ['黑色机车皮衣 (outerwear) — anchor garment'],
       null
     );
-    assert.match(prompt, /穿着描述/);
+    assert.match(prompt, /整套穿着/);
     assert.match(prompt, /leather jacket worn open/);
-    assert.match(prompt, /单品清单/);
+    assert.match(prompt, /穿搭构成/);
     assert.match(prompt, /无参考图单品/);
     assert.match(prompt, /修身奶油色短袖T恤/);
-    assert.match(prompt, /叠穿可见性/);
+    assert.match(prompt, /叠穿层次/);
     assert.match(prompt, /敞开或半敞/);
+  });
+
+  it('injects full wardrobe descriptions so front pleats are not lost to label truncation', () => {
+    const pantsOutfit: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'pants-1', name: 'Wide-Leg Trousers', layer: 'bottom', reason: '下装' },
+      ],
+      visual_composition: {
+        model_pose: 'standing',
+        // Stylist 概括词：容易诱导满裤褶皱
+        outfit_details: 'cream ankle-length high-waist wide-leg pleated trousers',
+        background: 'hotel lobby',
+      },
+    };
+    const ragCache = new Map([
+      [
+        'pants-1',
+        {
+          id: 'pants-1',
+          description:
+            'Cream wide-leg trousers with front pleats, an elastic back waistband, and a patterned drawstring belt with tassel ends.',
+        } as never,
+      ],
+    ]);
+    const prompt = buildSeedreamImagePrompt(
+      pantsOutfit,
+      ragCache,
+      [
+        'Wide-Leg Trousers | bottom | Cream wide-leg trousers with front pleats, an elastic back waistband, and a patterned drawstring belt with tassel ends.',
+      ],
+      null
+    );
+    assert.match(prompt, /衣橱单品原文/);
+    assert.match(prompt, /front pleats/);
+    assert.match(prompt, /以衣橱原文|结构细节以此为准/);
+    // 参考图短标签不应把整段 description 硬塞进 48 字窗口后静默丢失语义来源
+    assert.doesNotMatch(prompt, /图1Wide-Leg Trousers \| bottom \| BOTTOM/);
   });
 });

@@ -17,6 +17,11 @@ export type AnchorSlot = 'top' | 'bottom' | 'dress' | 'shoes' | 'outerwear' | 'a
 /** 本轮搭配适用的穿衣气候，供 RAG 季节过滤；由 Gatekeeper 推断，服务端仅做锚点矛盾纠错 */
 export type DressingClimate = 'cold' | 'warm' | 'mild';
 
+/**
+ * 本轮 city 对用户的含义：home=常住所在地（可写入档案）；travel=旅游/目的地（仅本轮天气，不写档案）；空=未提及或不适用。
+ */
+export type CityRole = 'home' | 'travel';
+
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
 export interface AnchorItemImageData {
@@ -36,6 +41,10 @@ export interface AnchorItemInfo {
 export interface GatekeeperIntent {
   weather: string;
   city?: string;
+  /**
+   * city 的语义角色：home 常住所在地可落档；travel 旅游/出行目的地不落档；空表示无城市或不适用。
+   */
+  city_role?: CityRole | '';
   occasion: string;
   style_preference: string;
   special_requests: string;
@@ -110,6 +119,8 @@ export interface GatekeeperFinalizeResult {
 
 export const DEFAULT_GATEKEEPER_INTENT: GatekeeperIntent = {
   weather: '',
+  city: '',
+  city_role: '',
   occasion: '',
   style_preference: '日常休闲',
   special_requests: '',

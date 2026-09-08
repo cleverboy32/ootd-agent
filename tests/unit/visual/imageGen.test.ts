@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  ACCESSORY_SCALE_HINT,
   buildImagePrompt,
   buildOutfitReferenceInputs,
 } from '@/server/agents/visual/imageGen';
@@ -62,6 +61,11 @@ describe('buildOutfitReferenceInputs', () => {
     ]);
     assert.match(referenceLabels[0], /White Linen Shirt/);
     assert.match(referenceLabels[0], /colors: white/);
+    // description 应紧跟名称，避免被类别字段挤出截断窗口
+    assert.match(
+      referenceLabels[0],
+      /White Linen Shirt \| top \| A white linen shirt/
+    );
   });
 
   it('prepends anchor garment as 图1 when anchor image data exists', () => {
@@ -137,8 +141,8 @@ describe('buildOutfitReferenceInputs', () => {
     assert.match(referenceLabels[1], /si_1/);
   });
 
-  it('annotates accessory references with realistic scale hint', () => {
-    const { referenceLabels } = buildOutfitReferenceInputs(
+  it('includes accessory reference images for style fidelity', () => {
+    const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
       outfitWithAccessory,
       [
         'https://example.com/top.jpg',
@@ -160,8 +164,12 @@ describe('buildOutfitReferenceInputs', () => {
       ])
     );
 
-    assert.match(referenceLabels[2], new RegExp(ACCESSORY_SCALE_HINT));
-    assert.doesNotMatch(referenceLabels[0], /realistic on-body scale/);
+    assert.deepEqual(referenceUrls, [
+      'https://example.com/top.jpg',
+      'https://example.com/bottom.jpg',
+      'https://example.com/necklace.jpg',
+    ]);
+    assert.match(referenceLabels[2], /Pendant Necklace|silver pendant/i);
   });
 });
 
@@ -179,14 +187,14 @@ describe('buildImagePrompt with Seedream references', () => {
 
   it('adds accessory fidelity critical when outfit includes accessory', () => {
     const prompt = buildImagePrompt(outfitWithAccessory);
-    assert.match(prompt, /CRITICAL ACCESSORY FIDELITY/);
-    assert.match(prompt, /product close-ups/i);
-    assert.match(prompt, /necklace ≠ earrings/i);
+    assert.match(prompt, /CRITICAL FULL-OUTFIT LOOK/);
+    assert.match(prompt, /subtle accents/i);
+    assert.doesNotMatch(prompt, /CRITICAL ACCESSORY SCALE/);
   });
 
   it('omits accessory fidelity critical when no accessory', () => {
     const prompt = buildImagePrompt(outfit);
-    assert.doesNotMatch(prompt, /CRITICAL ACCESSORY FIDELITY/);
+    assert.doesNotMatch(prompt, /CRITICAL FULL-OUTFIT LOOK/);
   });
 
   it('requires open layering when outerwear covers an inner top', () => {

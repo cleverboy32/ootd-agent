@@ -75,6 +75,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 【天气与城市（不参与放行，但由你决策是否查询）】
 - 不要因缺少天气或温度信息而拦截用户。
 - 若用户主动提到天气/温度，提取到 extracted_intent.weather；若主动提到城市，提取到 extracted_intent.city。
+- city_role【关键】：有 city 时必须判定角色——home=用户常住/所在城市（回答系统追问所在地、或明确说「我在/我家在/我住在」某城）；travel=旅游/出差/短期出行目的地（去某城玩、出差、度假等）。city 为空则 city_role 填空字符串。系统仅在 city_role=home 时把城市写入用户档案；travel 只用于本轮天气，禁止标成 home。
 - 由你判断本轮搭配是否需要实时天气，并填写 weather_lookup：
   - weather_lookup.needed：wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的，填 true；style_advice / outfit_selection / outfit_confirmed / clarify / purchase_pairing 这类一般填 false；用户已自述天气/温度时填 false。
   - weather_lookup.city：需要查询时填用户提到的城市；未知则留空字符串，系统会用 IP 兜底。
@@ -86,6 +87,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 【严格提取，禁止臆测】
 - style_preference：仅当用户明确提到风格词时填写；否则填 "日常休闲"。
 - city：仅提取用户明确提到的城市；未提及则填 ""。
+- city_role：随 city 判定；无 city 时填 ""；不确定是常住还是出行时优先 travel（宁可本轮不落档，也不误写档案）。
 - anchor_item_summary / anchor_slot：purchase_pairing / wardrobe_pairing 时填写；识别服装图时请描述颜色、品类、材质，不要描述模特外貌。
 
 【工作流程】

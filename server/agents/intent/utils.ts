@@ -4,6 +4,7 @@ import {
   AnchorItemImageData,
   AnchorItemInfo,
   AnchorSlot,
+  CityRole,
   DressingClimate,
   GatekeeperIntent,
   DEFAULT_GATEKEEPER_INTENT,
@@ -17,10 +18,12 @@ import {
  *
  * 【A类·空值兜底】只在 LLM 漏填某字段时补默认值，不覆盖 LLM 已做的分类判断。
  * 风险低，可以按需增加：
- *   - inferOccasionFromText / extractCityFromText
+ *   - inferOccasionFromText
  *   - buildWardrobePairingSpecialRequest / buildPurchasePairingSpecialRequest
  *   - ACCESSORY_ANCHOR_PATTERN 匹配（enrichIntentFromContext 内）
  *   - extractConfirmedWardrobeId（解析系统自己生成的确认字符串，非猜测）
+ * 天气城市：只认 Gatekeeper intent.city / weather_lookup.city 与 profileLocation，禁止从用户全文正则猜城。
+ * 档案落盘：仅当 Gatekeeper city_role=home 时写入 location（travel 不覆盖）。
  *
  * 【B类·矛盾纠正/分类裁决】覆盖 LLM 已给出的显式判断，用于修正已知的
  * 系统性误判。这类规则有风险（可能误伤未覆盖到的正常场景），当前清单：
@@ -90,19 +93,6 @@ const VERBAL_ANCHOR_ACCEPT_PATTERN =
 
 const VERBAL_ANCHOR_REJECT_PATTERN =
   /不是这|不要这|不对|错了|换一|重新找|不是我要|我要别的/;
-
-const COMMON_CITY_NAMES = [
-  '北京', '上海', '广州', '深圳', '杭州', '南京', '苏州', '成都', '重庆', '武汉',
-  '西安', '天津', '青岛', '大连', '厦门', '福州', '长沙', '郑州', '济南', '合肥',
-  '昆明', '贵阳', '南宁', '海口', '三亚', '哈尔滨', '沈阳', '长春', '石家庄', '太原',
-  '南昌', '宁波', '无锡', '常州', '温州', '东莞', '佛山', '珠海', '惠州', '中山',
-  '嘉兴', '绍兴', '金华', '台州', '拉萨', '乌鲁木齐', '兰州', '银川', '西宁', '呼和浩特',
-];
-
-const CITY_IN_TEXT_PATTERNS = [
-  /(?:我在|位于|人在|来到|来到|去到了?|到了?)([\u4e00-\u9fa5]{2,8})/,
-  /([\u4e00-\u9fa5]{2,8})(?:市|这边|那里|天气|今天)/,
-];
 
 // ─── Text / History extraction ─────────────────────────────────────────────────
 
@@ -205,32 +195,12 @@ export function inferOccasionFromText(text: string): string {
   return '';
 }
 
-export function extractCityFromText(text: string): string {
-  const normalized = text.trim();
-  if (!normalized) return '';
-
-  for (const city of COMMON_CITY_NAMES) {
-    if (normalized.includes(city)) return city;
-  }
-
-  for (const pattern of CITY_IN_TEXT_PATTERNS) {
-    const match = normalized.match(pattern);
-    const candidate = match?.[1]?.trim();
-    if (candidate && candidate.length >= 2 && candidate.length <= 8) {
-      return candidate.replace(/市$/, '');
-    }
-  }
-
-  return '';
-}
-
-function resolveWeatherCity(intent: GatekeeperIntent, ctx: WeatherEnrichmentContext): string {
-  return (
-    intent.city?.trim() ||
-    extractCityFromText(ctx.contextText ?? '') ||
-    ctx.profileLocation?.trim() ||
-    ''
-  );
+/** 查天气用城市：仅 intent.city → 档案城市；空则交给 IP。禁止扫用户全文猜城。 */
+export function resolveWeatherCity(
+  intent: Pick<GatekeeperIntent, 'city'>,
+  ctx: Pick<WeatherEnrichmentContext, 'profileLocation'>
+): string {
+  return intent.city?.trim() || ctx.profileLocation?.trim() || '';
 }
 
 export async function enrichIntentWeather(
@@ -310,6 +280,12 @@ export function parseDressingClimate(value?: string): DressingClimate | '' {
   if (normalized && DRESSING_CLIMATE_SET.has(normalized)) {
     return normalized as DressingClimate;
   }
+  return '';
+}
+
+export function parseCityRole(value?: string): CityRole | '' {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'home' || normalized === 'travel') return normalized;
   return '';
 }
 
@@ -649,6 +625,10 @@ export function normalizeGatekeeperIntent(
   merged.dressing_climate = parseDressingClimate(
     typeof merged.dressing_climate === 'string' ? merged.dressing_climate : ''
   );
+  merged.city_role = parseCityRole(
+    typeof merged.city_role === 'string' ? merged.city_role : ''
+  );
+  if (!merged.city?.trim()) merged.city_role = '';
   if (typeof merged.session_item_id !== 'string') merged.session_item_id = '';
   if (typeof merged.anchor_image_url !== 'string') merged.anchor_image_url = '';
   return merged;

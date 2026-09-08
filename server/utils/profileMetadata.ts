@@ -9,6 +9,24 @@ export const PROFILE_METADATA_KEYS = [
   'location',
 ] as const;
 
+/**
+ * 将 Gate 抽出的城市写入档案元数据（不经 Profile Agent schema）。
+ * 空串不写；与已有 location 相同则 unchanged。
+ */
+export function mergeLocationIntoProfileData(
+  existing: Record<string, unknown>,
+  city: string
+): { next: Record<string, unknown>; changed: boolean } {
+  const trimmed = city.trim();
+  if (!trimmed) return { next: existing, changed: false };
+
+  const prev =
+    typeof existing.location === 'string' ? existing.location.trim() : '';
+  if (prev === trimmed) return { next: existing, changed: false };
+
+  return { next: { ...existing, location: trimmed }, changed: true };
+}
+
 /** 从 DB 档案中保留元数据字段（对话 Agent 不产出这些字段） */
 export function preserveProfileMetadata(dbProfile: Record<string, unknown>): Record<string, unknown> {
   const meta: Record<string, unknown> = {};

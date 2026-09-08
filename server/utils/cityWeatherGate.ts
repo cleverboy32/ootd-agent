@@ -1,5 +1,4 @@
 import type { OutfitRequestType } from '@/server/agents/intent/typeDefs';
-import { extractCityFromText } from '@/server/agents/intent/utils';
 
 const CITY_GATE_REQUEST_TYPES = new Set<OutfitRequestType>([
   'wardrobe_outfit',
@@ -14,17 +13,12 @@ export function requestTypeNeedsCityWeatherGate(requestType: OutfitRequestType):
   return CITY_GATE_REQUEST_TYPES.has(requestType);
 }
 
+/** 已知城市：仅 intent/Gate 填写的 city 与用户档案；不从用户全文正则猜城。 */
 export function resolveKnownCity(input: {
   city?: string;
   profileLocation?: string;
-  contextText?: string;
 }): string {
-  return (
-    input.city?.trim() ||
-    input.profileLocation?.trim() ||
-    extractCityFromText(input.contextText ?? '') ||
-    ''
-  );
+  return input.city?.trim() || input.profileLocation?.trim() || '';
 }
 
 /**
@@ -37,6 +31,7 @@ export function evaluateCityWeatherGate(input: {
   weather: string;
   city?: string;
   profileLocation?: string;
+  /** @deprecated 不再用于猜城；保留字段以免调用方立刻报错 */
   contextText?: string;
 }): { blocked: boolean; followup?: string } {
   if (!requestTypeNeedsCityWeatherGate(input.requestType)) {

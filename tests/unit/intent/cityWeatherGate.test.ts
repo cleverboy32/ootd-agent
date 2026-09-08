@@ -6,6 +6,7 @@ import {
   requestTypeNeedsCityWeatherGate,
   resolveKnownCity,
 } from '@/server/utils/cityWeatherGate';
+import { parseCityRole, resolveWeatherCity } from '@/server/agents/intent/utils';
 
 describe('requestTypeNeedsCityWeatherGate', () => {
   it('gates outfit generating types only', () => {
@@ -18,10 +19,35 @@ describe('requestTypeNeedsCityWeatherGate', () => {
 });
 
 describe('resolveKnownCity', () => {
-  it('prefers intent city then profile then text', () => {
+  it('prefers intent city then profile; never invents from free text', () => {
     assert.equal(resolveKnownCity({ city: '杭州' }), '杭州');
     assert.equal(resolveKnownCity({ profileLocation: '上海' }), '上海');
-    assert.equal(resolveKnownCity({ contextText: '我在成都' }), '成都');
+    assert.equal(resolveKnownCity({ city: '', profileLocation: '上海' }), '上海');
+    assert.equal(resolveKnownCity({}), '');
+  });
+});
+
+describe('resolveWeatherCity', () => {
+  it('uses intent city then profile only', () => {
+    assert.equal(resolveWeatherCity({ city: '杭州' }, {}), '杭州');
+    assert.equal(resolveWeatherCity({ city: '' }, { profileLocation: '上海' }), '上海');
+    assert.equal(resolveWeatherCity({ city: '' }, {}), '');
+  });
+
+  it('does not treat revision chatter as a city', () => {
+    assert.equal(
+      resolveWeatherCity({ city: '' }, { profileLocation: undefined }),
+      ''
+    );
+  });
+});
+
+describe('parseCityRole', () => {
+  it('accepts home and travel only', () => {
+    assert.equal(parseCityRole('home'), 'home');
+    assert.equal(parseCityRole('TRAVEL'), 'travel');
+    assert.equal(parseCityRole(''), '');
+    assert.equal(parseCityRole('vacation'), '');
   });
 });
 
@@ -53,6 +79,26 @@ describe('evaluateCityWeatherGate', () => {
       city: '杭州',
     });
     assert.equal(result.blocked, false);
+  });
+
+  it('passes when profile location known even if weather empty', () => {
+    const result = evaluateCityWeatherGate({
+      requestType: 'wardrobe_outfit',
+      weatherLookupNeeded: true,
+      weather: '',
+      profileLocation: '成都',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('does not treat free-text noise as a known city', () => {
+    const result = evaluateCityWeatherGate({
+      requestType: 'wardrobe_outfit',
+      weatherLookupNeeded: true,
+      weather: '',
+      contextText: '额，我咋看不到第二套的新品内搭的样子啊',
+    });
+    assert.equal(result.blocked, true);
   });
 
   it('passes for style_advice and feedback_revision', () => {

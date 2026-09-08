@@ -26,10 +26,10 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Do NOT change shorts to pants, alter skirt/dress lengths, or modify garment proportions.',
   'Text-only / new_item garments without a reference image must still be clearly visible and match the written description.',
   'When outerwear is layered over an inner top, wear the outer piece open/unzipped so the inner garment (color, neckline, fabric) is clearly visible — never show only the jacket lining.',
-  'Every listed accessory must appear with the correct category (necklace ≠ earrings ≠ bag ≠ hat); wear jewelry at real-life scale — never enlarge to match product close-up framing.',
+  'Every listed accessory must appear as a subtle accent within the full outfit look — never the visual focus, never enlarged from product close-ups.',
 ].join(' ');
 
-/** 配饰商品图多为特写，需显式约束真人佩戴比例 */
+/** @deprecated 保留导出供旧测试；配饰已不再作为参考图输入 */
 export const ACCESSORY_SCALE_HINT =
   'product close-up ref — wear at realistic on-body scale, do NOT enlarge to fill frame';
 
@@ -93,15 +93,13 @@ export function buildOutfitReferenceInputs(
     const parts = [
       item?.name,
       item?.layer,
+      // description 紧跟名称，避免后续字段把结构细节挤出截断窗口
+      cached?.description,
       cached?.mainCategory,
       cached?.subCategory,
       cached?.colors?.length ? `colors: ${cached.colors.join(', ')}` : undefined,
       cached?.silhouette?.length ? `silhouette: ${cached.silhouette.join(', ')}` : undefined,
-      cached?.description,
     ].filter(Boolean);
-    if (isAccessoryReferenceItem(item?.layer, cached?.mainCategory)) {
-      parts.push(ACCESSORY_SCALE_HINT);
-    }
     referenceLabels.push(parts.join(' | ') || `wardrobe item ${idx + 1}`);
   });
 
@@ -131,7 +129,7 @@ export function buildImagePrompt(
 
   if (outfitHasAccessory(outfit, ragCache)) {
     lines.push(
-      'CRITICAL ACCESSORY FIDELITY: Every listed accessory MUST appear with the correct category (necklace ≠ earrings ≠ bag ≠ hat ≠ scarf) — do NOT omit, invent, or substitute. Jewelry and small accessories must appear at natural worn size (earrings on earlobes, necklace at collarbone, choker snug on neck). Accessory reference photos are product close-ups — copy style/color only, NEVER scale the accessory up to match the reference image size.'
+      'CRITICAL FULL-OUTFIT LOOK: Present one coherent full-body outfit. Clothing is the subject; accessories are subtle accents that must appear with correct category but must NOT dominate the frame or be enlarged from product close-ups.'
     );
   }
 
