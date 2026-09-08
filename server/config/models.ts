@@ -10,7 +10,7 @@ import { getProvider } from '@/server/services/llm/provider';
 const useVertexChat = getProvider('chat') === 'vertex';
 const useVertexImage = getProvider('image') === 'vertex';
 
-const openaiChat = process.env.LLM_MODEL?.trim() || 'kimi-k2.6';
+const openaiChat = process.env.LLM_MODEL?.trim() || 'deepseek-v4-pro';
 
 const VERTEX_DEFAULTS = {
   gatekeeper: 'gemini-3.1-flash-lite',

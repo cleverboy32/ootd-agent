@@ -25,6 +25,24 @@ describe('readCredential', () => {
       process.env.KIMI_API_KEY = prevKey;
     }
   });
+
+  it('reads DEEPSEEK_API_KEY when LLM_VENDOR=deepseek', () => {
+    const prevVendor = process.env.LLM_VENDOR;
+    const prevKey = process.env.DEEPSEEK_API_KEY;
+    const prevBase = process.env.DEEPSEEK_BASE_URL;
+    process.env.LLM_VENDOR = 'deepseek';
+    process.env.DEEPSEEK_API_KEY = 'sk-deepseek-test';
+    delete process.env.DEEPSEEK_BASE_URL;
+    try {
+      const cred = readCredential('chat');
+      assert.equal(cred.apiKey, 'sk-deepseek-test');
+      assert.equal(cred.baseURL, 'https://api.deepseek.com/v1');
+    } finally {
+      process.env.LLM_VENDOR = prevVendor;
+      process.env.DEEPSEEK_API_KEY = prevKey;
+      process.env.DEEPSEEK_BASE_URL = prevBase;
+    }
+  });
 });
 
 describe('resolveChatTemperature', () => {

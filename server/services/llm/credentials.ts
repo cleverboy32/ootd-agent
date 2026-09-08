@@ -15,6 +15,7 @@ const CAPABILITY_KEY_ENV: Record<LlmCapability, { key: string; baseUrl: string }
 const DEFAULT_BASE_URL: Record<string, string> = {
   kimi: 'https://api.moonshot.cn/v1',
   moonshot: 'https://api.moonshot.cn/v1',
+  deepseek: 'https://api.deepseek.com/v1',
   bytedance: 'https://ark.cn-beijing.volces.com/api/v3',
   volc: 'https://ark.cn-beijing.volces.com/api/v3',
   ark: 'https://ark.cn-beijing.volces.com/api/v3',
