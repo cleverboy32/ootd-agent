@@ -20,6 +20,10 @@ import {
 } from '@/server/utils/messageContent';
 import { getProfileLocation, persistMessageContent } from './helpers';
 import { outfitCachePipeline, outfitFreshPipeline } from './graph/outfitPipeline';
+import {
+  buildPipelineInvokeConfig,
+  logLangSmithStatusOnce,
+} from './graph/langsmith';
 import type { OutfitRuntime } from './graph/state';
 import prismadb from '@/server/db';
 
@@ -129,6 +133,7 @@ export function createMultiAgentStream(
   return new ReadableStream({
     async start(controller) {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
+      logLangSmithStatusOnce();
 
       const profileLocationPromise = getProfileLocation(clientId);
       const { runtime, getSnapshot } = createRuntime({
@@ -170,8 +175,6 @@ export function createMultiAgentStream(
           }
         }
 
-        const configurable = { runtime };
-
         if (cachedStylistResult && cachedProfile) {
           runtime.setActiveStylist(cachedStylistResult);
           runtime.trace.setRoute(RequestAuditRoute.FromCache);
@@ -186,7 +189,13 @@ export function createMultiAgentStream(
               userProfile: cachedProfile,
               cachedPersonalStyle: cachedProfile.personal_style,
             },
-            { configurable }
+            buildPipelineInvokeConfig({
+              runtime,
+              pipeline: 'outfit_cache',
+              conversationId,
+              clientId,
+              messageId: runtime.getMessageId(),
+            })
           );
         } else {
           await outfitFreshPipeline.invoke(
@@ -196,12 +205,22 @@ export function createMultiAgentStream(
               cacheHit: false,
               messageId: runtime.getMessageId(),
             },
-            { configurable }
+            buildPipelineInvokeConfig({
+              runtime,
+              pipeline: 'outfit_fresh',
+              conversationId,
+              clientId,
+              messageId: runtime.getMessageId(),
+            })
           );
         }
       } catch (error) {
-        mainError = error as Error;
-        console.error('[ORCHESTRATOR:LANGGRAPH] 编排流运行中发生错误:', mainError);
+        mainError = error instanceof Error ? error : new Error(String(error));
+        console.error(
+          '[ORCHESTRATOR:LANGGRAPH] 编排流运行中发生错误:',
+          mainError.message,
+          mainError.stack
+        );
       } finally {
         const snapshot = getSnapshot();
         let stylistCacheNode = snapshot.stylistCacheNode;

@@ -66,7 +66,16 @@ export function handleStreamError(
   context: string
 ) {
   console.error(`后端日志：在 [${context}] 中发生错误:`, error);
-  sendEvent(controller, 'error', { message: `处理您的请求时发生意外错误: ${context}` });
+  const detail =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'unknown';
+  // Keep client message short; full stack stays in server logs.
+  sendEvent(controller, 'error', {
+    message: `处理您的请求时发生意外错误: ${context} — ${detail.slice(0, 240)}`,
+  });
   
   // 3. 直接、安全地关闭控制器，不再调用 handleStreamCompletion
   if (controller.desiredSize !== null) {

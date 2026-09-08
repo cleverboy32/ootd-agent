@@ -46,5 +46,9 @@ function buildCachePathGraph() {
     .addEdge('parallelFromCache', END);
 }
 
-export const outfitFreshPipeline = buildFreshPathGraph().compile();
-export const outfitCachePipeline = buildCachePathGraph().compile();
+export const outfitFreshPipeline = buildFreshPathGraph().compile({
+  name: 'outfit_fresh',
+});
+export const outfitCachePipeline = buildCachePathGraph().compile({
+  name: 'outfit_cache',
+});
