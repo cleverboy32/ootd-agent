@@ -72,7 +72,7 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /避免过度磨皮|塑料感/);
   });
 
-  it('adds accessory scale constraint when outfit has accessory', () => {
+  it('adds accessory fidelity constraint when outfit has accessory', () => {
     const withAcc: StylistOutfit = {
       ...outfit,
       selected_items: [
@@ -81,7 +81,37 @@ describe('buildSeedreamImagePrompt', () => {
       ],
     };
     const prompt = buildSeedreamImagePrompt(withAcc, undefined, ['Choker (accessory)'], null);
-    assert.match(prompt, /配饰尺寸/);
+    assert.match(prompt, /配饰完整且准确/);
+    assert.match(prompt, /禁止漏画/);
     assert.match(prompt, /禁止按特写画面占比放大/);
+  });
+
+  it('keeps outfit text and open-layering when refs exist but inner is text-only', () => {
+    const layered: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '修身奶油色短袖T恤', layer: 'inner_top', reason: '内搭新品' },
+        { id: 'ow', name: '黑色机车皮衣', layer: 'outerwear', reason: '外套' },
+        { id: 'bt', name: '格纹半裙', layer: 'bottom', reason: '下装' },
+      ],
+      visual_composition: {
+        model_pose: 'standing casually',
+        outfit_details: 'leather jacket worn open over cream tee with plaid skirt',
+        background: 'brick wall afternoon light',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      layered,
+      undefined,
+      ['黑色机车皮衣 (outerwear) — anchor garment'],
+      null
+    );
+    assert.match(prompt, /穿着描述/);
+    assert.match(prompt, /leather jacket worn open/);
+    assert.match(prompt, /单品清单/);
+    assert.match(prompt, /无参考图单品/);
+    assert.match(prompt, /修身奶油色短袖T恤/);
+    assert.match(prompt, /叠穿可见性/);
+    assert.match(prompt, /敞开或半敞/);
   });
 });

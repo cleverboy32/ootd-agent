@@ -32,9 +32,76 @@ export function buildModelSubjectDescription(userProfile?: UserProfileResult | n
   return parts.join('，');
 }
 
+function layerKey(layer: string): string {
+  return layer.trim().toLowerCase();
+}
+
+export function isOuterwearLayer(layer: string): boolean {
+  const l = layerKey(layer);
+  return (
+    l === 'outerwear' ||
+    l.includes('outer') ||
+    l.includes('jacket') ||
+    l.includes('coat') ||
+    l.includes('cardigan')
+  );
+}
+
+export function isInnerOrTopLayer(layer: string): boolean {
+  const l = layerKey(layer);
+  return (
+    l === 'top' ||
+    l === 'inner_top' ||
+    l.includes('inner') ||
+    l.includes('base') ||
+    l.includes('mid') ||
+    l.includes('tee') ||
+    l.includes('shirt')
+  );
+}
+
+/** 外套 + 内搭/上装叠穿：需要强制敞开露出内搭 */
+export function outfitNeedsOpenLayering(outfit: StylistOutfit): boolean {
+  const layers = outfit.selected_items.map((i) => i.layer);
+  return layers.some(isOuterwearLayer) && layers.some(isInnerOrTopLayer);
+}
+
+/**
+ * 无独立参考图的单品（多为 new_item）：参考 label 里看不到其名称时视为 text-only。
+ * 有图时模型会偏袒参考图，无图单品容易被盖住或省略。
+ */
+export function listTextOnlyItems(
+  outfit: StylistOutfit,
+  referenceLabels: string[]
+): Array<{ name: string; layer: string; id: string }> {
+  const refBlob = referenceLabels.join(' ').toLowerCase();
+  return outfit.selected_items.filter((item) => {
+    const name = item.name.trim();
+    if (!name) return false;
+    if (item.id === 'new_item') {
+      // 名称未出现在任何参考标签 → 无图新品
+      return !refBlob.includes(name.toLowerCase());
+    }
+    // 衣橱单品通常有图；若 label 完全未提及其名，也按文字单品强化
+    return referenceLabels.length > 0 && !refBlob.includes(name.toLowerCase());
+  });
+}
+
+export function outfitHasAccessoryItem(
+  outfit: StylistOutfit,
+  ragCache?: Map<string, ClothingItem>
+): boolean {
+  return outfit.selected_items.some(
+    (item) =>
+      layerKey(item.layer) === 'accessory' ||
+      layerKey(item.layer).includes('accessor') ||
+      ragCache?.get(item.id)?.mainCategory?.toUpperCase() === 'ACCESSORY'
+  );
+}
+
 /**
  * Seedream 专用紧凑中文 prompt（官方建议中文不超过约 300 字，避免信息分散）。
- * 强调：亚洲面孔、真实街拍、反 AI 塑料感。
+ * 强调：亚洲面孔、真实街拍、反 AI 塑料感；有参考图时仍保留文字穿搭描述。
  */
 export function buildSeedreamImagePrompt(
   outfit: StylistOutfit,
@@ -46,6 +113,11 @@ export function buildSeedreamImagePrompt(
   const scene = simplifyVisualText(outfit.visual_composition.background);
   const outfitDesc = simplifyVisualText(outfit.visual_composition.outfit_details);
   const pose = simplifyVisualText(outfit.visual_composition.model_pose);
+  const textOnly = listTextOnlyItems(outfit, referenceLabels);
+  const itemSummary = outfit.selected_items
+    .map((i) => `${i.name}(${i.layer})`)
+    .join('、')
+    .slice(0, 180);
 
   const lines = [
     `真实街拍穿搭照片，${subject}。`,
@@ -59,18 +131,32 @@ export function buildSeedreamImagePrompt(
     lines.push(
       `严格还原参考图单品（${refSummary}），模特穿齐图1至图${referenceLabels.length}，款式颜色与廓形一致。`
     );
-  } else if (outfitDesc) {
-    lines.push(`穿着：${outfitDesc}。`);
   }
 
-  const hasAccessory = outfit.selected_items.some(
-    (item) =>
-      item.layer === 'accessory' ||
-      ragCache?.get(item.id)?.mainCategory === 'ACCESSORY'
-  );
-  if (hasAccessory) {
+  // 有参考图时仍必须保留文字穿搭：无图新品/内搭只靠这段，否则易被外套盖住或省略
+  if (outfitDesc) {
+    lines.push(`穿着描述：${outfitDesc}。`);
+  }
+  if (itemSummary) {
+    lines.push(`单品清单（须全部可见）：${itemSummary}。`);
+  }
+
+  if (textOnly.length > 0) {
+    const names = textOnly.map((i) => `${i.name}(${i.layer})`).join('、');
     lines.push(
-      '配饰尺寸：项链/耳环/choker/小配饰必须按真人佩戴正常比例，落在耳垂或锁骨等自然位置；配饰参考图多为商品特写，只还原款式与颜色，禁止按特写画面占比放大成夸张巨物。'
+      `无参考图单品（按文字清晰画出，禁止省略或被遮挡）：${names}。`
+    );
+  }
+
+  if (outfitNeedsOpenLayering(outfit)) {
+    lines.push(
+      '叠穿可见性：外套/夹克必须敞开或半敞穿着，内搭（尤其无图新品）的领口、颜色与面料须在前胸清晰可见；禁止只露出外套深色内衬，禁止把内搭画成看不见。'
+    );
+  }
+
+  if (outfitHasAccessoryItem(outfit, ragCache)) {
+    lines.push(
+      '配饰完整且准确：方案中的每件配饰都必须出现且品类正确（项链≠耳环≠包≠帽≠围巾），禁止漏画、替换或发明未点名的配饰；项链/耳环/choker 等按真人佩戴正常比例落在耳垂或锁骨，配饰参考图多为商品特写，只还原款式与颜色，禁止按特写画面占比放大。'
     );
   }
 
@@ -85,6 +171,7 @@ export function buildSeedreamImagePrompt(
 export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '生成真实摄影风格的穿搭展示图，不要插画、3D 或明显 AI 合成感。',
   '模特必须是东亚/中国面孔，禁止生成欧美模特。',
-  '服装必须与参考图及描述一致，不得改变裤长、裙长、领型与配色。',
-  '配饰必须按真人佩戴尺寸绘制，禁止把商品特写参考图的画面占比照搬放大。',
+  '服装必须与参考图及文字描述一致，不得改变裤长、裙长、领型与配色；无参考图的单品按文字描述清晰可见。',
+  '有外套+内搭时外套须敞开，露出内搭本体，禁止只画外套内衬。',
+  '配饰必须全部佩戴且品类正确，禁止漏画或替换；按真人佩戴尺寸绘制，禁止把商品特写参考图的画面占比照搬放大。',
 ].join('');

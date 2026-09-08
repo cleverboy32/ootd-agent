@@ -177,14 +177,33 @@ describe('buildImagePrompt with Seedream references', () => {
     assert.match(prompt, /图1 through 图2/);
   });
 
-  it('adds accessory scale critical when outfit includes accessory', () => {
+  it('adds accessory fidelity critical when outfit includes accessory', () => {
     const prompt = buildImagePrompt(outfitWithAccessory);
-    assert.match(prompt, /CRITICAL ACCESSORY SCALE/);
+    assert.match(prompt, /CRITICAL ACCESSORY FIDELITY/);
     assert.match(prompt, /product close-ups/i);
+    assert.match(prompt, /necklace ≠ earrings/i);
   });
 
-  it('omits accessory scale critical when no accessory', () => {
+  it('omits accessory fidelity critical when no accessory', () => {
     const prompt = buildImagePrompt(outfit);
-    assert.doesNotMatch(prompt, /CRITICAL ACCESSORY SCALE/);
+    assert.doesNotMatch(prompt, /CRITICAL ACCESSORY FIDELITY/);
+  });
+
+  it('requires open layering when outerwear covers an inner top', () => {
+    const layered: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: 'Cream Tee', layer: 'inner_top', reason: 'inner' },
+        { id: 'ow', name: 'Leather Jacket', layer: 'outerwear', reason: 'outer' },
+        { id: 'item-bottom', name: 'Skirt', layer: 'bottom', reason: 'bottom' },
+      ],
+    };
+    const prompt = buildImagePrompt(layered, undefined, [
+      'Leather Jacket (outerwear) — anchor garment',
+    ]);
+    assert.match(prompt, /CRITICAL LAYERING VISIBILITY/);
+    assert.match(prompt, /CRITICAL TEXT-ONLY ITEMS/);
+    assert.match(prompt, /Cream Tee/);
+    assert.match(prompt, /NEW \/ purchase item/);
   });
 });

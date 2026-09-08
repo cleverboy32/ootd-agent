@@ -13,6 +13,8 @@ import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import type { ClothingItem } from '@prisma/client';
 import {
   buildSeedreamImagePrompt,
+  listTextOnlyItems,
+  outfitNeedsOpenLayering,
   SEEDREAM_SYSTEM_INSTRUCTION,
 } from './seedreamPrompt';
 
@@ -22,7 +24,9 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Generate a fashion editorial photo.',
   'Strictly reproduce each wardrobe item silhouette, hem length, neckline, and fit from reference images and text.',
   'Do NOT change shorts to pants, alter skirt/dress lengths, or modify garment proportions.',
-  'Accessories (necklace, earrings, choker, bag, belt, etc.) must be worn at real-life scale — never enlarge jewelry or small accessories to match product close-up reference framing.',
+  'Text-only / new_item garments without a reference image must still be clearly visible and match the written description.',
+  'When outerwear is layered over an inner top, wear the outer piece open/unzipped so the inner garment (color, neckline, fabric) is clearly visible — never show only the jacket lining.',
+  'Every listed accessory must appear with the correct category (necklace ≠ earrings ≠ bag ≠ hat); wear jewelry at real-life scale — never enlarge to match product close-up framing.',
 ].join(' ');
 
 /** 配饰商品图多为特写，需显式约束真人佩戴比例 */
@@ -110,9 +114,11 @@ export function buildImagePrompt(
   ragCache?: Map<string, ClothingItem>,
   referenceLabels?: string[]
 ): string {
+  const labels = referenceLabels ?? [];
   const itemLines = outfit.selected_items.map((i) => {
     const cached = ragCache?.get(i.id);
     const parts: string[] = [`${i.name} (${i.layer})`];
+    if (i.id === 'new_item') parts.push('NEW / purchase item — must be clearly visible');
     if (cached?.description) parts.push(cached.description);
     if (cached?.tags?.length) parts.push(cached.tags.join(', '));
     return `  - ${parts.join(' | ')}`;
@@ -125,15 +131,29 @@ export function buildImagePrompt(
 
   if (outfitHasAccessory(outfit, ragCache)) {
     lines.push(
-      'CRITICAL ACCESSORY SCALE: Jewelry and small accessories must appear at natural worn size relative to the body (earrings on earlobes, necklace at collarbone, choker snug on neck). Accessory reference photos are product close-ups — copy style/color only, NEVER scale the accessory up to match the reference image size.'
+      'CRITICAL ACCESSORY FIDELITY: Every listed accessory MUST appear with the correct category (necklace ≠ earrings ≠ bag ≠ hat ≠ scarf) — do NOT omit, invent, or substitute. Jewelry and small accessories must appear at natural worn size (earrings on earlobes, necklace at collarbone, choker snug on neck). Accessory reference photos are product close-ups — copy style/color only, NEVER scale the accessory up to match the reference image size.'
     );
   }
 
-  if (referenceLabels?.length) {
+  if (outfitNeedsOpenLayering(outfit)) {
+    lines.push(
+      'CRITICAL LAYERING VISIBILITY: Outerwear (jacket/coat/cardigan) MUST be worn open or half-open so the inner top / base layer is clearly visible at the neckline and front — color and fabric of the inner piece must read clearly. Do NOT show only the dark jacket lining; do NOT fully zip/button closed if that hides the inner garment.'
+    );
+  }
+
+  const textOnly = listTextOnlyItems(outfit, labels);
+  if (textOnly.length > 0) {
+    lines.push(
+      'CRITICAL TEXT-ONLY ITEMS (no reference image — paint from description, must remain visible):',
+      ...textOnly.map((i) => `  - ${i.name} (${i.layer})`)
+    );
+  }
+
+  if (labels.length) {
     lines.push(
       'Reference wardrobe images (reproduce each exactly):',
-      ...referenceLabels.map((label, i) => `  - 图${i + 1}: ${label}`),
-      `The model must wear ALL garments from 图1 through 图${referenceLabels.length} with exact colors, silhouettes, and hem lengths.`
+      ...labels.map((label, i) => `  - 图${i + 1}: ${label}`),
+      `The model must wear ALL garments from 图1 through 图${labels.length} with exact colors, silhouettes, and hem lengths, PLUS every text-only item listed above.`
     );
   }
 
