@@ -3,6 +3,8 @@ import { llmGenerate } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { logVisualAudit } from '@/server/logging/visual';
+import { urlToGenerativePart } from '@/server/utils/image';
+import type { Part } from '@google/genai';
 import type { StylistOutfit } from '@/server/agents/stylist';
 
 const criticSchema: Schema = {
@@ -43,32 +45,78 @@ const CRITIC_SYSTEM_INSTRUCTION = `
 【输出规则】
 - 如果完全符合，approved 设为 true。
 - 如果不符合，approved 设为 false，并在 critique_reason 中指出具体问题，在 revised_prompt_enhancement 中给出修正和强化的英文提示词。
+- 输入已包含效果图；请基于可见画面审核，不要要求用户重新上传。
 `;
+
+/** Critic 因读图失败而编造的「无法审核」话术（应记为 audit 失败，而非画错） */
+export function isImageUnreadableCritique(reason: string): boolean {
+  return /无法审核|无法显示|未成功显示|无法查看|未能成功读取|Unsupported Image|格式不受支持|无法核验|无法核对|重新上传|无法进行对比|读不到图|看不见图/i.test(
+    reason
+  );
+}
+
+async function resolveAuditImagePart(
+  imageUrl: string,
+  imageBase64: string,
+  mimeType: string
+): Promise<Part> {
+  let data = imageBase64.trim();
+  let mime = mimeType.trim() || 'image/jpeg';
+  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/i.exec(data);
+  if (dataUrlMatch) {
+    mime = dataUrlMatch[1];
+    data = dataUrlMatch[2];
+  }
+
+  if (data) {
+    const buffer = Buffer.from(data, 'base64');
+    if (buffer.length > 0) {
+      // 审核只需「能看见」：统一转 jpeg，避免字节与声明 mime 不一致（如 jpeg 标成 png）
+      const sharp = (await import('sharp')).default;
+      const jpeg = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+      console.log(
+        `[VISUAL_DIRECTOR] Audit image normalized to jpeg (${buffer.length}→${jpeg.length} bytes, was ${mime})`
+      );
+      return {
+        inlineData: {
+          data: jpeg.toString('base64'),
+          mimeType: 'image/jpeg',
+        },
+      };
+    }
+  }
+
+  const url = imageUrl.trim();
+  if (!url) {
+    throw new Error('Audit image missing both inline base64 and public URL');
+  }
+  console.warn('[VISUAL_DIRECTOR] Inline audit bytes empty, falling back to public URL');
+  return urlToGenerativePart(url);
+}
 
 async function auditImage(
   outfit: StylistOutfit,
+  imageUrl: string,
   imageBase64: string,
   mimeType: string
 ): Promise<CriticResult> {
   console.log(`[VISUAL_DIRECTOR] Auditing generated image for outfit ${outfit.id}...`);
 
+  const imagePart = await resolveAuditImagePart(imageUrl, imageBase64, mimeType);
   const prompt = `
 【搭配师指定方案】
 - 核心概念: ${outfit.overall_concept}
 - 选用单品: ${outfit.selected_items.map((i) => `${i.name} (${i.layer})`).join(', ')}
 - 视觉构想: ${outfit.visual_composition.outfit_details} paired with ${outfit.visual_composition.background}
 
-请仔细审核上传的图片，判断是否 100% 契合上述方案。
+请仔细审核上方效果图，判断是否 100% 契合上述方案。
 `;
 
   const response = await withRetryOn429(
     () =>
       llmGenerate({
         model: AGENT_MODELS.visualCritic,
-        contents: [
-          { inlineData: { data: imageBase64, mimeType } },
-          { text: prompt },
-        ],
+        contents: [imagePart, { text: prompt }],
         systemInstruction: CRITIC_SYSTEM_INSTRUCTION,
         temperature: 0.1,
         jsonSchema: criticSchema,
@@ -101,8 +149,22 @@ export function scheduleVisualAudit(
     };
 
     try {
-      const auditResult = await auditImage(outfit, imageBase64, mimeType);
+      const auditResult = await auditImage(outfit, imageUrl, imageBase64, mimeType);
       console.log(`[VISUAL_DIRECTOR] Audit completed for outfit ${outfit.id}:`, auditResult);
+
+      if (isImageUnreadableCritique(auditResult.critique_reason)) {
+        console.warn(
+          `[VISUAL_DIRECTOR] Critic could not read image for ${outfit.id}; logging as auditError`
+        );
+        await logVisualAudit({
+          ...baseEntry,
+          approved: null,
+          critiqueReason: '',
+          revisedPromptEnhancement: '',
+          auditError: auditResult.critique_reason,
+        });
+        return;
+      }
 
       await logVisualAudit({
         ...baseEntry,

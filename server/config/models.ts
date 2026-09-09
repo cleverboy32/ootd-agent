@@ -11,6 +11,13 @@ const useVertexChat = getProvider('chat') === 'vertex';
 const useVertexImage = getProvider('image') === 'vertex';
 
 const openaiChat = process.env.LLM_MODEL?.trim() || 'deepseek-v4-pro';
+const llmVendor = process.env.LLM_VENDOR?.trim().toLowerCase() || '';
+/** DeepSeek 文本模型不识图；Critic 需 vision 变体 */
+const openaiVisionChat =
+  process.env.LLM_MODEL_VISUAL_CRITIC?.trim() ||
+  (llmVendor === 'deepseek' || openaiChat.startsWith('deepseek-')
+    ? 'deepseek-v4-flash-vision-exp'
+    : openaiChat);
 
 const VERTEX_DEFAULTS = {
   gatekeeper: 'gemini-3.1-flash-lite',
@@ -36,7 +43,9 @@ export const AGENT_MODELS = {
   gatekeeper: chatModel('LLM_MODEL_GATEKEEPER', VERTEX_DEFAULTS.gatekeeper),
   copywriter: chatModel('LLM_MODEL_COPYWRITER', VERTEX_DEFAULTS.copywriter),
   visualPrompt: chatModel('LLM_MODEL_VISUAL_PROMPT', VERTEX_DEFAULTS.visualPrompt),
-  visualCritic: chatModel('LLM_MODEL_VISUAL_CRITIC', VERTEX_DEFAULTS.visualCritic),
+  visualCritic: useVertexChat
+    ? chatModel('LLM_MODEL_VISUAL_CRITIC', VERTEX_DEFAULTS.visualCritic)
+    : openaiVisionChat,
   imageGen:
     process.env.LLM_MODEL_IMAGE?.trim() ||
     (useVertexImage ? VERTEX_DEFAULTS.imageGen : 'doubao-seedream-4-0-250828'),
