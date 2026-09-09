@@ -18,14 +18,15 @@ import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
 import { resolveWardrobeAnchor } from './wardrobeResolver';
 import type { WardrobeAnchorCandidate } from '../intent';
-import { gatekeeperSchema, WeatherLookup } from './schema';
+import { gatekeeperSchema, WeatherLookup, type ProfileUpdate } from './schema';
 import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
 import { resolveDressingClimateForIntent } from '@/server/utils/ragSeasonFilter';
 import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
 import { formatSessionItemsForGate } from '@/server/utils/sessionItems';
 import type { SessionPurchaseItem } from '@/server/utils/sessionItems';
+import { normalizeProfileUpdate } from '@/server/utils/profileUpdatePatch';
 
-export type { WeatherLookup } from './schema';
+export type { WeatherLookup, ProfileUpdate } from './schema';
 
 export interface GatekeeperContext {
   clientIp?: string;
@@ -48,6 +49,8 @@ export interface GatekeeperResult {
   gatekeeper_reply?: string;
   /** Gatekeeper 决策本轮是否查询天气及目标城市（仅服务端使用） */
   weather_lookup?: WeatherLookup;
+  /** Gatekeeper 抽出的长期档案增量（服务端异步合并） */
+  profile_update?: ProfileUpdate;
   /** wardrobe_pairing 检索到多件相似单品时的候选列表 */
   wardrobe_candidates?: WardrobeAnchorCandidate[];
   /** 是否建议在回复中提示用户告知城市以获取天气 */
@@ -96,7 +99,7 @@ async function finalizeGatekeeperIntent(
 
 /**
  * 调用 Gatekeeper Agent 评估用户请求。
- * 单次 LLM 调用即完成意图判定与天气决策；天气在 LLM 返回后按 weather_lookup 串行查询，不参与放行。
+ * 单次 LLM 调用即完成意图判定、天气决策与档案增量提取；天气在 LLM 返回后按 weather_lookup 串行查询，档案增量由编排层异步写库。
  */
 export async function callGatekeeperAgent(
   history: Content[],
@@ -134,6 +137,7 @@ export async function callGatekeeperAgent(
     console.log('[GATEKEEPER_AGENT] Raw response:', responseText);
 
     const parsed = JSON.parse(responseText) as GatekeeperResult;
+    const profileUpdate = normalizeProfileUpdate(parsed.profile_update);
     const rawIntent = normalizeGatekeeperIntent(parsed.extracted_intent);
     const intentBeforeCoerce = rawIntent.request_type;
     const browsedIntent = coerceWardrobeBrowseIntent(rawIntent, history, currentInput);
@@ -218,6 +222,7 @@ export async function callGatekeeperAgent(
       followup_questions: gatedResult.followup_questions,
       extracted_intent: gatedResult.extracted_intent,
       weather_lookup: parsed.weather_lookup,
+      profile_update: profileUpdate,
       wardrobe_candidates: gatedResult.wardrobe_candidates,
       l1,
       thinking: thinkingText || undefined,
@@ -226,6 +231,7 @@ export async function callGatekeeperAgent(
     return {
       ...gatedResult,
       weather_lookup: parsed.weather_lookup,
+      profile_update: profileUpdate,
       thinking: thinkingText || undefined,
     };
   } catch (error) {

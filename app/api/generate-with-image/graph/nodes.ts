@@ -4,9 +4,7 @@ import prismadb from '@/server/db';
 import { sendEvent } from '@/server/utils/stream-helpers';
 import { callGatekeeperAgent, type GatekeeperContext } from '@/server/agents/gatekeeper';
 import {
-  callUserProfileAgent,
   buildUserProfileFallback,
-  shouldSkipProfileAgentUpdate,
   loadUserProfileFromDb,
 } from '@/server/agents/user-profile';
 import { callStylistAgent, callStylistAdvice } from '@/server/agents/stylist';
@@ -17,6 +15,10 @@ import { buildPersistedMessageContent, type StylistCacheNode } from '@/server/ut
 import { runOutfitImageGeneration, extractSelectedItemUrls } from '../imageRetry';
 import { getPreviousStylistCache, findPreviousAnchorImageUrl, persistProfileLocation } from '../helpers';
 import { resolveAnchorUrlFromSessionItems, buildAdditionalPurchaseImageRefs } from '@/server/utils/sessionItems';
+import {
+  shouldApplyGateProfileUpdate,
+  scheduleProfileUpdatePersist,
+} from '@/server/utils/profileUpdatePatch';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
 
 function getRuntime(config: LangGraphRunnableConfig): OutfitRuntime {
@@ -219,6 +221,21 @@ export async function gatekeeperNode(
     await persistProfileLocation(runtime.clientId, intent.city);
   }
 
+  // 档案增量：Gate 抽出 patch，异步写库，不阻塞后续 Stylist
+  const currentUserText = runtime.initialParts
+    .filter((p): p is { text: string } => 'text' in p && Boolean(p.text?.trim()))
+    .map((p) => p.text)
+    .join('\n');
+  const profileUpdate = gatekeeperResult.profile_update;
+  if (
+    runtime.clientId &&
+    profileUpdate &&
+    shouldApplyGateProfileUpdate(intent, profileUpdate, currentUserText)
+  ) {
+    console.log('[ORCHESTRATOR:LANGGRAPH] Scheduling async profile_update persist');
+    scheduleProfileUpdatePersist(runtime.clientId, profileUpdate.patch);
+  }
+
   return {
     gatekeeperResult,
     intent,
@@ -341,33 +358,15 @@ export async function loadProfileNode(
     }
   }
 
-  const currentUserText = runtime.initialParts
-    .filter((p): p is { text: string } => 'text' in p && Boolean(p.text?.trim()))
-    .map((p) => p.text)
-    .join('\n');
-
+  // 关键路径只读 DB；档案增量由 Gate profile_update 异步写库，不再串行 Profile LLM
   let userProfile;
-  if (shouldSkipProfileAgentUpdate(intent, currentUserText) && runtime.clientId) {
-    console.log('[ORCHESTRATOR:LANGGRAPH] 跳过 Profile Agent — 本轮为操作/确认类消息');
-    userProfile = await loadUserProfileFromDb(runtime.clientId);
-  } else {
-    try {
-      userProfile = await callUserProfileAgent(
-        state.history,
-        runtime.initialParts,
-        runtime.clientId,
-        {
-          conversationId: runtime.conversationId,
-          messageId,
-          userMessage: currentUserText,
-        }
-      );
-    } catch (e) {
-      console.warn('[ORCHESTRATOR:LANGGRAPH] User Profile 失败，启动保底画像:', e);
-      userProfile = runtime.clientId
-        ? await loadUserProfileFromDb(runtime.clientId)
-        : buildUserProfileFallback();
-    }
+  try {
+    userProfile = runtime.clientId
+      ? await loadUserProfileFromDb(runtime.clientId)
+      : buildUserProfileFallback();
+  } catch (e) {
+    console.warn('[ORCHESTRATOR:LANGGRAPH] loadUserProfileFromDb failed, using fallback:', e);
+    userProfile = buildUserProfileFallback();
   }
 
   runtime.trace.markStage('loadProfile', Date.now() - loadProfileStartedAt);
@@ -429,6 +428,7 @@ export async function stylistNode(
       {
         previousStylistCache: state.previousStylistCache,
         previousAnchorImageUrl,
+        messageId,
       }
     );
   } catch (e) {

@@ -153,7 +153,8 @@ export function buildUserProfileFallback(): UserProfileResult {
 }
 
 /**
- * 调用 User Profile Agent 生成/更新用户时尚档案
+ * 调用 User Profile Agent 生成/更新用户时尚档案。
+ * 对话主路径已改为 Gate profile_update 异步 patch；本函数保留给需要全量 LLM 合并的场景。
  */
 export async function callUserProfileAgent(
   history: Content[],

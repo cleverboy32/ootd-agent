@@ -84,15 +84,34 @@ export async function performRagSearch(
   indexMap: Map<string, string>;
   items: ClothingItem[];
   matchSummaryXml: string;
+  slotSnapshots: Array<{
+    slot: string;
+    matchStatus?: 'adequate' | 'weak' | 'none';
+    bestSimilarity?: number;
+    candidates: Array<{ id: string; subCategory: string; similarity: number }>;
+  }>;
 }> {
   console.log('[RAG_HANDLER] Starting RAG search process...');
+
+  const empty = {
+    xmlString: '',
+    indexMap: new Map<string, string>(),
+    items: [] as ClothingItem[],
+    matchSummaryXml: '',
+    slotSnapshots: [] as Array<{
+      slot: string;
+      matchStatus?: 'adequate' | 'weak' | 'none';
+      bestSimilarity?: number;
+      candidates: Array<{ id: string; subCategory: string; similarity: number }>;
+    }>,
+  };
 
   const queries = searchQueries
     .map(normalizeWardrobeSearchInput)
     .filter((item) => item.query.length > 0);
   if (queries.length === 0) {
     console.log('[RAG_HANDLER] No search queries provided. Skipping RAG search.');
-    return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
+    return empty;
   }
 
   console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
@@ -174,9 +193,29 @@ export async function performRagSearch(
       })
     );
 
+    const slotAssessments = buildSlotMatchAssessments(
+      perQueryResults,
+      logContext?.intent,
+      logContext?.userMessage
+    );
+    const slotSnapshots = perQueryResults.map(({ slot }, idx) => {
+      const assessment = slotAssessments[idx];
+      const results = perQueryResults[idx]?.results ?? [];
+      return {
+        slot: slot ?? assessment?.slot ?? 'unknown',
+        matchStatus: assessment?.status,
+        bestSimilarity: assessment?.bestSimilarity,
+        candidates: results.map((item) => ({
+          id: item.id,
+          subCategory: item.subCategory,
+          similarity: item.similarity,
+        })),
+      };
+    });
+
     if (mergedResults.length === 0) {
       console.log('[RAG_HANDLER] No relevant items found in wardrobe.');
-      return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
+      return { ...empty, slotSnapshots };
     }
 
     console.log(`[RAG_HANDLER] Found ${mergedResults.length} unique items. Caching and formatting to XML.`);
@@ -198,7 +237,6 @@ export async function performRagSearch(
 
     clothingItems.forEach((item) => ragCache.set(item.id, item));
 
-    const slotAssessments = buildSlotMatchAssessments(perQueryResults, logContext?.intent, logContext?.userMessage);
     const matchSummaryXml = formatSlotMatchSummaryXml(slotAssessments, athletic);
     if (matchSummaryXml) {
       console.log('[RAG_HANDLER] Slot match summary:', slotAssessments);
@@ -212,10 +250,17 @@ export async function performRagSearch(
       indexMap,
       items: clothingItems,
       matchSummaryXml,
+      slotSnapshots,
     };
   } catch (error) {
     console.error('[RAG_HANDLER] Error during RAG search:', error);
-    return { xmlString: '', indexMap: new Map(), items: [], matchSummaryXml: '' };
+    return {
+      xmlString: '',
+      indexMap: new Map(),
+      items: [],
+      matchSummaryXml: '',
+      slotSnapshots: [],
+    };
   }
 }
 

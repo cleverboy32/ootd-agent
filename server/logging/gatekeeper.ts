@@ -14,6 +14,16 @@ export interface GatekeeperAuditLogEntry {
   followup_questions: string[];
   extracted_intent: GatekeeperIntent;
   weather_lookup?: { needed: boolean; city: string };
+  profile_update?: {
+    needed: boolean;
+    patch: {
+      name: string;
+      height: string;
+      weight: string;
+      personal_style: string;
+      preference_additions: string[];
+    };
+  };
   wardrobe_candidates?: unknown[];
   l1: GatekeeperEvalResult;
   thinking?: string;

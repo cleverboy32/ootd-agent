@@ -5,6 +5,28 @@ export interface WeatherLookup {
   city: string;
 }
 
+/** Gatekeeper 抽出的长期档案增量；服务端合并写库，不阻塞搭配 */
+export interface ProfileUpdatePatch {
+  name: string;
+  height: string;
+  weight: string;
+  personal_style: string;
+  preference_additions: string[];
+}
+
+export interface ProfileUpdate {
+  needed: boolean;
+  patch: ProfileUpdatePatch;
+}
+
+export const EMPTY_PROFILE_UPDATE_PATCH: ProfileUpdatePatch = {
+  name: '',
+  height: '',
+  weight: '',
+  personal_style: '',
+  preference_additions: [],
+};
+
 export const gatekeeperSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -121,6 +143,48 @@ export const gatekeeperSchema: Schema = {
       },
       required: ['needed', 'city'],
     },
+    profile_update: {
+      type: Type.OBJECT,
+      description:
+        '本轮是否含应写入【长期时尚档案】的信息。系统会异步合并写库，不阻塞搭配。只记录跨对话仍成立的稳定信息。',
+      properties: {
+        needed: {
+          type: Type.BOOLEAN,
+          description:
+            '本轮是否需要更新长期档案。true：明确自我介绍姓名、身高体重、一贯风格偏好等；false：纯场合/单次想穿什么/选套/确认/微调/衣橱浏览/待购搭配。outfit_selection / outfit_confirmed / clarify / feedback_revision 通常 false。',
+        },
+        patch: {
+          type: Type.OBJECT,
+          description: '增量字段；未提及的项填空字符串或空数组，禁止把本轮场合/单次单品意图写入 preference_additions。',
+          properties: {
+            name: {
+              type: Type.STRING,
+              description: '仅用户明确自我介绍时填写；否则空字符串。',
+            },
+            height: {
+              type: Type.STRING,
+              description: '用户明确说出的身高；未提及填空字符串。',
+            },
+            weight: {
+              type: Type.STRING,
+              description: '用户明确说出的体重；未提及填空字符串。',
+            },
+            personal_style: {
+              type: Type.STRING,
+              description: '用户明确说出的长期风格定位；未提及填空字符串。禁止根据场合臆测。',
+            },
+            preference_additions: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description:
+                '本轮新出现的【长期】穿衣偏好条目（可追加多条）。禁止写入场合、单次搭配请求、操作确认。无则空数组。',
+            },
+          },
+          required: ['name', 'height', 'weight', 'personal_style', 'preference_additions'],
+        },
+      },
+      required: ['needed', 'patch'],
+    },
     followup_questions: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
@@ -128,5 +192,12 @@ export const gatekeeperSchema: Schema = {
         '当 is_complete=false 且缺少场合/锚定单品等结构化信息时，用于追问的问题列表。当 is_complete=true 时必须为空数组。',
     },
   },
-  required: ['is_complete', 'extracted_intent', 'gatekeeper_reply', 'weather_lookup', 'followup_questions'],
+  required: [
+    'is_complete',
+    'extracted_intent',
+    'gatekeeper_reply',
+    'weather_lookup',
+    'profile_update',
+    'followup_questions',
+  ],
 };

@@ -35,6 +35,8 @@ export interface StylistAgentOptions {
   previousStylistCache?: import('@/server/utils/messageContent').StylistCacheNode | null;
   /** 当上一轮 cache 丢了 URL 时，从更早 cache 找回的待购锚点 */
   previousAnchorImageUrl?: string;
+  /** 写入 stylist-selection.jsonl */
+  messageId?: string;
 }
 
 export const stylistSchema: Schema = {

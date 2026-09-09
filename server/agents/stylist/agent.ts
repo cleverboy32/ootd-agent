@@ -34,6 +34,8 @@ import {
   REVISION_SEARCH_ADDENDUM,
   STYLE_ADVICE_SYSTEM_INSTRUCTION,
 } from './prompts';
+import { buildAndLogStylistSelection } from '@/server/logging/stylist';
+import type { StylistSelectionSlotSnapshot } from '@/server/logging/stylist';
 
 export type { StylistOutfit, StylistResult, StyleAdviceResult, StylistAgentOptions } from './schema';
 
@@ -303,9 +305,10 @@ export async function callStylistAgent(
 
   let wardrobeXml = '';
   let ragIndexMap = new Map<string, string>();
+  let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
+  const userMessage = extractUserMessage(initialParts);
   if (clientId && ragCache) {
     try {
-      const userMessage = extractUserMessage(initialParts);
       console.log(
         `[STYLIST_AGENT] Triggering internal RAG search${isRevision ? ' (revision slots)' : ''}...`
       );
@@ -325,6 +328,7 @@ export async function callStylistAgent(
       });
       wardrobeXml = searchResults.xmlString;
       ragIndexMap = searchResults.indexMap;
+      slotSnapshots = searchResults.slotSnapshots;
     } catch (ragError) {
       console.warn('[STYLIST_AGENT] RAG search failed, proceeding with empty wardrobe:', ragError);
     }
@@ -398,7 +402,7 @@ ${
     ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item)*'
     : '*(用户衣橱为空，请推荐全新单品)*')
 }
-${isAthleticOccasion(intent, extractUserMessage(initialParts)) ? '\n【提醒】当前为运动场合：请先阅读 <wardrobe_match_summary>，对 status=weak/none 的核心槽位使用 new_item，禁止硬选时装类单品。' : ''}
+${isAthleticOccasion(intent, userMessage) ? '\n【提醒】当前为运动场合：请先阅读 <wardrobe_match_summary>，对 status=weak/none 的核心槽位使用 new_item，禁止硬选时装类单品。' : ''}
 `;
 
   const contents: Content[] = [...history, { role: 'user', parts: [{ text: contextPrompt }] }];
@@ -427,6 +431,14 @@ ${isAthleticOccasion(intent, extractUserMessage(initialParts)) ? '\n【提醒】
     if (ragCache && ragCache.size > 0) {
       alignStylistItemsWithWardrobe(parsed, ragCache);
     }
+    buildAndLogStylistSelection({
+      result: parsed,
+      slotSnapshots,
+      requestType: intent.request_type,
+      conversationId,
+      messageId: options.messageId,
+      userMessage,
+    });
     if (anchorItem?.imageData) {
       parsed.anchor_item_image_data = anchorItem.imageData;
     } else if (previousCache?.stylist_result.anchor_item_image_data?.data) {
