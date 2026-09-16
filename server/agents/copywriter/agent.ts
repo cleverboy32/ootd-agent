@@ -1,5 +1,6 @@
 import { llmStream } from '@/server/services/llm/client';
 import { AGENT_MODELS } from '@/server/config/models';
+import { throwIfAborted } from '@/server/utils/abort';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { sendEvent } from '@/server/utils/stream-helpers';
 import {
@@ -21,6 +22,7 @@ export type { } from './prompts';
 export interface CopywriterAuditMeta {
   conversationId?: string;
   messageId?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -61,6 +63,7 @@ ${pointsList}${personalNoteBlock}${followupBlock}
           contents: prompt,
           systemInstruction: COPYWRITER_ADVICE_SYSTEM_INSTRUCTION,
           temperature: 0.7,
+          signal: _auditMeta?.signal,
         }),
       { label: 'Copywriter advice' }
     );
@@ -68,6 +71,7 @@ ${pointsList}${personalNoteBlock}${followupBlock}
     let fullText = '';
 
     for await (const chunk of responseStream) {
+      throwIfAborted(_auditMeta?.signal);
       const text = chunk.text;
       if (text) {
         fullText += text;
@@ -109,6 +113,7 @@ export async function callCopywriterAgentStream(
           contents: prompt,
           systemInstruction,
           temperature: 0.7,
+          signal: auditMeta?.signal,
         }),
       { label: 'Copywriter' }
     );
@@ -116,6 +121,7 @@ export async function callCopywriterAgentStream(
     let fullText = '';
 
     for await (const chunk of responseStream) {
+      throwIfAborted(auditMeta?.signal);
       const text = chunk.text;
       if (text) {
         const sanitized = streamSanitizer.process(text);

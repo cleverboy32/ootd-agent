@@ -39,6 +39,7 @@ export interface GatekeeperContext {
 export interface GatekeeperAuditMeta {
   conversationId?: string;
   messageId?: string;
+  signal?: AbortSignal;
 }
 
 export interface GatekeeperResult {
@@ -124,6 +125,7 @@ export async function callGatekeeperAgent(
           systemInstruction: GATEKEEPER_SYSTEM_INSTRUCTION,
           temperature: 0.0,
           jsonSchema: gatekeeperSchema,
+          signal: auditMeta?.signal,
         }),
       { label: 'Gatekeeper', maxRetries: 4 }
     );

@@ -19,6 +19,7 @@ module.exports = {
         HTTP_PROXY: "",
       },
       max_memory_restart: "700M",
+      kill_timeout: 20000,
     },
   ],
 };

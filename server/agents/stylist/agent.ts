@@ -46,7 +46,8 @@ export async function callStylistAdvice(
   history: Content[],
   initialParts: Part[],
   intent: GatekeeperIntent,
-  profile: UserProfileResult
+  profile: UserProfileResult,
+  signal?: AbortSignal
 ): Promise<StyleAdviceResult> {
   console.log('[STYLIST_AGENT] Generating style advice...');
 
@@ -81,6 +82,7 @@ ${userMessage || '（请根据历史对话推断咨询主题）'}
         systemInstruction: STYLE_ADVICE_SYSTEM_INSTRUCTION,
         temperature: 0.5,
         jsonSchema: styleAdviceSchema,
+        signal,
       }),
     { label: 'Stylist advice' }
   );
@@ -124,7 +126,8 @@ async function planWardrobeSearchQueries(
   intent: GatekeeperIntent,
   profile: UserProfileResult,
   userMessage: string,
-  anchorItem: AnchorItemInfo | null
+  anchorItem: AnchorItemInfo | null,
+  signal?: AbortSignal
 ): Promise<WardrobeSearchQuery[]> {
   console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
 
@@ -207,6 +210,7 @@ ${strategyHint}
         systemInstruction,
         temperature: 0.3,
         jsonSchema: wardrobeSearchSchema,
+        signal,
       }),
     { label: 'Stylist wardrobe search' }
   );
@@ -317,7 +321,8 @@ export async function callStylistAgent(
         intent,
         profile,
         userMessage,
-        anchorItem
+        anchorItem,
+        options.signal
       );
       const searchResults = await performRagSearch(searchQueries, clientId, ragCache, {
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
@@ -416,6 +421,7 @@ ${isAthleticOccasion(intent, userMessage) ? '\n【提醒】当前为运动场合
           systemInstruction: STYLIST_SYSTEM_INSTRUCTION,
           temperature: 0.4,
           jsonSchema: stylistSchema,
+          signal: options.signal,
         }),
       { label: 'Stylist' }
     );

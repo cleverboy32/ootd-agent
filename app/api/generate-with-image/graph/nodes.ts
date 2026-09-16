@@ -19,6 +19,7 @@ import {
   shouldApplyGateProfileUpdate,
   scheduleProfileUpdatePersist,
 } from '@/server/utils/profileUpdatePatch';
+import { throwIfAborted } from '@/server/utils/abort';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
 
 function getRuntime(config: LangGraphRunnableConfig): OutfitRuntime {
@@ -91,6 +92,7 @@ async function executeParallelAgents(
     {
       conversationId: runtime.conversationId,
       messageId: state.messageId ?? runtime.getMessageId(),
+      signal: runtime.abortSignal,
     },
     state.intent ?? undefined,
     state.revisionNoItemChange
@@ -103,6 +105,7 @@ async function executeParallelAgents(
     stylistResult.outfits,
     IMAGE_GEN_CONCURRENCY,
     (outfit) => {
+      throwIfAborted(runtime.abortSignal);
       const additionalPurchaseRefs = buildAdditionalPurchaseImageRefs(
         outfit,
         state.sessionItems ?? [],
@@ -126,7 +129,8 @@ async function executeParallelAgents(
         runtime.ragCache,
         state.userProfile,
         stylistResult.anchor_image_url,
-        additionalPurchaseRefs
+        additionalPurchaseRefs,
+        runtime.abortSignal
       );
     }
   ).finally(() => {
@@ -193,7 +197,7 @@ export async function gatekeeperNode(
     state.history,
     runtime.initialParts,
     gatekeeperCtx,
-    { conversationId: runtime.conversationId, messageId }
+    { conversationId: runtime.conversationId, messageId, signal: runtime.abortSignal }
   );
   runtime.trace.markStage('gatekeeper', Date.now() - gatekeeperStartedAt);
 
@@ -265,7 +269,8 @@ export async function styleAdvicePathNode(
     state.history,
     runtime.initialParts,
     intent,
-    adviceProfile
+    adviceProfile,
+    runtime.abortSignal
   );
   runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
 
@@ -288,6 +293,7 @@ export async function styleAdvicePathNode(
     {
       conversationId: runtime.conversationId,
       messageId: state.messageId ?? runtime.getMessageId(),
+      signal: runtime.abortSignal,
     }
   );
   runtime.trace.markStage('copywriter', Date.now() - copywriterStartedAt);
@@ -429,6 +435,7 @@ export async function stylistNode(
         previousStylistCache: state.previousStylistCache,
         previousAnchorImageUrl,
         messageId,
+        signal: runtime.abortSignal,
       }
     );
   } catch (e) {

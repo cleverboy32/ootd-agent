@@ -57,6 +57,7 @@ export function buildPipelineInvokeConfig(params: {
 
   return {
     configurable: { runtime },
+    signal: runtime.abortSignal,
     runName: pipeline,
     tags: ['ootd-agent', 'outfit-pipeline', pipeline],
     metadata: {

@@ -1,3 +1,5 @@
+import { isAbortError } from '@/server/utils/abort';
+
 export function is429Error(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
 
@@ -25,6 +27,7 @@ export async function withRetryOn429<T>(
     try {
       return await fn();
     } catch (error) {
+      if (isAbortError(error)) throw error;
       if (!is429Error(error) || attempt === maxRetries) throw error;
 
       const delayMs = 1000 * 2 ** attempt;

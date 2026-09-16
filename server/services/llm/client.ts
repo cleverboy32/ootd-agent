@@ -11,6 +11,7 @@ import { readCredential } from './credentials';
 import { minimaxGenerateImage } from './minimax';
 import { bytedanceMultimodalEmbed, usesByteDanceMultimodalEmbedding } from './bytedance';
 import { isSeedreamImageVendor, seedreamGenerateImage } from './seedream';
+import { throwIfAborted } from '@/server/utils/abort';
 import {
   vertexEmbed,
   vertexGenerate,
@@ -71,6 +72,7 @@ function isResponseFormatCompatibilityError(error: unknown): boolean {
 }
 
 export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGenerateResult> {
+  throwIfAborted(options.signal);
   if (getProvider('chat') === 'vertex') {
     return vertexGenerate(options);
   }
@@ -82,18 +84,22 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
     temperature: resolveChatTemperature(options.model, options.temperature),
     messages,
   };
+  const requestOptions = options.signal ? { signal: options.signal } : undefined;
 
   try {
-    const completion = await client.chat.completions.create({
-      ...base,
-      response_format: options.jsonSchema ? { type: 'json_object' as const } : undefined,
-    });
+    const completion = await client.chat.completions.create(
+      {
+        ...base,
+        response_format: options.jsonSchema ? { type: 'json_object' as const } : undefined,
+      },
+      requestOptions
+    );
     const text = completion.choices[0]?.message?.content ?? '';
     return { text: options.jsonSchema ? extractJsonText(text) : text };
   } catch (error) {
     if (!options.jsonSchema || !isResponseFormatCompatibilityError(error)) throw error;
     console.warn('[LLM] json_object response_format not supported, retrying without it');
-    const completion = await client.chat.completions.create(base);
+    const completion = await client.chat.completions.create(base, requestOptions);
     const text = completion.choices[0]?.message?.content ?? '';
     return { text: extractJsonText(text) };
   }
@@ -102,20 +108,25 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
 export async function llmStream(
   options: Omit<LlmGenerateOptions, 'jsonSchema'>
 ): Promise<AsyncGenerator<{ text: string }>> {
+  throwIfAborted(options.signal);
   if (getProvider('chat') === 'vertex') {
     return vertexStream(options);
   }
 
   const client = getClient('chat');
-  const stream = await client.chat.completions.create({
-    model: options.model,
-    temperature: resolveChatTemperature(options.model, options.temperature),
-    messages: buildMessages(options),
-    stream: true,
-  });
+  const stream = await client.chat.completions.create(
+    {
+      model: options.model,
+      temperature: resolveChatTemperature(options.model, options.temperature),
+      messages: buildMessages(options),
+      stream: true,
+    },
+    options.signal ? { signal: options.signal } : undefined
+  );
 
   async function* iterate() {
     for await (const chunk of stream) {
+      throwIfAborted(options.signal);
       const text = chunk.choices[0]?.delta?.content;
       if (text) yield { text };
     }
@@ -128,8 +139,10 @@ export async function llmGenerateImage(
   prompt: string,
   model: string,
   parts?: Part[],
-  referenceImageUrls?: string[]
+  referenceImageUrls?: string[],
+  signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string }> {
+  throwIfAborted(signal);
   if (getProvider('image') === 'vertex') {
     const vertexParts = parts?.length ? parts : [{ text: prompt }];
     return vertexGenerateImage(vertexParts, model);
@@ -146,19 +159,25 @@ export async function llmGenerateImage(
   const client = getClient('image');
   const size = process.env.IMAGE_SIZE?.trim() || '1024x1024';
   try {
-    const result = await client.images.generate({
-      model,
-      prompt,
-      size,
-      response_format: 'b64_json',
-    });
+    const result = await client.images.generate(
+      {
+        model,
+        prompt,
+        size,
+        response_format: 'b64_json',
+      },
+      signal ? { signal } : undefined
+    );
     const data = result.data?.[0]?.b64_json;
     if (data) return { data, mimeType: 'image/png' };
   } catch (error) {
     console.warn('[LLM] images.generate with b64_json failed, retrying without response_format', error);
   }
 
-  const result = await client.images.generate({ model, prompt, size });
+  const result = await client.images.generate(
+    { model, prompt, size },
+    signal ? { signal } : undefined
+  );
   const data = result.data?.[0]?.b64_json;
   if (data) return { data, mimeType: 'image/png' };
   throw new Error('Image generation API did not return image data.');

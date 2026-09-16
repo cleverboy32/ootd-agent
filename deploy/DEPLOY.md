@@ -214,6 +214,16 @@ pm2 save
 
 pm2 配置里已清空代理环境变量，避免继承失效的 `HTTP_PROXY`。
 
+### 优雅退出（Abort）
+
+`ecosystem.config.cjs` 已设置 `kill_timeout: 20000`（毫秒）。`pm2 restart/stop/reload` 时进程会：
+
+1. 收到 `SIGTERM`，标记 shutting down，**新** `POST /api/generate-with-image` 返回 **503**
+2. 对进行中的 SSE 流 `abort()`，半截内容落库为 `status=failed`
+3. 约 12s 内等待 in-flight 结束（可用 `SHUTDOWN_ABORT_TIMEOUT_MS` 覆盖），再 `prisma.$disconnect()` 并退出
+
+用户刷新后看到「消息生成失败 + 重试」；若 Stylist 已完成，重试会走断点续传（`stylist_cache`）。
+
 ## 8. 更新部署
 
 ```bash

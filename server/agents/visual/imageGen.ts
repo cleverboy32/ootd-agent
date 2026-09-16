@@ -5,6 +5,7 @@ import { isSeedreamImageVendor, SEEDREAM_MAX_REFERENCE_IMAGES } from '@/server/s
 import { urlToGenerativePart } from '@/server/utils/image';
 import { Part } from '@google/genai';
 import { AGENT_MODELS, IMAGE_GEN_RETRY } from '@/server/config/models';
+import { isAbortError, throwIfAborted } from '@/server/utils/abort';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { logImageGenAudit } from '@/server/logging/imageGen';
 import type { StylistOutfit } from '@/server/agents/stylist';
@@ -166,7 +167,12 @@ export function buildImagePrompt(
   return lines.join('\n');
 }
 
-async function callImageGen(prompt: string, parts?: Part[], referenceImageUrls?: string[]) {
+async function callImageGen(
+  prompt: string,
+  parts?: Part[],
+  referenceImageUrls?: string[],
+  signal?: AbortSignal
+) {
   if (
     getProvider('image') !== 'vertex' &&
     !isSeedreamImageVendor() &&
@@ -177,7 +183,13 @@ async function callImageGen(prompt: string, parts?: Part[], referenceImageUrls?:
     );
   }
 
-  const generated = await llmGenerateImage(prompt, AGENT_MODELS.imageGen, parts, referenceImageUrls);
+  const generated = await llmGenerateImage(
+    prompt,
+    AGENT_MODELS.imageGen,
+    parts,
+    referenceImageUrls,
+    signal
+  );
   return {
     candidates: [
       {
@@ -197,8 +209,10 @@ async function generateWithSeedream(
   ragCache?: Map<string, ClothingItem>,
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
-  additionalPurchaseRefs?: Array<{ url: string; label: string }>
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
+  throwIfAborted(signal);
   const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
     outfit,
     wardrobeImageUrls,
@@ -211,7 +225,7 @@ async function generateWithSeedream(
   const fullPrompt = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
 
   const imageResponse = await withRetryOn429(
-    () => callImageGen(fullPrompt, undefined, referenceUrls),
+    () => callImageGen(fullPrompt, undefined, referenceUrls, signal),
     { label: `ImageGen Seedream (${outfit.id})` }
   );
 
@@ -235,8 +249,10 @@ export async function attemptGenerateOutfitImage(
   ragCache?: Map<string, ClothingItem>,
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
-  additionalPurchaseRefs?: Array<{ url: string; label: string }>
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
+  throwIfAborted(signal);
   if (isSeedreamImageVendor()) {
     return generateWithSeedream(
       outfit,
@@ -246,7 +262,8 @@ export async function attemptGenerateOutfitImage(
       ragCache,
       userProfile,
       anchorImageUrl,
-      additionalPurchaseRefs
+      additionalPurchaseRefs,
+      signal
     );
   }
 
@@ -293,12 +310,13 @@ export async function attemptGenerateOutfitImage(
       multiModalParts.push({ text: imgPrompt });
 
       imageResponse = await withRetryOn429(
-        () => callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`, multiModalParts),
+        () =>
+          callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`, multiModalParts, undefined, signal),
         { label: `ImageGen multimodal (${outfit.id})` }
       );
     } else {
       imageResponse = await withRetryOn429(
-        () => callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`),
+        () => callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`, undefined, undefined, signal),
         { label: `ImageGen text-only (${outfit.id})` }
       );
     }
@@ -315,7 +333,7 @@ export async function attemptGenerateOutfitImage(
   if (!imagePart?.inlineData) {
     mode = 'text-only';
     imageResponse = await withRetryOn429(
-      () => callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`),
+      () => callImageGen(`${IMAGE_GEN_SYSTEM_INSTRUCTION}\n${imgPrompt}`, undefined, undefined, signal),
       { label: `ImageGen fallback (${outfit.id})` }
     );
     imagePart = imageResponse?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
@@ -342,10 +360,12 @@ export async function generateOutfitImage(
   ragCache?: Map<string, ClothingItem>,
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
-  additionalPurchaseRefs?: Array<{ url: string; label: string }>
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string }> {
   return retry(
     async (bail, attemptNumber) => {
+      throwIfAborted(signal);
       try {
         const result = await attemptGenerateOutfitImage(
           outfit,
@@ -355,7 +375,8 @@ export async function generateOutfitImage(
           ragCache,
           userProfile,
           anchorImageUrl,
-          additionalPurchaseRefs
+          additionalPurchaseRefs,
+          signal
         );
         void logImageGenAudit({
           timestamp: new Date().toISOString(),
@@ -382,6 +403,11 @@ export async function generateOutfitImage(
           error: message,
           trigger,
         });
+
+        if (isAbortError(error)) {
+          bail(error as Error);
+          return { data: '', mimeType: '' };
+        }
 
         if (message.includes('did not return image data')) {
           bail(error as Error);

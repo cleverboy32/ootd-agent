@@ -37,6 +37,7 @@ export interface StylistAgentOptions {
   previousAnchorImageUrl?: string;
   /** 写入 stylist-selection.jsonl */
   messageId?: string;
+  signal?: AbortSignal;
 }
 
 export const stylistSchema: Schema = {

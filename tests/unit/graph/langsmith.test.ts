@@ -7,6 +7,7 @@ import {
 import type { OutfitRuntime } from '@/app/api/generate-with-image/graph/state';
 
 function stubRuntime(overrides: Partial<OutfitRuntime> = {}): OutfitRuntime {
+  const abortController = new AbortController();
   return {
     controller: {} as ReadableStreamDefaultController,
     imageMap: new Map(),
@@ -17,6 +18,7 @@ function stubRuntime(overrides: Partial<OutfitRuntime> = {}): OutfitRuntime {
     clientId: 'client-1',
     profileLocationPromise: Promise.resolve(undefined),
     trace: {} as OutfitRuntime['trace'],
+    abortSignal: abortController.signal,
     appendText: () => undefined,
     getAccumulated: () => '',
     setMessageId: () => undefined,
@@ -57,5 +59,6 @@ describe('langsmith helpers', () => {
     assert.equal((cfg.configurable as { runtime: OutfitRuntime }).runtime, runtime);
     assert.equal(cfg.metadata?.conversationId, 'conv-1');
     assert.equal(cfg.metadata?.messageId, 'msg-1');
+    assert.equal(cfg.signal, runtime.abortSignal);
   });
 });

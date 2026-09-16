@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality, type Part, type Schema } from '@google/genai';
+import { throwIfAborted } from '@/server/utils/abort';
 import { normalizeContents } from './convert';
 import type { LlmGenerateOptions, LlmGenerateResult } from './types';
 
@@ -20,6 +21,7 @@ export function getVertexClient(): GoogleGenAI {
 }
 
 export async function vertexGenerate(options: LlmGenerateOptions): Promise<LlmGenerateResult> {
+  throwIfAborted(options.signal);
   const genAI = getVertexClient();
   const response = await genAI.models.generateContent({
     model: options.model,
@@ -38,6 +40,7 @@ export async function vertexGenerate(options: LlmGenerateOptions): Promise<LlmGe
 export async function vertexStream(
   options: Omit<LlmGenerateOptions, 'jsonSchema'>
 ): Promise<AsyncGenerator<{ text: string }>> {
+  throwIfAborted(options.signal);
   const genAI = getVertexClient();
   const stream = await genAI.models.generateContentStream({
     model: options.model,
@@ -50,6 +53,7 @@ export async function vertexStream(
 
   async function* iterate() {
     for await (const chunk of stream) {
+      throwIfAborted(options.signal);
       const text = chunk.text;
       if (text) yield { text };
     }

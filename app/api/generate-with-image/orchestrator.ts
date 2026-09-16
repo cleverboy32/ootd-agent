@@ -25,6 +25,11 @@ import {
   logLangSmithStatusOnce,
 } from './graph/langsmith';
 import type { OutfitRuntime } from './graph/state';
+import {
+  registerInFlight,
+  unregisterInFlight,
+} from '@/server/lifecycle/shutdown';
+import { isAbortError } from '@/server/utils/abort';
 import prismadb from '@/server/db';
 
 export { createImageRetryStream } from './imageRetry';
@@ -44,6 +49,7 @@ function createRuntime(params: {
   currentImageUrl?: string;
   profileLocationPromise: Promise<string | undefined>;
   trace: RequestTrace;
+  abortSignal: AbortSignal;
 }): {
   runtime: OutfitRuntime;
   getSnapshot: () => {
@@ -77,6 +83,7 @@ function createRuntime(params: {
     currentImageUrl: params.currentImageUrl,
     profileLocationPromise: params.profileLocationPromise,
     trace: params.trace,
+    abortSignal: params.abortSignal,
     appendText: (text) => {
       accumulatedContent += text;
     },
@@ -130,6 +137,14 @@ export function createMultiAgentStream(
     clientId,
   });
 
+  const abortController = new AbortController();
+  const inFlightId = crypto.randomUUID();
+  let resolveDone!: () => void;
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  registerInFlight(inFlightId, abortController, done);
+
   return new ReadableStream({
     async start(controller) {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
@@ -146,6 +161,7 @@ export function createMultiAgentStream(
         currentImageUrl: options.currentImageUrl,
         profileLocationPromise,
         trace,
+        abortSignal: abortController.signal,
       });
 
       let mainError: Error | null = null;
@@ -227,6 +243,14 @@ export function createMultiAgentStream(
         const { activeStylistResult, wardrobeCandidatesNode } = snapshot;
         const finalMessageId = snapshot.messageId;
         const accumulatedContent = snapshot.accumulatedContent;
+        const aborted =
+          abortController.signal.aborted ||
+          (mainError != null && isAbortError(mainError));
+        const failed = Boolean(mainError) || aborted;
+
+        if (aborted) {
+          trace.markCancelled(abortController.signal.reason ?? mainError?.message ?? 'aborted');
+        }
 
         if (finalMessageId) {
           try {
@@ -254,12 +278,12 @@ export function createMultiAgentStream(
               imageMap: runtime.imageMap,
               failedImageIds: runtime.failedImageIds,
               outfitIds,
-              status: mainError ? 'failed' : 'completed',
+              status: failed ? 'failed' : 'completed',
               wardrobeCandidates: wardrobeCandidatesNode,
             });
             console.log(
               `[ORCHESTRATOR:LANGGRAPH] 数据库记录 ${finalMessageId} 已更新，状态: ${
-                mainError ? 'failed' : 'completed'
+                failed ? 'failed' : 'completed'
               }`
             );
           } catch (dbError) {
@@ -274,7 +298,7 @@ export function createMultiAgentStream(
 
         void logRequestAudit(
           runtime.trace.finalize({
-            outcome: mainError ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
+            outcome: failed ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
             errorMessage: mainError?.message,
             messageId: finalMessageId,
             summary: {
@@ -289,9 +313,9 @@ export function createMultiAgentStream(
           })
         );
 
-        if (mainError) {
+        if (mainError && !aborted) {
           handleStreamError(controller, [], mainError, 'OrchestratorProcess');
-        } else {
+        } else if (!failed) {
           sendEvent(controller, 'stream_end', { message: '所有内容已加载完毕' });
           try {
             controller.close();
@@ -302,11 +326,17 @@ export function createMultiAgentStream(
             );
           }
         }
+
+        resolveDone();
+        unregisterInFlight(inFlightId);
       }
     },
     cancel(reason) {
       console.warn('[ORCHESTRATOR:LANGGRAPH] 流被客户端取消，原因:', reason);
       trace.markCancelled(reason);
+      if (!abortController.signal.aborted) {
+        abortController.abort(reason ?? new DOMException('Client cancelled', 'AbortError'));
+      }
     },
   });
 }

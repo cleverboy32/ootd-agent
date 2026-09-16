@@ -24,6 +24,8 @@ export interface OutfitRuntime {
   profileLocationPromise: Promise<string | undefined>;
   /** 请求级 audit 追踪（与 ReadableStream.cancel 共享同一实例） */
   trace: RequestTrace;
+  /** 进程 shutdown 或客户端 cancel 时 abort 下游 LLM/生图 */
+  abortSignal: AbortSignal;
   appendText: (text: string) => void;
   getAccumulated: () => string;
   setMessageId: (id: string) => void;

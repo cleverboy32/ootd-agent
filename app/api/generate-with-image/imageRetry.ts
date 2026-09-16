@@ -13,6 +13,11 @@ import {
   RequestTrace,
 } from '@/server/logging/request';
 import {
+  registerInFlight,
+  unregisterInFlight,
+} from '@/server/lifecycle/shutdown';
+import { isAbortError } from '@/server/utils/abort';
+import {
   applyImageResultsToText,
   buildImageStates,
   buildPersistedMessageContent,
@@ -34,7 +39,8 @@ export async function runOutfitImageGeneration(
   ragCache?: Map<string, ClothingItem>,
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
-  additionalPurchaseRefs?: Array<{ url: string; label: string }>
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  signal?: AbortSignal
 ): Promise<void> {
   const imageId = outfit.id;
 
@@ -49,9 +55,18 @@ export async function runOutfitImageGeneration(
         imageMap.set(id, url);
         console.log(`[ORCHESTRATOR] 效果图生成成功: ${id} -> ${url}`);
       },
-      { trigger, messageId, ragCache, userProfile, anchorImageUrl, additionalPurchaseRefs }
+      {
+        trigger,
+        messageId,
+        ragCache,
+        userProfile,
+        anchorImageUrl,
+        additionalPurchaseRefs,
+        signal,
+      }
     );
   } catch (e) {
+    if (isAbortError(e)) throw e;
     failedImageIds.add(outfit.id);
     console.warn(`[ORCHESTRATOR] 方案 ${outfit.id} 效果图生成失败 (已优雅降级):`, e);
     sendEvent(controller, 'image_generation_failed', {
@@ -74,6 +89,14 @@ export function createImageRetryStream(
     messageId,
     route: RequestAuditRoute.ImageRetry,
   });
+
+  const abortController = new AbortController();
+  const inFlightId = crypto.randomUUID();
+  let resolveDone!: () => void;
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  registerInFlight(inFlightId, abortController, done);
 
   return new ReadableStream({
     async start(controller) {
@@ -118,7 +141,9 @@ export function createImageRetryStream(
           'user_retry',
           ragCache,
           null,
-          stylistCache.stylist_result.anchor_image_url
+          stylistCache.stylist_result.anchor_image_url,
+          undefined,
+          abortController.signal
         );
         trace.markStage('imageGen', Date.now() - imageStartedAt);
 
@@ -150,13 +175,21 @@ export function createImageRetryStream(
           console.warn('[ORCHESTRATOR] 单图重试流关闭失败 (可能已被客户端取消):', e);
         }
       } catch (error) {
-        mainError = error as Error;
-        console.error('[ORCHESTRATOR] 单图重试失败:', mainError);
-        handleStreamError(controller, [], mainError, 'ImageRetry');
+        mainError = error instanceof Error ? error : new Error(String(error));
+        const aborted = abortController.signal.aborted || isAbortError(mainError);
+        if (aborted) {
+          trace.markCancelled(abortController.signal.reason ?? mainError.message);
+        } else {
+          console.error('[ORCHESTRATOR] 单图重试失败:', mainError);
+          handleStreamError(controller, [], mainError, 'ImageRetry');
+        }
       } finally {
         void logRequestAudit(
           trace.finalize({
-            outcome: mainError ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
+            outcome:
+              mainError || abortController.signal.aborted
+                ? RequestAuditOutcome.Failed
+                : RequestAuditOutcome.Completed,
             errorMessage: mainError?.message,
             messageId,
             summary: {
@@ -167,11 +200,16 @@ export function createImageRetryStream(
             },
           })
         );
+        resolveDone();
+        unregisterInFlight(inFlightId);
       }
     },
     cancel(reason) {
       console.warn('[ORCHESTRATOR] 单图重试流被客户端取消，原因:', reason);
       trace.markCancelled(reason);
+      if (!abortController.signal.aborted) {
+        abortController.abort(reason ?? new DOMException('Client cancelled', 'AbortError'));
+      }
     },
   });
 }

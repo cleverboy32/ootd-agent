@@ -10,6 +10,7 @@ export interface LlmGenerateOptions {
   systemInstruction?: string;
   temperature?: number;
   jsonSchema?: Schema;
+  signal?: AbortSignal;
 }
 
 export interface LlmGenerateResult {

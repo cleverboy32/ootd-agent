@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { createImageRetryStream, createMultiAgentStream } from "./orchestrator";
 import { urlToGenerativePart } from '@/server/utils/image';
 import { resolveClientIp } from '@/server/utils/resolveClientIp';
+import { isShuttingDown } from '@/server/lifecycle/shutdown';
 import prismadb from '@/server/db';
 
 const SSE_HEADERS = {
@@ -12,8 +13,15 @@ const SSE_HEADERS = {
   'X-Accel-Buffering': 'no',
 };
 
+const SHUTDOWN_RESPONSE = () =>
+  new Response(JSON.stringify({ error: '服务正在重启，请稍后重试' }), { status: 503 });
+
 export async function POST(req: NextRequest) {
   try {
+    if (isShuttingDown()) {
+      return SHUTDOWN_RESPONSE();
+    }
+
     const body = await req.json();
     const { content, conversationId, messageId, retryOutfitId } = body;
     const text = content?.text;
