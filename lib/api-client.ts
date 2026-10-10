@@ -42,6 +42,16 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   if (!response.ok) {
     // Try to parse the error body
     const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status}` }));
+    // user 模式下未登录：跳登录页并记住来源（登录页自身除外，避免循环）
+    if (
+      response.status === 401 &&
+      errorBody?.code === 'UNAUTHENTICATED' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/login')
+    ) {
+      const current = window.location.pathname + window.location.search;
+      window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
+    }
     // Throw an error with more info for the upper layer to catch
     throw new Error(errorBody.error || errorBody.message || `HTTP error! Status: ${response.status}`);
   }

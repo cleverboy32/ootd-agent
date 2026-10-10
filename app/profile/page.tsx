@@ -7,6 +7,7 @@ import { VisualAnalysisSection } from '@/components/profile/VisualAnalysisSectio
 import { fetchProfile, type ProfileData } from '@/lib/api/profile';
 import { getFriendlyErrorMessage } from '@/lib/api/errorMessage';
 import { ProfileErrorState } from '@/components/profile/ProfileErrorState';
+import { AccountSection } from '@/components/profile/AccountSection';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AppSidebar } from '@/components/AppSidebar';
 
@@ -74,6 +75,7 @@ export default function ProfilePage() {
 
           {!loading && profile && (
             <div className="space-y-6 w-full">
+              <AccountSection />
               <ProfileOverview profile={profile} />
               <VisualAnalysisSection
                 profile={profile}
