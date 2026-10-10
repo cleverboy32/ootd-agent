@@ -28,8 +28,25 @@ model ClientProfile {
   profileData   Json      @default("{}") // 使用 JSON 字段，可以灵活存储任何提取出的信息
   conversations Conversation[] // 一个客户可以有多个会话
   clothingItems ClothingItem[] // 新增与 ClothingItem 的关联
+  user          User?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+// 用户账号（自建用户名+密码体系，见 design/features/2026-10-10-user-auth.md）
+model User {
+  id                  String       @id @default(cuid())
+  username            String       @unique // 存小写
+  passwordHash        String // scrypt:N:r:p:salt:hash (base64)
+  securityQuestions   Json         @default("[]") // [{question, answerHash}]
+  recoveryCodeHashes  String[]     @default([])
+  failedLoginAttempts Int          @default(0)
+  lockedUntil         DateTime?
+  sessionVersion      Int          @default(0)
+  clientProfileId     String       @unique
+  clientProfile       ClientProfile @relation(fields: [clientProfileId], references: [id])
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 }
 
 model Conversation {
