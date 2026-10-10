@@ -8,7 +8,8 @@ import {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith('/api/access/')) {
+  // auth 路由只认 cookie/session，不读 x-client-id，两种模式下都直接放行
+  if (pathname.startsWith('/api/access/') || pathname.startsWith('/api/auth/')) {
     return NextResponse.next();
   }
 
