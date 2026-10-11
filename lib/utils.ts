@@ -12,6 +12,13 @@ export function withBasePath(path: string): string {
   return `${basePath}${path}`;
 }
 
+/** Inverse of withBasePath: browser pathname → app-relative path accepted by router.push. */
+export function stripBasePath(pathname: string): string {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  if (!basePath || (pathname !== basePath && !pathname.startsWith(`${basePath}/`))) return pathname;
+  return pathname.slice(basePath.length) || "/";
+}
+
 /** Local public asset; must include basePath for next/image optimizer behind subpath deploy. */
 export const LOGO_SRC = withBasePath("/logo.png");
 

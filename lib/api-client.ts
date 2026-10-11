@@ -1,4 +1,4 @@
-import { getClientId, withBasePath } from '@/lib/utils';
+import { getClientId, stripBasePath, withBasePath } from '@/lib/utils';
 
 /**
  * A base fetch wrapper that sends the configured owner id as a routing hint.
@@ -47,10 +47,10 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
       response.status === 401 &&
       errorBody?.code === 'UNAUTHENTICATED' &&
       typeof window !== 'undefined' &&
-      !window.location.pathname.startsWith('/login')
+      !stripBasePath(window.location.pathname).startsWith('/login')
     ) {
-      const current = window.location.pathname + window.location.search;
-      window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
+      const current = stripBasePath(window.location.pathname) + window.location.search;
+      window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
     }
     // Throw an error with more info for the upper layer to catch
     throw new Error(errorBody.error || errorBody.message || `HTTP error! Status: ${response.status}`);

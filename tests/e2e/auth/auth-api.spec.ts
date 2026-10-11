@@ -95,6 +95,8 @@ test.describe('data isolation', () => {
     });
     expect(created.status()).toBe(201);
     const conversation = await created.json();
+    const listA = await (await request.get('/api/conversations')).json();
+    expect(listA.map((c: { id: string }) => c.id)).toContain(conversation.id);
 
     // 登出 A，注册 B
     await request.post('/api/auth/logout');

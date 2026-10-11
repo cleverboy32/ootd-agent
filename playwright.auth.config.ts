@@ -18,6 +18,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: 'http://localhost:3001',
+    channel: 'chrome',
   },
   webServer: {
     command: 'AUTH_MODE=user USER_SESSION_SECRET=e2e-user-session-secret-at-least-32-chars pnpm dev -p 3001',
