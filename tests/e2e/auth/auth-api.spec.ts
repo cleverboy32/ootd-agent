@@ -119,7 +119,7 @@ test.describe('data isolation', () => {
 });
 
 test.describe('password reset', () => {
-  test('security questions reset revokes old sessions', async ({ request }) => {
+  test('security questions reset revokes old sessions', async ({ request, playwright, baseURL }) => {
     const username = uniqueName('reset');
     expect((await registerUser(request, username)).status()).toBe(200);
 
@@ -133,26 +133,34 @@ test.describe('password reset', () => {
     });
     expect(setQ.status()).toBe(200);
 
-    // 登出后走找回流程
-    await request.post('/api/auth/logout');
+    // `request` 保持登录作为旧设备；找回流程在另一台设备上完成
+    const otherDevice = await playwright.request.newContext({ baseURL });
+    try {
+      const questions = await otherDevice.get(`/api/auth/security-questions?username=${username}`);
+      expect((await questions.json()).questions.length).toBe(2);
 
-    const questions = await request.get(`/api/auth/security-questions?username=${username}`);
-    expect((await questions.json()).questions.length).toBe(2);
+      // 答案归一化：大小写/全半角不敏感
+      const reset = await otherDevice.post('/api/auth/reset-password', {
+        data: {
+          username,
+          method: 'questions',
+          answers: [' 阳光小学 ', '成都'],
+          newPassword: 'newpass123',
+        },
+      });
+      expect(reset.status()).toBe(200);
 
-    // 答案归一化：大小写/全半角不敏感
-    const reset = await request.post('/api/auth/reset-password', {
-      data: {
-        username,
-        method: 'questions',
-        answers: [' 阳光小学 ', '成都'],
-        newPassword: 'newpass123',
-      },
-    });
-    expect(reset.status()).toBe(200);
+      // 重置设备自动登录
+      expect((await otherDevice.get('/api/wardrobe')).status()).toBe(200);
+    } finally {
+      await otherDevice.dispose();
+    }
 
-    // 重置后自动登录
-    expect((await (await request.get('/api/auth/session')).json()).authenticated).toBe(true);
-    await request.post('/api/auth/logout');
+    // 旧设备的 session 被吊销
+    const revoked = await request.get('/api/wardrobe');
+    expect(revoked.status()).toBe(401);
+    expect((await revoked.json()).code).toBe('UNAUTHENTICATED');
+    expect((await (await request.get('/api/auth/session')).json()).authenticated).toBe(false);
 
     // 旧密码失效，新密码可登录
     const oldLogin = await request.post('/api/auth/login', {
@@ -163,6 +171,33 @@ test.describe('password reset', () => {
       data: { username, password: 'newpass123' },
     });
     expect(newLogin.status()).toBe(200);
+  });
+
+  test('change password renews current session and revokes other devices', async ({ request, playwright, baseURL }) => {
+    const username = uniqueName('chg');
+    expect((await registerUser(request, username)).status()).toBe(200);
+
+    const otherDevice = await playwright.request.newContext({ baseURL });
+    try {
+      const login = await otherDevice.post('/api/auth/login', {
+        data: { username, password: VALID_PASSWORD },
+      });
+      expect(login.status()).toBe(200);
+      expect((await otherDevice.get('/api/wardrobe')).status()).toBe(200);
+
+      const changed = await request.post('/api/auth/change-password', {
+        data: { oldPassword: VALID_PASSWORD, newPassword: 'changed123' },
+      });
+      expect(changed.status()).toBe(200);
+
+      // 当前设备续签后仍可用，其他设备失效
+      expect((await request.get('/api/wardrobe')).status()).toBe(200);
+      const revoked = await otherDevice.get('/api/wardrobe');
+      expect(revoked.status()).toBe(401);
+      expect((await revoked.json()).code).toBe('UNAUTHENTICATED');
+    } finally {
+      await otherDevice.dispose();
+    }
   });
 
   test('recovery code resets password and is single-use', async ({ request }) => {
