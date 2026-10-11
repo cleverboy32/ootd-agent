@@ -2,6 +2,7 @@
  * 认证 API 客户端（/api/auth/*）。
  * 不走 apiClient：auth 接口不需要 X-Client-ID 头，401 也不触发登录页跳转。
  */
+import { withBasePath } from '@/lib/utils';
 
 export interface AuthUser {
   id: string;
@@ -22,7 +23,7 @@ async function parseOrThrow<T>(res: Response): Promise<T> {
 }
 
 async function post<T>(url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(withBasePath(url), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
@@ -54,7 +55,7 @@ export async function logout(): Promise<void> {
 }
 
 export async function fetchSession(): Promise<SessionState> {
-  const res = await fetch('/api/auth/session', { credentials: 'same-origin' });
+  const res = await fetch(withBasePath('/api/auth/session'), { credentials: 'same-origin' });
   return parseOrThrow<SessionState>(res);
 }
 
@@ -63,9 +64,10 @@ export async function changePassword(oldPassword: string, newPassword: string): 
 }
 
 export async function fetchSecurityQuestions(username: string): Promise<string[]> {
-  const res = await fetch(`/api/auth/security-questions?username=${encodeURIComponent(username)}`, {
-    credentials: 'same-origin',
-  });
+  const res = await fetch(
+    withBasePath(`/api/auth/security-questions?username=${encodeURIComponent(username)}`),
+    { credentials: 'same-origin' }
+  );
   const data = await parseOrThrow<{ questions: string[] }>(res);
   return data.questions;
 }
