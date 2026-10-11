@@ -45,7 +45,10 @@ export async function POST(req: NextRequest) {
     }
 
     const lock = getLockStatus(user);
-    if (lock.locked) return lockedResponse(lock.retryAfterSec);
+    if (lock.locked) {
+      await logAuthEvent({ action: 'login', outcome: 'failure', username, reason: 'account_locked' });
+      return lockedResponse(lock.retryAfterSec);
+    }
 
     const ok = await verifySecret(password, user.passwordHash);
     if (!ok) {

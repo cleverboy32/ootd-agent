@@ -70,7 +70,10 @@ export async function POST(req: NextRequest) {
     }
 
     const lock = getLockStatus(user);
-    if (lock.locked) return lockedResponse(lock.retryAfterSec);
+    if (lock.locked) {
+      await logAuthEvent({ action: 'reset_password', outcome: 'failure', username, reason: 'account_locked' });
+      return lockedResponse(lock.retryAfterSec);
+    }
 
     let remainingRecoveryHashes: string[] | null = null;
 
