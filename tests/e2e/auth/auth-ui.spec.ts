@@ -21,6 +21,8 @@ test('unauthenticated visit redirects to login and returns to the origin page', 
 
   await page.goto('/ootd');
   await expect(page).toHaveURL(/\/ootd\/login\?redirect=%2F$/);
+  // 受控输入框：水合前填入的值会被重置
+  await page.waitForLoadState('networkidle');
 
   await page.locator('#login-username').fill(username);
   await page.locator('#login-password').fill(PASSWORD);
