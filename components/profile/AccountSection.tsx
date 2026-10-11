@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { fetchSession, logout, type AuthUser } from '@/lib/api/auth';
+import { withBasePath } from '@/lib/utils';
 
 /** 账号条：显示当前用户 + 安全中心/登出入口。access 模式（未启用登录体系）下不渲染 */
 export function AccountSection() {
-  const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -22,7 +21,8 @@ export function AccountSection() {
     setPending(true);
     try {
       await logout();
-      router.push('/login');
+      // 整页跳转：清掉内存里上一个账号的会话/衣橱 store
+      window.location.assign(withBasePath('/login'));
     } catch {
       setPending(false);
     }

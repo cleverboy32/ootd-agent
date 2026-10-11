@@ -2,7 +2,7 @@
 
 import { Suspense, useState, type FormEvent } from 'react';
 import Image from 'next/image';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import {
   resetPasswordByQuestions,
   resetPasswordByRecovery,
 } from '@/lib/api/auth';
-import { LOGO_SRC } from '@/lib/utils';
+import { LOGO_SRC, withBasePath } from '@/lib/utils';
 
 /** 只允许站内相对路径，防开放重定向 */
 function safeRedirect(target: string | null): string {
@@ -22,10 +22,14 @@ function safeRedirect(target: string | null): string {
   return '/';
 }
 
+/** 整页跳转：根布局的 AccessProvider 与内存 store 必须按新身份重新初始化，客户端路由做不到 */
+function enterApp(redirect: string): void {
+  window.location.assign(withBasePath(redirect));
+}
+
 const labelClass = 'block text-sm font-medium text-foreground mb-1.5';
 
 function LoginTab({ redirect }: { redirect: string }) {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -37,7 +41,7 @@ function LoginTab({ redirect }: { redirect: string }) {
     setPending(true);
     try {
       await login(username, password);
-      router.push(redirect);
+      enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
       setPending(false);
@@ -76,7 +80,6 @@ function LoginTab({ redirect }: { redirect: string }) {
 }
 
 function RegisterTab({ redirect }: { redirect: string }) {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -94,7 +97,7 @@ function RegisterTab({ redirect }: { redirect: string }) {
     setPending(true);
     try {
       await registerAccount(username, password, inviteCode);
-      router.push(redirect);
+      enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '注册失败，请稍后重试');
       setPending(false);
@@ -156,7 +159,6 @@ function RegisterTab({ redirect }: { redirect: string }) {
 }
 
 function ForgotTab({ redirect }: { redirect: string }) {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [questions, setQuestions] = useState<string[] | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -205,7 +207,7 @@ function ForgotTab({ redirect }: { redirect: string }) {
       } else {
         await resetPasswordByRecovery(username, recoveryCode, newPassword);
       }
-      router.push(redirect);
+      enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '重置失败，请稍后重试');
       setPending(false);

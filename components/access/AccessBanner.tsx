@@ -10,7 +10,7 @@ import { useAccess } from "./AccessProvider";
 
 export function AccessBanner() {
   const pathname = usePathname();
-  const { mode, configured, verify, logout } = useAccess();
+  const { mode, authMode, configured, verify, logout } = useAccess();
   const [expanded, setExpanded] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -22,7 +22,7 @@ export function AccessBanner() {
     ? "fixed right-3 top-16 z-50"
     : "fixed right-4 top-3 z-50 lg:right-6";
 
-  if (mode === "loading") return null;
+  if (mode === "loading" || authMode === "user") return null;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

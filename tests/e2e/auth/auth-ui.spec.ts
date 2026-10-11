@@ -27,4 +27,12 @@ test('unauthenticated visit redirects to login and returns to the origin page', 
   await page.locator('#login-password').press('Enter');
 
   await expect(page).toHaveURL(/\/ootd\/?$/);
+
+  // 登录态即完整能力：不出现访问码浏览模式，聊天可输入
+  await expect(page.getByPlaceholder('上传衣服照片，获取搭配建议...')).toBeEnabled();
+  await expect(page.getByText('浏览模式')).toHaveCount(0);
+
+  await page.goto('/ootd/profile');
+  await expect(page.getByText(username, { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '安全中心' })).toBeVisible();
 });

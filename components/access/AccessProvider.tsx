@@ -13,8 +13,12 @@ import {
 
 export type AccessMode = "loading" | "browse" | "verified";
 
+/** access：访问码单用户模式；user：登录体系（能力由登录 session 决定，不展示访问码入口） */
+export type AuthMode = "access" | "user";
+
 interface AccessContextValue {
   mode: AccessMode;
+  authMode: AuthMode;
   configured: boolean;
   canMutate: boolean;
   canInvokeAI: boolean;
@@ -26,6 +30,7 @@ const AccessContext = createContext<AccessContextValue | null>(null);
 
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AccessMode>("loading");
+  const [authMode, setAuthMode] = useState<AuthMode>("access");
   const [configured, setConfigured] = useState(true);
 
   useEffect(() => {
@@ -36,11 +41,13 @@ export function AccessProvider({ children }: { children: ReactNode }) {
         return response.json() as Promise<{
           mode: "browse" | "verified";
           configured: boolean;
+          authMode?: AuthMode;
         }>;
       })
       .then((result) => {
         if (!active) return;
         setMode(result.mode);
+        setAuthMode(result.authMode ?? "access");
         setConfigured(result.configured);
       })
       .catch(() => {
@@ -74,13 +81,14 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AccessContextValue>(
     () => ({
       mode,
+      authMode,
       configured,
       canMutate: mode === "verified",
       canInvokeAI: mode === "verified",
       verify,
       logout,
     }),
-    [configured, logout, mode, verify]
+    [authMode, configured, logout, mode, verify]
   );
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>;

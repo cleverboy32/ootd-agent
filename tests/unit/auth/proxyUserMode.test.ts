@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { NextRequest } from 'next/server';
-import { getAuthMode, proxy } from '@/proxy';
+import { proxy } from '@/proxy';
+import { getAuthMode } from '@/server/auth/mode';
 
 const originalEnv = {
   AUTH_MODE: process.env.AUTH_MODE,

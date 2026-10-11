@@ -5,6 +5,7 @@ import {
   isPublicReadRequest,
   verifyAccessSessionToken,
 } from '@/server/auth/access';
+import { getAuthMode } from '@/server/auth/mode';
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/server/auth/session';
 
 /**
@@ -14,11 +15,6 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from '@/server/auth/session';
  *
  * 注意：Proxy 在 Next 16 默认 Node.js 运行时，Prisma 可用。
  */
-
-/** AUTH_MODE=user 启用登录体系；缺省/其他值均为 access */
-export function getAuthMode(): 'user' | 'access' {
-  return process.env.AUTH_MODE?.trim() === 'user' ? 'user' : 'access';
-}
 
 function unauthorized(): NextResponse {
   return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
