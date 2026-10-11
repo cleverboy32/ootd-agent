@@ -4,7 +4,7 @@ import { MOCK_PROFILE, MOCK_WARDROBE_ITEMS } from './mock-data';
 export async function mockConversationApis(page: Page): Promise<void> {
   await page.route('**/api/conversations**', async (route: Route) => {
     const req = route.request();
-    const { pathname } = new URL(req.url());
+    const pathname = new URL(req.url()).pathname.replace(/^\/ootd(?=\/)/, '');
 
     if (req.method() === 'GET' && pathname === '/api/conversations') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });

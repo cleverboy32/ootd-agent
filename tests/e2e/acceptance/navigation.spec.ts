@@ -9,7 +9,7 @@ test.describe('navigation', () => {
     await mockWardrobeApi(page);
 
     await page.getByRole('link', { name: 'AI 搭配' }).click();
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL(/\/ootd\/?$/);
     await expect(page.getByText('你好，我是你的专属时尚搭配助手')).toBeVisible();
   });
 
@@ -21,7 +21,7 @@ test.describe('navigation', () => {
     await page.goto('/profile');
 
     await page.getByRole('link', { name: '衣橱总览' }).click();
-    await expect(page).toHaveURL('/wardrobe');
+    await expect(page).toHaveURL('/ootd/wardrobe');
     await expect(page.getByText('共 2 件衣物')).toBeVisible();
   });
 
@@ -32,7 +32,7 @@ test.describe('navigation', () => {
     await page.goto('/wardrobe');
 
     await page.getByRole('link', { name: '我的档案' }).click();
-    await expect(page).toHaveURL('/profile');
+    await expect(page).toHaveURL('/ootd/profile');
     await expect(page.getByText('E2E Tester')).toBeVisible();
   });
 
