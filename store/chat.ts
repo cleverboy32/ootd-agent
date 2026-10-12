@@ -96,7 +96,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     }
   },
 
-  // 乐观渲染：建会话 + 存首条消息两次往返（实测 1.3~1.7s）期间用户消息已上屏
+  // 乐观渲染：建会话（含首条消息，单次往返）期间用户消息已上屏
   startNewConversation: async (userMessage) => {
     set({ activeConversationId: null, messages: [userMessage] });
     return get().persistNewConversation(userMessage);
@@ -113,8 +113,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     };
 
     try {
-      const newConversation = await chatApi.createConversation(createTitleFromContent(userMessage.content));
-      await chatApi.postMessage(newConversation.id, { role: userMessage.role, content: userMessage.content });
+      const newConversation = await chatApi.createConversation(
+        createTitleFromContent(userMessage.content),
+        { role: 'user', content: userMessage.content }
+      );
 
       set(state => ({ conversations: [newConversation, ...state.conversations] }));
       // 等待期间用户已切走（新建/切换会话）则不抢回视图，也不让调用方继续往当前视图流式写入

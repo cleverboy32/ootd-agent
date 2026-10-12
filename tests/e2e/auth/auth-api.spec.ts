@@ -91,12 +91,24 @@ test.describe('data isolation', () => {
     const usernameA = uniqueName('ua');
     expect((await registerUser(request, usernameA)).status()).toBe(200);
     const created = await request.post('/api/conversations', {
-      data: { title: 'A 的私密会话' },
+      data: {
+        title: 'A 的私密会话',
+        firstMessage: { role: 'user', content: [{ type: 'text', content: '有没有白裙子' }] },
+      },
     });
     expect(created.status()).toBe(201);
     const conversation = await created.json();
     const listA = await (await request.get('/api/conversations')).json();
     expect(listA.map((c: { id: string }) => c.id)).toContain(conversation.id);
+    // 首条消息与会话同一次写入
+    const messagesA = await (await request.get(`/api/conversations/${conversation.id}/messages`)).json();
+    expect(messagesA).toHaveLength(1);
+    expect(messagesA[0]).toMatchObject({ role: 'user', content: [{ type: 'text', content: '有没有白裙子' }] });
+
+    const invalid = await request.post('/api/conversations', {
+      data: { title: 'x', firstMessage: { role: 'ai', content: [] } },
+    });
+    expect(invalid.status()).toBe(400);
 
     // 登出 A，注册 B
     await request.post('/api/auth/logout');

@@ -47,9 +47,17 @@ test.describe('new conversation optimistic send', () => {
     const createGate = new Promise<void>((resolve) => {
       releaseCreate = resolve;
     });
+    let createBody: unknown;
     await mockConversationsWith(page, async (route) => {
+      createBody = route.request().postDataJSON();
       await createGate;
       await fulfillCreated(route);
+    });
+    const messagePosts: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && /\/conversations\/[^/]+\/messages$/.test(new URL(request.url()).pathname)) {
+        messagePosts.push(request.url());
+      }
     });
 
     await sendFirstMessage(page, '有没有白裙子');
@@ -59,6 +67,12 @@ test.describe('new conversation optimistic send', () => {
 
     releaseCreate();
     await expect(page.getByText('白裙子搭配建议')).toBeVisible();
+
+    // 首条消息随建会话一次落库，不再单独 POST messages
+    expect(createBody).toMatchObject({
+      firstMessage: { role: 'user', content: [{ type: 'text', content: '有没有白裙子' }] },
+    });
+    expect(messagePosts).toHaveLength(0);
   });
 
   test('[ACC-C5] failed conversation creation keeps the message and retries', async ({ page }) => {

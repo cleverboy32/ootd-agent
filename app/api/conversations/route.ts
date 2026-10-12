@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prismadb from '@/server/db';
+import type { MessageContentPart } from '@/lib/types';
 
 /**
  * Handles GET requests to fetch conversations for a specific client.
@@ -30,31 +31,57 @@ export async function GET(req: NextRequest) {
   }
 }
 
+interface CreateConversationBody {
+  title?: unknown;
+  firstMessage?: { role?: unknown; content?: unknown };
+}
+
 /**
  * Handles POST requests to create a new conversation.
- * Expects `clientId` and `title` in the JSON request body.
+ * Body: `title`, optional `firstMessage` ({ role: 'user', content: MessageContentPart[] })
+ * persisted in the same write so a new chat costs one round trip instead of two.
  * @param req The Next.js request object.
  * @returns A JSON response with the newly created conversation or an error.
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { title } = body;
+    const body = (await req.json()) as CreateConversationBody;
+    const { title, firstMessage } = body;
     const clientId = req.headers.get('X-Client-ID');
-    
 
     if (!clientId) {
       return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
     }
-    
-    if (!title) {
+
+    if (typeof title !== 'string' || !title) {
         return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
+
+    if (
+      firstMessage !== undefined &&
+      (firstMessage.role !== 'user' ||
+        !Array.isArray(firstMessage.content) ||
+        firstMessage.content.length === 0)
+    ) {
+      return NextResponse.json(
+        { error: 'firstMessage must be a user message with non-empty content' },
+        { status: 400 }
+      );
     }
 
     const newConversation = await prismadb.conversation.create({
       data: {
-        title: title,
-        clientId: clientId,
+        title,
+        clientId,
+        ...(firstMessage && {
+          messages: {
+            create: {
+              role: 'user',
+              content: firstMessage.content as MessageContentPart[],
+              timestamp: new Date(),
+            },
+          },
+        }),
       },
     });
 

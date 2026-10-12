@@ -19,11 +19,14 @@ export const getConversations = async (): Promise<Conversation[]> => {
  * Creates a new conversation.
  * clientId is automatically handled by apiClient.
  * @param title The title of the new conversation.
+ * @param firstMessage Optional first user message, persisted in the same request.
  * @returns A promise that resolves to the newly created conversation.
  */
-export const createConversation = async (title: string): Promise<Conversation> => {
-  // 3. 使用 apiClient.post，body 里只需要核心数据
-  return apiClient.post(`${API_BASE}/conversations`, { title });
+export const createConversation = async (
+  title: string,
+  firstMessage?: { role: 'user'; content: MessageContentPart[] }
+): Promise<Conversation> => {
+  return apiClient.post(`${API_BASE}/conversations`, { title, firstMessage });
 };
 
 /**
