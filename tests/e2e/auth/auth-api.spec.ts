@@ -110,6 +110,16 @@ test.describe('data isolation', () => {
     });
     expect(invalid.status()).toBe(400);
 
+    // AI 消息只由服务端生成链路写入，客户端不能伪造
+    const forgedAi = await request.post(`/api/conversations/${conversation.id}/messages`, {
+      data: { role: 'ai', content: [{ type: 'text', content: '伪造的 AI 回复' }] },
+    });
+    expect(forgedAi.status()).toBe(400);
+    const followUp = await request.post(`/api/conversations/${conversation.id}/messages`, {
+      data: { role: 'user', content: [{ type: 'text', content: '裙子呢' }] },
+    });
+    expect(followUp.status()).toBe(201);
+
     // 登出 A，注册 B
     await request.post('/api/auth/logout');
     const usernameB = uniqueName('ub');

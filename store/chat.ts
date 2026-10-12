@@ -20,7 +20,6 @@ interface ChatActions {
   persistNewConversation: (userMessage: Message) => Promise<string>;
   addUserMessage: (userMessage: Message) => Promise<void>;
   updateMessages: (updater: (messages: Message[]) => Message[]) => void; // The new powerful action
-  saveFinalAiMessage: () => Promise<void>;
   setLoading: (isLoading: boolean) => void;
   setWaitReply: (waiting: boolean) => void;
   deleteConversation: (conversationId: string) => Promise<void>;
@@ -140,7 +139,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     
     set({ messages: [...messages, userMessage] });
     try {
-      await chatApi.postMessage(activeConversationId, { role: userMessage.role, content: userMessage.content });
+      await chatApi.postMessage(activeConversationId, { role: 'user', content: userMessage.content });
     } catch (error) {
       console.error("Failed to save user message", error);
       // 可选: 实现回滚逻辑
@@ -152,17 +151,5 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       messages: updater(state.messages)
     }));
   },
-  
-  saveFinalAiMessage: async () => {
-    const { activeConversationId, messages } = get();
-    const lastMessage = messages.at(-1);
-    if (!activeConversationId || !lastMessage || lastMessage.role !== 'ai') return;
-    
-    try {
-      await chatApi.postMessage(activeConversationId, { role: lastMessage.role, content: lastMessage.content });
-    } catch (error) {
-      console.error("Failed to save final AI message", error);
-    }
-  }
 }));
 

@@ -70,11 +70,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
 
-    const body: { role: 'user' | 'ai', content: MessageContentPart[] } = await req.json();
+    const body = (await req.json()) as { role?: unknown; content?: unknown };
     const { role, content } = body;
 
-    if (!role || !content) {
-      return NextResponse.json({ error: 'Role and content are required' }, { status: 400 });
+    // AI 消息只由服务端生成链路写入（graph/nodes.ts 占位 + helpers.ts 更新），客户端只能写用户消息
+    if (role !== 'user' || !Array.isArray(content) || content.length === 0) {
+      return NextResponse.json(
+        { error: 'Only user messages with non-empty content can be posted' },
+        { status: 400 }
+      );
     }
 
     console.log('接收到的消息', JSON.stringify(content))
@@ -82,8 +86,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     const newMessage = await prismadb.message.create({
       data: {
         conversationId: conversationId,
-        role: role,
-        content: content,
+        role: 'user',
+        content: content as MessageContentPart[],
         timestamp: new Date(),
       },
     });

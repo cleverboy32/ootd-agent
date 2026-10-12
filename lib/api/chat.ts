@@ -54,6 +54,6 @@ export const getMessages = async (conversationId: string): Promise<Message[]> =>
  * @param message The message object to post.
  * @returns A promise that resolves to the newly created message.
  */
-export const postMessage = async (conversationId: string, message: { role: 'user' | 'ai'; content: string | MessageContentPart[] }): Promise<Message> => {
+export const postMessage = async (conversationId: string, message: { role: 'user'; content: MessageContentPart[] }): Promise<Message> => {
   return apiClient.post(`${API_BASE}/conversations/${conversationId}/messages`, message);
 };
