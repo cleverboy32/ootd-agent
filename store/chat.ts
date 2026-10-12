@@ -17,6 +17,7 @@ interface ChatActions {
   
   // --- 原子化的消息 Actions (供编排者调用) ---
   startNewConversation: (userMessage: Message) => Promise<string>;
+  persistNewConversation: (userMessage: Message) => Promise<string>;
   addUserMessage: (userMessage: Message) => Promise<void>;
   updateMessages: (updater: (messages: Message[]) => Message[]) => void; // The new powerful action
   saveFinalAiMessage: () => Promise<void>;
@@ -95,32 +96,38 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     }
   },
 
+  // 乐观渲染：建会话 + 存首条消息两次往返（实测 1.3~1.7s）期间用户消息已上屏
   startNewConversation: async (userMessage) => {
-    const { conversations } = get();
-    
-    // 从消息内容创建标题的辅助函数
+    set({ activeConversationId: null, messages: [userMessage] });
+    return get().persistNewConversation(userMessage);
+  },
+
+  /** 为已上屏的首条消息建会话并落库；失败时标记 sendFailed 供重试，返回空串 */
+  persistNewConversation: async (userMessage) => {
     const createTitleFromContent = (content: string | MessageContentPart[]): string => {
       if (typeof content === 'string') {
-        return content.substring(0, 50); // Use first 50 chars of string content
+        return content.substring(0, 50);
       }
       const textPart = content.find(part => part.type === 'text');
       return textPart ? textPart.content.substring(0, 50) : 'New Conversation';
     };
 
-    const title = createTitleFromContent(userMessage.content);
-
     try {
-      const newConversation = await chatApi.createConversation(title);
+      const newConversation = await chatApi.createConversation(createTitleFromContent(userMessage.content));
       await chatApi.postMessage(newConversation.id, { role: userMessage.role, content: userMessage.content });
-      
-      set({
-        conversations: [newConversation, ...conversations],
-        activeConversationId: newConversation.id,
-        messages: [userMessage],
-      });
+
+      set(state => ({ conversations: [newConversation, ...state.conversations] }));
+      // 等待期间用户已切走（新建/切换会话）则不抢回视图，也不让调用方继续往当前视图流式写入
+      const { activeConversationId, messages } = get();
+      if (activeConversationId !== null || messages[0]?.id !== userMessage.id) return '';
+
+      set({ activeConversationId: newConversation.id });
       return newConversation.id;
     } catch (error) {
       console.error("Failed to start new conversation", error);
+      set(state => ({
+        messages: state.messages.map(m => m.id === userMessage.id ? { ...m, sendFailed: true } : m),
+      }));
       return '';
     }
   },

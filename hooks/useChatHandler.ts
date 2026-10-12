@@ -11,6 +11,7 @@ export const useChatHandler = () => {
   const {
     activeConversationId,
     startNewConversation,
+    persistNewConversation,
     addUserMessage,
     updateMessages,
     setWaitReply,
@@ -296,8 +297,6 @@ export const useChatHandler = () => {
    */
   const handleRetrySend = useCallback(async (failedUserMsg: Message) => {
     if (!canInvokeAI) return;
-    const conversationId = activeConversationId;
-    if (!conversationId) return;
 
     // 清除错误标记
     updateMessages(messages =>
@@ -307,6 +306,13 @@ export const useChatHandler = () => {
     const { text: textPrompt, imageUrl } = extractUserMessageMedia(failedUserMsg);
 
     setWaitReply(true);
+
+    // 首条消息建会话失败：先补建会话（失败时 store 会重新标记 sendFailed）
+    const conversationId = activeConversationId ?? await persistNewConversation(failedUserMsg);
+    if (!conversationId) {
+      setWaitReply(false);
+      return;
+    }
 
     let currentAiMessageId = '';
 
@@ -379,7 +385,7 @@ export const useChatHandler = () => {
       { conversationId, content: { text: textPrompt, imageUrl } } as Parameters<typeof streamResponse>[0],
       handlers,
     );
-  }, [activeConversationId, canInvokeAI, updateMessages, setWaitReply]);
+  }, [activeConversationId, canInvokeAI, persistNewConversation, updateMessages, setWaitReply]);
 
   return { handleSend, handleRetrySend, canInvokeAI };
 };

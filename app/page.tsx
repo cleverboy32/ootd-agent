@@ -45,7 +45,7 @@ export default function FashionAIPage() {
       <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
         <ChatHeader />
         <div className="flex-1 overflow-y-auto no-scrollbar pb-32">
-          {!activeConversationId ? ( 
+          {!activeConversationId && messages.length === 0 ? (
             <GreetingSection handleSend={handleSend} />
           ) : (
             <ChatMessagesList messagesEndRef={messagesEndRef} /> // <--- 修改这里
