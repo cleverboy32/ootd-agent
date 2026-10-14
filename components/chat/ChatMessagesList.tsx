@@ -1,21 +1,61 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import Image from 'next/image';
 import { ChatMessage } from './ChatMessage';
 import { useChatStore } from '@/store/chat';
 import { LOGO_SRC } from '@/lib/utils';
 interface ChatMessagesListProps {
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
+export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMessagesListProps) {
 
   const {
     messages,
     isLoading,
-    waitReply
+    isLoadingOlder,
+    nextCursor,
+    waitReply,
+    loadOlderMessages,
   } = useChatStore();
 
   const lastMessage = messages[messages.length - 1];
+  const firstMessageId = messages[0]?.id;
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const prevFirstIdRef = useRef(firstMessageId);
+  const prevScrollHeightRef = useRef(0);
+
+  // 头部插入更早消息后补偿 scrollTop，保持当前阅读位置不动
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const prevFirstId = prevFirstIdRef.current;
+    if (
+      prevFirstId &&
+      firstMessageId !== prevFirstId &&
+      messages.some(m => m.id === prevFirstId)
+    ) {
+      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+    }
+    prevFirstIdRef.current = firstMessageId;
+    prevScrollHeightRef.current = el.scrollHeight;
+  });
+
+  // 依赖 firstMessageId 以便每页加载后重建 observer：内容不足一屏时 sentinel 持续可见，需要重新触发
+  useEffect(() => {
+    const root = scrollContainerRef.current;
+    const sentinel = topSentinelRef.current;
+    if (!root || !sentinel || !nextCursor) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) void loadOlderMessages();
+      },
+      { root, rootMargin: '200px 0px 0px 0px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [scrollContainerRef, firstMessageId, nextCursor, loadOlderMessages]);
 
   useEffect(() => {
     console.log(isLoading, messages);
@@ -36,9 +76,15 @@ export function ChatMessagesList({ messagesEndRef }: ChatMessagesListProps) {
 
   return (
     <div className="pt-8 px-6 sm:px-12 flex flex-col gap-6">
-      {messages.map((msg, idx) => (
+      {nextCursor && (
+        <div ref={topSentinelRef} className="flex justify-center text-xs text-muted-foreground h-4">
+          {isLoadingOlder && <span className="animate-pulse">正在加载更早的消息...</span>}
+        </div>
+      )}
+
+      {messages.map((msg) => (
         <ChatMessage
-          key={idx} // <-- 使用唯一的 message.id 作为 key！
+          key={msg.id}
           msg={msg}
         />
       ))}

@@ -6,7 +6,10 @@ interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
   messages: Message[];
+  /** `before` cursor for the next older page; null when the oldest message is loaded */
+  nextCursor: string | null;
   isLoading: boolean;
+  isLoadingOlder: boolean;
   waitReply: boolean;
 }
 
@@ -14,6 +17,7 @@ interface ChatActions {
   // --- 基础 Actions ---
   fetchConversations: () => Promise<void>;
   setActiveConversationId: (id: string | null) => void;
+  loadOlderMessages: () => Promise<void>;
   
   // --- 原子化的消息 Actions (供编排者调用) ---
   startNewConversation: (userMessage: Message) => Promise<string>;
@@ -30,7 +34,9 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   conversations: [],
   activeConversationId: null,
   messages: [],
+  nextCursor: null,
   isLoading: false,
+  isLoadingOlder: false,
   waitReply: false,
   
   // --- Actions 实现 ---
@@ -67,6 +73,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       if (activeConversationId === conversationId) {
         newState.activeConversationId = null;
         newState.messages = [];
+        newState.nextCursor = null;
       }
 
       set(newState);
@@ -84,20 +91,43 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     if (id === get().activeConversationId) return;
 
     if (!id) {
-      set({ activeConversationId: null, messages: [], isLoading: false });
+      set({ activeConversationId: null, messages: [], nextCursor: null, isLoading: false, isLoadingOlder: false });
       return;
     }
 
-    set({ activeConversationId: id, messages: [], isLoading: true });
-    const messages = await chatApi.getMessages(id);
+    set({ activeConversationId: id, messages: [], nextCursor: null, isLoading: true, isLoadingOlder: false });
+    const { messages, nextCursor } = await chatApi.getMessages(id);
     if (get().activeConversationId === id) {
-      set({ messages, isLoading: false });
+      set({ messages, nextCursor, isLoading: false });
+    }
+  },
+
+  loadOlderMessages: async () => {
+    const { activeConversationId: id, nextCursor, isLoading, isLoadingOlder } = get();
+    if (!id || !nextCursor || isLoading || isLoadingOlder) return;
+
+    // 切换会话会重置 cursor，游标不变才说明响应仍对应当前视图
+    const isCurrent = () => get().activeConversationId === id && get().nextCursor === nextCursor;
+
+    set({ isLoadingOlder: true });
+    try {
+      const page = await chatApi.getMessages(id, { before: nextCursor });
+      if (!isCurrent()) return;
+      set(state => {
+        const loaded = new Set(state.messages.map(m => m.id));
+        const older = page.messages.filter(m => !loaded.has(m.id));
+        return { messages: [...older, ...state.messages], nextCursor: page.nextCursor };
+      });
+    } catch (error) {
+      console.error("Failed to load older messages", error);
+    } finally {
+      if (get().activeConversationId === id) set({ isLoadingOlder: false });
     }
   },
 
   // 乐观渲染：建会话（含首条消息，单次往返）期间用户消息已上屏
   startNewConversation: async (userMessage) => {
-    set({ activeConversationId: null, messages: [userMessage] });
+    set({ activeConversationId: null, messages: [userMessage], nextCursor: null, isLoadingOlder: false });
     return get().persistNewConversation(userMessage);
   },
 

@@ -38,14 +38,32 @@ export const deleteConversation = async (conversationId: string): Promise<void> 
   await apiClient.delete(`${API_BASE}/conversations/${conversationId}`);
 };
 
+export interface MessagePageResult {
+  /** Chronological order. */
+  messages: Message[];
+  /** Pass as `before` to fetch the previous page; null when there are no older messages. */
+  nextCursor: string | null;
+}
+
 /**
- * Fetches all messages for a specific conversation.
+ * Fetches one page of messages for a specific conversation.
  * @param conversationId The ID of the conversation.
- * @returns A promise that resolves to an array of messages.
+ * @param options `before` cursor (omit for the latest page) and page `limit`.
  */
-export const getMessages = async (conversationId: string): Promise<Message[]> => {
-  const raw = await apiClient.get(`${API_BASE}/conversations/${conversationId}/messages`);
-  return mapDbMessagesToClient(raw as Parameters<typeof mapDbMessagesToClient>[0]);
+export const getMessages = async (
+  conversationId: string,
+  options: { before?: string; limit?: number } = {}
+): Promise<MessagePageResult> => {
+  const query = new URLSearchParams();
+  if (options.before) query.set('before', options.before);
+  if (options.limit) query.set('limit', String(options.limit));
+  const qs = query.toString();
+
+  const raw = (await apiClient.get(
+    `${API_BASE}/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`
+  )) as { messages: Parameters<typeof mapDbMessagesToClient>[0]; nextCursor: string | null };
+
+  return { messages: mapDbMessagesToClient(raw.messages), nextCursor: raw.nextCursor };
 };
 
 /**

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prismadb from '@/server/db';
 import { MessageContentPart } from '@/lib/types';
+import { buildMessagePage, parseMessagePageLimit } from '@/server/utils/messagePage';
 
 type RouteParams = {
   params: Promise<{
@@ -9,10 +10,11 @@ type RouteParams = {
 };
 
 /**
- * Handles GET requests to fetch all messages for a specific conversation.
+ * Handles GET requests to fetch one page of messages for a specific conversation.
+ * Query: `limit` (default 20, max 50), `before` (message id cursor; omitted for the latest page).
  * @param req The Next.js request object.
  * @param params The route parameters, containing `conversationId`.
- * @returns A JSON response with the list of messages or an error.
+ * @returns `{ messages, nextCursor }` with messages in chronological order, or an error.
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
@@ -25,17 +27,21 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     );
   }
 
+  const { searchParams } = req.nextUrl;
+  const limit = parseMessagePageLimit(searchParams.get('limit'));
+  const before = searchParams.get('before');
+
   try {
-    const messages = await prismadb.message.findMany({
+    const rowsDesc = await prismadb.message.findMany({
       where: {
         conversationId,
         conversation: { clientId },
       },
-      orderBy: {
-        createdAt: 'asc', // Order messages chronologically
-      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(before && { cursor: { id: before }, skip: 1 }),
     });
-    return NextResponse.json(messages);
+    return NextResponse.json(buildMessagePage(rowsDesc, limit));
   } catch (error) {
     console.error('[MESSAGES_GET]', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
