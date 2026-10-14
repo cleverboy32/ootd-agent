@@ -72,3 +72,11 @@ export async function beginShutdown(signal: NodeJS.Signals): Promise<void> {
   console.log('[SHUTDOWN] exit 0');
   process.exit(0);
 }
+
+export function registerShutdownSignals(): void {
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => {
+      void beginShutdown(sig);
+    });
+  }
+}
