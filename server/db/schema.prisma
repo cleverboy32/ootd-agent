@@ -76,7 +76,7 @@ model Message {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  @@index([conversationId])
+  @@index([conversationId, createdAt])
 }
 
 // --- [新增] --- 全新的 Summary 模型
