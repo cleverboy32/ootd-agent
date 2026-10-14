@@ -35,6 +35,25 @@ const baseIntent = {
   dressing_climate: '' as const,
 };
 
+describe('computeDressingClimate — temperature thresholds', () => {
+  const climateAt = (weather: string) =>
+    computeDressingClimate({ ...baseIntent, occasion: '晚餐', weather });
+
+  it('23℃ 雾天（2026-10-14 重庆晚餐）→ mild，不再判 warm', () => {
+    assert.equal(climateAt('重庆城区，雾，23℃，东北风≤3级，湿度77%'), 'mild');
+  });
+
+  it('25℃ → mild；26℃ → warm', () => {
+    assert.equal(climateAt('25℃'), 'mild');
+    assert.equal(climateAt('26℃'), 'warm');
+  });
+
+  it('12℃ → cold；13℃ → mild', () => {
+    assert.equal(climateAt('12℃'), 'cold');
+    assert.equal(climateAt('13℃'), 'mild');
+  });
+});
+
 describe('buildSeasonFilterContext', () => {
   it('uses warm from weather temperature, ignoring Gatekeeper guess', () => {
     const ctx = buildSeasonFilterContext({

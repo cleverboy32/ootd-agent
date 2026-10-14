@@ -19,6 +19,10 @@ export interface SeasonFilterContext {
 
 const ALL_SEASONS: ClothingSeason[] = ['spring', 'summer', 'autumn', 'winter'];
 
+/** 穿衣指数口径：≥26℃ 才是短袖短裤天；22–25℃ 早晚体感偏凉，归 mild 交给 Stylist 按天气文本挑 */
+const WARM_MIN_CELSIUS = 26;
+const COLD_MAX_CELSIUS = 12;
+
 const STRICT_COLD_ACTIVITY_HINT = /滑雪|滑雪服|雪场|雪地|skiing|snowboard|snow sports/i;
 
 const HEAVY_WINTER_SUBCATEGORY = /puffer|down jacket|down coat|parka|padded boot|quilted.*jacket/i;
@@ -55,11 +59,7 @@ export function inferClimateFromWeather(weather: string): DressingClimate | '' {
   if (!normalized) return '';
 
   const temp = parseTemperatureCelsius(normalized);
-  if (temp !== null) {
-    if (temp >= 22) return 'warm';
-    if (temp <= 12) return 'cold';
-    return 'mild';
-  }
+  if (temp !== null) return climateFromParsedTemperature(temp);
 
   if (/冬|寒冷|下雪|保暖|冷/i.test(normalized)) return 'cold';
   if (/夏|炎热|热/i.test(normalized)) return 'warm';
@@ -89,14 +89,14 @@ function inferClimateFromActivity(intent: GatekeeperIntent, userMessage?: string
   if (!STRICT_COLD_ACTIVITY_HINT.test(activityText)) return '';
 
   const temp = intent.weather?.trim() ? parseTemperatureCelsius(intent.weather) : null;
-  if (temp !== null && temp >= 22) return '';
+  if (temp !== null && temp >= WARM_MIN_CELSIUS) return '';
 
   return 'cold';
 }
 
 function climateFromParsedTemperature(temp: number): DressingClimate {
-  if (temp >= 22) return 'warm';
-  if (temp <= 12) return 'cold';
+  if (temp >= WARM_MIN_CELSIUS) return 'warm';
+  if (temp <= COLD_MAX_CELSIUS) return 'cold';
   return 'mild';
 }
 
