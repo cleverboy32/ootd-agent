@@ -143,7 +143,7 @@ export function assessSlotMatch(
     };
   }
 
-  // 灰区：分数达到 weak 线但未达 adequate 线，若 top1 明显领先 top2，可提升为 adequate
+  // 灰区一律 adequate：Stylist prompt 视 weak 为「必须补新品」，而多件候选分数接近意味着衣橱有多个可选项，不是没有
   if (gap >= thresholds.slotConfidenceGap) {
     return {
       slot,
@@ -156,10 +156,10 @@ export function assessSlotMatch(
 
   return {
     slot,
-    status: 'weak',
+    status: 'adequate',
     bestSimilarity: top.similarity,
     bestSubCategory,
-    note: '相似度中等且与次优选项胶着，请谨慎判断是否真适配场合',
+    note: `相似度 ${top.similarity.toFixed(2)} 灰区，有多件相近候选，请按场合与风格择优`,
   };
 }
 

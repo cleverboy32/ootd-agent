@@ -82,7 +82,7 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
     assert.match(assessment.note, /有可用的衣橱单品/);
   });
 
-  it('灰区分低且 gap 小 → weak', () => {
+  it('灰区且多件候选分数接近 → adequate，提示按场合择优', () => {
     const assessment = assessSlotMatch(
       [
         item({ id: 'c1', subCategory: 'Trench Coat', similarity: 0.58 }),
@@ -91,8 +91,43 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
       'outerwear',
       false
     );
+    assert.equal(assessment.status, 'adequate');
+    assert.match(assessment.note, /择优/);
+  });
+
+  it('回放 2026-10-14 晚餐：上衣 0.603/0.578、鞋 0.614/0.592 → adequate', () => {
+    const top = assessSlotMatch(
+      [
+        item({ id: 't1', subCategory: 'Sleeveless Blouse', mainCategory: 'TOP', similarity: 0.6028 }),
+        item({ id: 't2', subCategory: 'T-shirt', mainCategory: 'TOP', similarity: 0.5778 }),
+        item({ id: 't3', subCategory: 'T-shirt', mainCategory: 'TOP', similarity: 0.5777 }),
+      ],
+      'top',
+      false
+    );
+    const shoes = assessSlotMatch(
+      [
+        item({ id: 's1', subCategory: 'Outdoor Sneakers', mainCategory: 'FOOTWEAR', similarity: 0.6141 }),
+        item({ id: 's2', subCategory: 'Retro Sneakers', mainCategory: 'FOOTWEAR', similarity: 0.5922 }),
+        item({ id: 's3', subCategory: 'Sneakers', mainCategory: 'FOOTWEAR', similarity: 0.5512 }),
+      ],
+      'shoes',
+      false
+    );
+    assert.equal(top.status, 'adequate');
+    assert.equal(shoes.status, 'adequate');
+  });
+
+  it('多件候选接近但 top1 低于 weak 阈值 → 仍为 weak', () => {
+    const assessment = assessSlotMatch(
+      [
+        item({ id: 'e1', subCategory: 'Trench Coat', similarity: 0.54 }),
+        item({ id: 'e2', subCategory: 'Puffer Jacket', similarity: 0.53 }),
+      ],
+      'outerwear',
+      false
+    );
     assert.equal(assessment.status, 'weak');
-    assert.match(assessment.note, /胶着/);
   });
 
   it('灰区但 gap 足够大 → adequate', () => {

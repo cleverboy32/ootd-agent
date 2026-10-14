@@ -17,7 +17,7 @@ export interface EmbeddingSimilarityThresholds {
   slotWeak: number;
   /** 槽位评估：高于此值为 adequate */
   slotAdequate: number;
-  /** 灰区提升：top1 - top2 ≥ 此 gap 时，可将 weak 提升为 adequate */
+  /** 灰区 top1 领先 top2 的显著差距（槽位评估仅影响提示文案；wardrobe_pairing 锚定用于判断是否领先） */
   slotConfidenceGap: number;
   /** wardrobe_pairing 锚定：高于此值且领先时可 auto-resolve */
   resolveThreshold: number;
