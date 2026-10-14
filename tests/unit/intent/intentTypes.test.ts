@@ -215,6 +215,35 @@ describe('finalizeGatekeeperResult — selection short-circuit', () => {
     assert.ok((result.gatekeeper_reply ?? '').length > 0);
   });
 
+  it('clarify with server-fetched weather answers with the weather instead of asking for city', () => {
+    const fetchedWeather = '重庆，多云，22℃';
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'clarify',
+        weather: fetchedWeather,
+        city: '重庆',
+      }),
+      gatekeeper_reply: '请告诉我你在哪个城市，我帮你看看天气～',
+      fetchedWeather,
+      currentMessageText: '今天天气如何',
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.ok((result.gatekeeper_reply ?? '').includes(fetchedWeather), '回复应包含查到的天气');
+    assert.doesNotMatch(result.gatekeeper_reply ?? '', /哪个城市|告诉我.*城市/);
+  });
+
+  it('clarify keeps the model reply when weather was only stated by the user', () => {
+    const modelReply = '30 度确实挺热的，你是想让我帮你搭一套清凉的穿搭吗？';
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({ request_type: 'clarify', weather: '30度' }),
+      gatekeeper_reply: modelReply,
+      currentMessageText: '今天 30 度好热',
+    });
+
+    assert.equal(result.gatekeeper_reply, modelReply);
+  });
+
   it('confirms outfit_confirmed without asking for revision', () => {
     const result = finalizeGatekeeperResult({
       extracted_intent: normalizeGatekeeperIntent({

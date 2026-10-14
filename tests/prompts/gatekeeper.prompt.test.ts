@@ -152,17 +152,39 @@ describe('Gatekeeper — outfit selection / confirmed', () => {
   });
 });
 
+describe('Gatekeeper — weather lookup', () => {
+  it('「今天天气如何」→ needed=true，未提城市则 city 留空交给系统兜底', async () => {
+    const result = await callGatekeeperAgent([], [{ text: '今天天气如何' }], {});
+
+    assert.equal(result.weather_lookup?.needed, true, '主动问天气必须查询');
+    assert.equal(result.weather_lookup?.city ?? '', '', '未提城市时不应臆造城市');
+  });
+
+  it('问出行目的地天气 → needed=true，city=目的地，city_role=travel', async () => {
+    const result = await callGatekeeperAgent(
+      [],
+      [{ text: '我下周去成都出差，那边天气怎么样' }],
+      {}
+    );
+
+    assert.equal(result.weather_lookup?.needed, true);
+    assert.match(result.weather_lookup?.city ?? '', /成都/);
+    assert.equal(result.extracted_intent.city_role, 'travel');
+  });
+});
+
 describe('Gatekeeper — wardrobe outfit intent', () => {
   it('有明确场合 → wardrobe_outfit 放行', async () => {
     const result = await callGatekeeperAgent(
       [],
       [{ text: '帮我搭一套明天上班的穿搭' }],
-      {}
+      { profileLocation: '上海' }
     );
 
     assert.equal(result.extracted_intent.request_type, 'wardrobe_outfit');
     assert.equal(result.is_complete, true);
     assert.ok(result.extracted_intent.occasion, '应提取场合');
+    assert.equal(result.weather_lookup?.needed, true, '出穿搭仍需查天气');
   });
 
   it('无场合 → wardrobe_outfit 不放行，追问场合', async () => {

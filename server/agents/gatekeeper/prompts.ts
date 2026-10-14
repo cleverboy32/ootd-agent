@@ -26,7 +26,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 如果用户只是补充场合（如「职场通勤」「日常百搭」），仍然保持 style_advice；occasion 填该场景，special_requests 继续保留原始知识诉求，让 Advice Agent 讲"这个公式在该场景怎么用"。
 - 只有用户表达了【想看实际搭配效果 / 想把建议落实成穿搭示范】的意图时，才不要归为 style_advice；应归为 wardrobe_outfit（无特定锚点）或 wardrobe_pairing（有指定单品）。判断依据是意图，不依赖特定措辞——"给我搭一套""能变出什么魔法""想看看效果""用我的衣橱示范一下"都属于此类。此时 special_requests 中应继承刚才建议的核心主题（如「按高级感大地色系公式搭配」），让搭配师知道风格方向；occasion 若未明确则默认「日常百搭」。
 - 【贯穿原始诉求（关键）】：多轮咨询里，用户最初问的可能是某个知识点（如「高级感色彩搭配公式」），后续只是补充了场合（如「职场通勤」）。你【必须】从历史对话提取用户最初真正想了解的主题，写入 special_requests。occasion 只是落地场景，禁止丢掉原始主题。
-- style_advice 不需要锚定单品、天气或穿衣气候；weather_lookup.needed 填 false。
+- style_advice 不需要锚定单品、天气或穿衣气候；weather_lookup.needed 按【天气与城市】规则判断（用户未主动问天气时为 false）。
 
 【outfit_selection 话术（重要）】
 - gatekeeper_reply 必须【简短】：一句确认选了哪套 + 一个选择题（满意 or 微调）。
@@ -76,9 +76,12 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 不要因缺少天气或温度信息而拦截用户。
 - 若用户主动提到天气/温度，提取到 extracted_intent.weather；若主动提到城市，提取到 extracted_intent.city。
 - city_role【关键】：有 city 时必须判定角色——home=用户常住/所在城市（回答系统追问所在地、或明确说「我在/我家在/我住在」某城）；travel=旅游/出差/短期出行目的地（去某城玩、出差、度假等）。city 为空则 city_role 填空字符串。系统仅在 city_role=home 时把城市写入用户档案；travel 只用于本轮天气，禁止标成 home。
-- 由你判断本轮搭配是否需要实时天气，并填写 weather_lookup：
-  - weather_lookup.needed：wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的，填 true；style_advice / outfit_selection / outfit_confirmed / clarify / purchase_pairing 这类一般填 false；用户已自述天气/温度时填 false。
-  - weather_lookup.city：需要查询时填用户提到的城市；未知则留空字符串，系统会用 IP 兜底。
+- 由你判断本轮是否需要实时天气，并填写 weather_lookup：
+  - weather_lookup.needed 只看「本轮回复是否依赖实时天气」，与 request_type 无关：
+    - 用户主动询问天气、气温或冷暖（含询问出行目的地的天气）→ true，无论 request_type 判为什么；
+    - wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的 → true；
+    - 其余与天气无关的请求 → false；用户已自述当前天气/温度时 → false。
+  - weather_lookup.city：只填用户明确提到、且本轮要查的城市（如出行目的地）；未提及则留空字符串，系统会依次用用户档案中的常住城市、IP 兜底，【禁止】自行猜测城市。
 - 系统会在你返回后据 weather_lookup 串行查询并补全天气结果，你无需填写查询结果本身。
 
 【长期档案增量 profile_update】

@@ -82,6 +82,14 @@ function userStatedWeather(contextText: string): boolean {
   return /天气|气温|温度|下雨|下雪|刮风|晴|阴|冷|热|\d+\s*度/.test(contextText);
 }
 
+/** 本轮在询问天气（需要查询），而非自述天气 */
+function userAskedWeather(currentMessageText: string): boolean {
+  return (
+    /天气|气温|温度|冷不冷|热不热|下雨|下雪|几度|多少度/.test(currentMessageText) &&
+    /如何|怎么样|怎样|咋样|多少|几度|吗|么|呢|会不会|冷不冷|热不热|\?|？/.test(currentMessageText)
+  );
+}
+
 function appendAnchorSlotMislabelWarnings(intent: GatekeeperIntent, issues: GatekeeperEvalIssue[]): void {
   if (intent.anchor_slot === 'top') {
     const inferred = inferAnchorSlotFromSummary(intent.anchor_item_summary);
@@ -346,7 +354,8 @@ export function evaluateGatekeeperOutput(
 
   if (ctx.weatherLookup) {
     const { needed } = ctx.weatherLookup;
-    if (needed && SHORT_CIRCUIT_TYPES.has(requestType)) {
+    const askedWeather = userAskedWeather(ctx.currentMessageText ?? '');
+    if (needed && !askedWeather && SHORT_CIRCUIT_TYPES.has(requestType)) {
       issues.push({
         code: 'UNNECESSARY_WEATHER_LOOKUP',
         severity: 'warn',
@@ -360,7 +369,7 @@ export function evaluateGatekeeperOutput(
         message: 'purchase_pairing should not request weather lookup',
       });
     }
-    if (needed && userStatedWeather(contextText)) {
+    if (needed && !askedWeather && userStatedWeather(contextText)) {
       issues.push({
         code: 'WEATHER_LOOKUP_AFTER_USER_STATED',
         severity: 'warn',

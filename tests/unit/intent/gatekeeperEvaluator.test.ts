@@ -38,6 +38,52 @@ describe('evaluateGatekeeperOutput', () => {
     assert.ok(evalResult.issues.some((i) => i.code === 'WARDROBE_MISSING_OCCASION'));
   });
 
+  it('does not warn when user asks about weather and clarify requests a lookup', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({ request_type: 'clarify' }),
+      gatekeeper_reply: '帮你查一下天气～',
+    });
+
+    const evalResult = evaluateGatekeeperOutput(result, {
+      contextText: '今天天气如何',
+      currentMessageText: '今天天气如何',
+      weatherLookup: { needed: true, city: '' },
+    });
+    const codes = evalResult.issues.map((i) => i.code);
+    assert.ok(!codes.includes('UNNECESSARY_WEATHER_LOOKUP'), codes.join(','));
+    assert.ok(!codes.includes('WEATHER_LOOKUP_AFTER_USER_STATED'), codes.join(','));
+  });
+
+  it('still warns clarify weather lookup when user did not ask about weather', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({ request_type: 'clarify' }),
+      gatekeeper_reply: '你想搭配什么场合呢？',
+    });
+
+    const evalResult = evaluateGatekeeperOutput(result, {
+      contextText: '帮我看看',
+      currentMessageText: '帮我看看',
+      weatherLookup: { needed: true, city: '' },
+    });
+    assert.ok(evalResult.issues.some((i) => i.code === 'UNNECESSARY_WEATHER_LOOKUP'));
+  });
+
+  it('still warns lookup when user already stated the temperature', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'wardrobe_outfit',
+        occasion: '上班通勤',
+      }),
+    });
+
+    const evalResult = evaluateGatekeeperOutput(result, {
+      contextText: '今天 30 度，帮我搭一套上班穿的',
+      currentMessageText: '今天 30 度，帮我搭一套上班穿的',
+      weatherLookup: { needed: true, city: '' },
+    });
+    assert.ok(evalResult.issues.some((i) => i.code === 'WEATHER_LOOKUP_AFTER_USER_STATED'));
+  });
+
   it('fails clarify without gatekeeper_reply', () => {
     const result = {
       is_complete: false,

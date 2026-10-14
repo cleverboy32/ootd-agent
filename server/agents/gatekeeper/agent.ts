@@ -70,7 +70,7 @@ async function finalizeGatekeeperIntent(
   currentInput: Part[],
   ctx: GatekeeperContext,
   weatherLookup?: WeatherLookup
-): Promise<{ intent: GatekeeperIntent; suggestCityForWeather: boolean }> {
+): Promise<{ intent: GatekeeperIntent; suggestCityForWeather: boolean; fetchedWeather?: string }> {
   const contextText = buildContextText(history, currentInput);
   let enriched = enrichIntentFromContext(intent, history, currentInput, {
     sessionItems: ctx.sessionItems,
@@ -78,6 +78,7 @@ async function finalizeGatekeeperIntent(
   });
 
   // 天气由 Gatekeeper LLM 决策（weather_lookup.needed）；服务端在此串行查询补全
+  let fetchedWeather: string | undefined;
   if (weatherLookup?.needed && !enriched.weather.trim()) {
     if (weatherLookup.city?.trim()) {
       enriched = { ...enriched, city: weatherLookup.city.trim() };
@@ -87,6 +88,7 @@ async function finalizeGatekeeperIntent(
       profileLocation: ctx.profileLocation,
       contextText,
     });
+    fetchedWeather = enriched.weather.trim() || undefined;
   }
 
   // 服务端统一解析 dressing_climate（实况温度 / 锚点 / 活动；忽略 Gatekeeper LLM 推断）
@@ -95,7 +97,7 @@ async function finalizeGatekeeperIntent(
   }
 
   const suggestCityForWeather = Boolean(weatherLookup?.needed) && !enriched.weather.trim();
-  return { intent: enriched, suggestCityForWeather };
+  return { intent: enriched, suggestCityForWeather, fetchedWeather };
 }
 
 /**
@@ -147,7 +149,7 @@ export async function callGatekeeperAgent(
     const wasCoercedBrowse =
       intentBeforeCoerce === 'clarify' && coercedIntent.request_type === 'wardrobe_pairing';
 
-    const { intent, suggestCityForWeather } = await finalizeGatekeeperIntent(
+    const { intent, suggestCityForWeather, fetchedWeather } = await finalizeGatekeeperIntent(
       coercedIntent,
       history,
       currentInput,
@@ -175,6 +177,7 @@ export async function callGatekeeperAgent(
       followup_questions: parsed.followup_questions,
       gatekeeper_reply: wasCoercedBrowse ? undefined : parsed.gatekeeper_reply,
       suggestCityForWeather,
+      fetchedWeather,
       wardrobeResolver,
       currentMessageText: extractTextFromParts(currentInput),
       history,

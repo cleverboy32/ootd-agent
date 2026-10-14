@@ -134,11 +134,11 @@ export const gatekeeperSchema: Schema = {
         needed: {
           type: Type.BOOLEAN,
           description:
-            '本轮搭配是否需要补充实时天气：wardrobe_outfit / feedback_revision 通常 true；purchase_pairing / style_advice / outfit_selection / clarify 通常 false；用户已自述天气或温度时填 false。',
+            '本轮回复是否依赖实时天气，与 request_type 无关：用户主动询问天气/气温/冷暖时必为 true；要真正出穿搭、受冷暖影响时为 true；与天气无关或用户已自述天气温度时为 false。',
         },
         city: {
           type: Type.STRING,
-          description: '需要查询天气的城市（用户提到则填）；未知则填空字符串，系统会用 IP 兜底。',
+          description: '用户明确提到、且本轮要查天气的城市；未提及填空字符串，系统会依次用用户档案常住城市、IP 兜底。禁止猜测。',
         },
       },
       required: ['needed', 'city'],

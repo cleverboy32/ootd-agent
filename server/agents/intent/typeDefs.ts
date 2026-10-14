@@ -100,6 +100,8 @@ export interface FinalizeGatekeeperInput {
   followup_questions?: string[];
   gatekeeper_reply?: string;
   suggestCityForWeather?: boolean;
+  /** 服务端本轮按 weather_lookup 查到的天气；区别于 intent.weather 中用户自述的天气 */
+  fetchedWeather?: string;
   wardrobeResolver?: WardrobeResolverResult;
   currentMessageText?: string;
   history?: Content[];
