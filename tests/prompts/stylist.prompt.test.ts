@@ -206,6 +206,92 @@ describe('Stylist — wardrobe_pairing: 锚定单品必须出现在每套方案�
   });
 });
 
+const SHORTS = /shorts?\b|短裤/i;
+const RAIN_UNSAFE_SHOES = /suede|麂皮|canvas|帆布/i;
+const WEATHER_WORDS = /天气|气温|温度|℃|度|凉|冷|外套/;
+
+function weatherIntent(weather: string, occasion: string, specialRequests = '') {
+  return normalizeGatekeeperIntent({
+    request_type: 'wardrobe_outfit',
+    occasion,
+    weather,
+    style_preference: '简约',
+    special_requests: specialRequests,
+    dressing_climate: 'mild',
+  });
+}
+
+const SKILL_JARGON = /档|修正项|细则/;
+
+type StylistOutput = Awaited<ReturnType<typeof callStylistAgent>>;
+
+function itemsOnLayer(result: StylistOutput, layer: RegExp) {
+  return result.outfits.flatMap((o) => o.selected_items.filter((item) => layer.test(item.layer)));
+}
+
+function assertNoSkillJargon(result: StylistOutput) {
+  for (const item of result.outfits.flatMap((o) => o.selected_items)) {
+    assert.doesNotMatch(item.reason, SKILL_JARGON, `reason 泄漏细则术语：${item.reason}`);
+  }
+}
+
+describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
+  it('23℃ 雾天晚餐 → 不选短裤', async () => {
+    const result = await callStylistAgent(
+      [],
+      weatherIntent('重庆城区，雾，23℃，东北风≤3级，湿度77%', '晚餐'),
+      EMPTY_PROFILE,
+      [{ text: '去南岸区吃晚饭，帮我搭一套' }]
+    );
+    for (const item of itemsOnLayer(result, /bottom/)) {
+      assert.doesNotMatch(item.name, SHORTS, `23℃ 不应推荐短裤：${item.name}`);
+    }
+    assertNoSkillJargon(result);
+  });
+
+  it('25℃ 边界（舒适档）→ 不选短裤', async () => {
+    const result = await callStylistAgent(
+      [],
+      weatherIntent('上海市，多云，25℃，东风≤3级，湿度60%', '周末逛街'),
+      EMPTY_PROFILE,
+      [{ text: '周末去逛街，帮我搭一套' }]
+    );
+    for (const item of itemsOnLayer(result, /bottom/)) {
+      assert.doesNotMatch(item.name, SHORTS, `25℃ 不应推荐短裤：${item.name}`);
+    }
+    assertNoSkillJargon(result);
+  });
+
+  it('小雨 18℃ → 鞋不选麂皮或帆布', async () => {
+    const result = await callStylistAgent(
+      [],
+      weatherIntent('杭州市，小雨，18℃，北风≤3级，湿度90%', '日常通勤'),
+      EMPTY_PROFILE,
+      [{ text: '明天上班穿什么' }]
+    );
+    const shoes = itemsOnLayer(result, /shoe/);
+    assert.ok(shoes.length > 0, '应包含鞋履');
+    for (const item of shoes) {
+      assert.doesNotMatch(item.name, RAIN_UNSAFE_SHOES, `雨天不应推荐：${item.name}`);
+    }
+  });
+
+  it('用户坚持短裤 + 23℃ → 尊重用户选短裤，并在 reason 提示天气', async () => {
+    const result = await callStylistAgent(
+      [],
+      weatherIntent('重庆城区，雾，23℃，东北风≤3级，湿度77%', '晚餐', '就想穿短裤'),
+      EMPTY_PROFILE,
+      [{ text: '晚上吃饭，我就想穿短裤' }]
+    );
+    for (const outfit of result.outfits) {
+      const shorts = outfit.selected_items.find((item) => /bottom/.test(item.layer) && SHORTS.test(item.name));
+      assert.ok(shorts, `${outfit.id} 应包含短裤`);
+      const reasons = outfit.selected_items.map((item) => item.reason).join(' ');
+      assert.match(reasons, WEATHER_WORDS, `${outfit.id} reason 应提及天气取舍`);
+    }
+  });
+});
+
 describe('Stylist — style advice mode', () => {
   it('style_advice: 返回 topic + points（3-5 条），结构正确', async () => {
     const { callStylistAdvice } = await import('@/server/agents/stylist/agent');

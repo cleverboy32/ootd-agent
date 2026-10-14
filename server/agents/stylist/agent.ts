@@ -36,6 +36,7 @@ import {
 } from './prompts';
 import { buildAndLogStylistSelection } from '@/server/logging/stylist';
 import type { StylistSelectionSlotSnapshot } from '@/server/logging/stylist';
+import { loadSkill } from '@/server/skills/loadSkill';
 
 export type { StylistOutfit, StylistResult, StyleAdviceResult, StylistAgentOptions } from './schema';
 
@@ -121,6 +122,14 @@ function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
   return map[slot] ?? 'inner_top';
 }
 
+function buildWeatherSkillBlock(intent: GatekeeperIntent): string {
+  if (!intent.weather?.trim()) return '';
+  return `
+【穿衣细则 Skill】
+${loadSkill('weather-dressing')}
+`;
+}
+
 async function planWardrobeSearchQueries(
   history: Content[],
   intent: GatekeeperIntent,
@@ -179,7 +188,7 @@ ${athleticOccasion ? '- 当前为【运动场合】：检索 query 必须体现 
 - 场合: ${intent.occasion}
 - 风格: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${pairingBlock}${revisionBlock}
+${buildWeatherSkillBlock(intent)}${pairingBlock}${revisionBlock}
 【用户当前消息】
 ${userMessage || '（无文字，请根据对话历史推断）'}
 
@@ -399,7 +408,7 @@ ${JSON.stringify(previousOutfit, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${anchorBlock}${revisionBlock}
+${buildWeatherSkillBlock(intent)}${anchorBlock}${revisionBlock}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '互补单品'})】
 ${
   wardrobeXml ||
