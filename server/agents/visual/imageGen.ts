@@ -30,7 +30,7 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Every listed accessory must appear as a subtle accent within the full outfit look — never the visual focus, never enlarged from product close-ups.',
 ].join(' ');
 
-/** @deprecated 保留导出供旧测试；配饰已不再作为参考图输入 */
+/** @deprecated 未再使用（配饰参考图仍会传入，比例约束改由 SEEDREAM_SYSTEM_INSTRUCTION 与 CRITICAL FULL-OUTFIT LOOK 承担） */
 export const ACCESSORY_SCALE_HINT =
   'product close-up ref — wear at realistic on-body scale, do NOT enlarge to fill frame';
 
@@ -86,10 +86,17 @@ export function buildOutfitReferenceInputs(
     referenceLabels.push(extra.label || 'additional purchase garment');
   }
 
+  // 按 URL 反查单品而非按下标：上游会丢弃 ragCache 中无图的单品，下标对应会让后续标签整体错位
+  const wardrobeItemByUrl = new Map<string, StylistOutfit['selected_items'][number]>();
+  for (const item of wardrobeItems) {
+    const url = ragCache?.get(item.id)?.imageUrl;
+    if (url && !wardrobeItemByUrl.has(url)) wardrobeItemByUrl.set(url, item);
+  }
+
   wardrobeImageUrls.forEach((url, idx) => {
     if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) return;
     referenceUrls.push(url);
-    const item = wardrobeItems[idx];
+    const item = wardrobeItemByUrl.get(url);
     const cached = item ? ragCache?.get(item.id) : undefined;
     const parts = [
       item?.name,

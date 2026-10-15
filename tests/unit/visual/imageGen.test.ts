@@ -68,6 +68,41 @@ describe('buildOutfitReferenceInputs', () => {
     );
   });
 
+  it('中间单品无图被上游丢弃时，后续参考图标签不错位', () => {
+    const threePiece: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'item-top', name: 'White Linen Shirt', layer: 'top', reason: 'a' },
+        { id: 'item-missing', name: 'Gray Wide-leg Trousers', layer: 'bottom', reason: 'b' },
+        { id: 'item-shoes', name: 'Retro Sneakers', layer: 'shoes', reason: 'c' },
+      ],
+    };
+    const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
+      threePiece,
+      ['https://example.com/top.jpg', 'https://example.com/shoes.jpg'],
+      undefined,
+      new Map([
+        ['item-top', { id: 'item-top', imageUrl: 'https://example.com/top.jpg', subCategory: 'Linen Shirt' } as never],
+        ['item-shoes', { id: 'item-shoes', imageUrl: 'https://example.com/shoes.jpg', subCategory: 'Sneakers' } as never],
+      ])
+    );
+
+    assert.deepEqual(referenceUrls, ['https://example.com/top.jpg', 'https://example.com/shoes.jpg']);
+    assert.match(referenceLabels[0], /White Linen Shirt/);
+    assert.match(referenceLabels[1], /Retro Sneakers/);
+    assert.doesNotMatch(referenceLabels[1], /Trousers/);
+  });
+
+  it('参考图无法对应到单品时用通用标签，不借用其他单品的名称', () => {
+    const { referenceLabels } = buildOutfitReferenceInputs(
+      outfit,
+      ['https://example.com/unknown.jpg'],
+      undefined,
+      new Map()
+    );
+    assert.equal(referenceLabels[0], 'wardrobe item 1');
+  });
+
   it('prepends anchor garment as 图1 when anchor image data exists', () => {
     const purchaseOutfit: StylistOutfit = {
       ...outfit,
@@ -155,6 +190,7 @@ describe('buildOutfitReferenceInputs', () => {
           'item-acc',
           {
             id: 'item-acc',
+            imageUrl: 'https://example.com/necklace.jpg',
             mainCategory: 'ACCESSORY',
             subCategory: 'Pendant Necklace',
             colors: ['silver'],
