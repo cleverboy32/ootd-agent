@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { ProfileOverview } from '@/components/profile/ProfileOverview';
 import { StyleSection } from '@/components/profile/StyleSection';
 import { VisualAnalysisSection } from '@/components/profile/VisualAnalysisSection';
@@ -50,7 +52,14 @@ export default function ProfilePage() {
       <AppSidebar activeSection="profile" />
 
       <div className="flex flex-col">
-        <header className="flex h-14 items-center border-b px-4 lg:h-15 lg:px-6">
+        <header className="flex h-14 items-center gap-2 border-b px-4 lg:h-15 lg:px-6">
+          <Link
+            href="/"
+            aria-label="返回首页"
+            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
           <h1 className="text-lg font-semibold">我的档案</h1>
         </header>
 

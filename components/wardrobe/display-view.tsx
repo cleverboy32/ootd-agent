@@ -157,7 +157,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
   const allVisibleSelected = visibleCount > 0 && getFilteredItems(activeTab).every((item) => selectedIds.has(item.id));
 
   return (
-    <div className="w-full">
+    <div className="flex w-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">共 {items.length} 件衣物</p>
 

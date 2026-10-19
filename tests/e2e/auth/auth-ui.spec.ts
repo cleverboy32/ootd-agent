@@ -36,5 +36,9 @@ test('unauthenticated visit redirects to login and returns to the origin page', 
 
   await page.goto('/ootd/profile');
   await expect(page.getByText(username, { exact: true })).toBeVisible();
+
+  await page.goto('/ootd/');
+  await page.getByRole('button', { name: '我的' }).hover();
   await expect(page.getByRole('link', { name: '安全中心' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: '退出登录' })).toBeVisible();
 });

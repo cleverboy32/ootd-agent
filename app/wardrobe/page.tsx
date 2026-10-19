@@ -22,7 +22,7 @@ export default function WardrobePage() {
         onSelectWardrobe={switchToDisplay}
       />
       <div className="flex flex-col">
-        <MainHeader activeView={visibleView} />
+        <MainHeader activeView={visibleView} onBackToDisplay={switchToDisplay} />
         <main className="flex flex-1 flex-col overflow-y-auto">
             {visibleView === 'display' && (
               <div className="p-4 lg:p-6">
