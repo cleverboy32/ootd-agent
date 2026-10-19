@@ -14,7 +14,7 @@ import {
   resetPasswordByQuestions,
   resetPasswordByRecovery,
 } from '@/lib/api/auth';
-import { LOGO_SRC, withBasePath } from '@/lib/utils';
+import { cn, LOGO_SRC, withBasePath } from '@/lib/utils';
 
 /** 只允许站内相对路径，防开放重定向 */
 function safeRedirect(target: string | null): string {
@@ -27,15 +27,23 @@ function enterApp(redirect: string): void {
   window.location.assign(withBasePath(redirect));
 }
 
-const fieldClass = 'space-y-2';
+const fieldClass = 'space-y-1.5';
 const labelClass = 'block text-sm font-medium text-foreground/80';
 const inputClass =
-  'h-11 rounded-xl bg-background px-3.5 text-sm shadow-none border-border focus-visible:border-ring focus-visible:ring-ring/30';
+  'h-11 rounded-xl bg-background px-3.5 text-sm shadow-none border-border transition-colors hover:border-[var(--gold)] focus-visible:border-[var(--gold)] focus-visible:ring-[var(--gold)]/30';
 
-function FieldError({ message }: { message: string }) {
+function fieldInputClass(hasError: boolean): string {
+  return cn(
+    inputClass,
+    hasError &&
+      'border-destructive hover:border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30',
+  );
+}
+
+function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p className="rounded-lg bg-destructive/8 px-3 py-2 text-sm text-destructive" role="alert">
+    <p className="text-sm text-destructive" role="alert">
       {message}
     </p>
   );
@@ -54,17 +62,19 @@ function LoginFields({
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
     onPendingChange(true);
     try {
       await login(username, password);
       enterApp(redirect);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
+      const message = err instanceof Error ? err.message : '登录失败，请稍后重试';
+      // 凭据错误挂在密码框；锁定等整单提示也挂密码框，避免漂在表单底部
+      setFieldErrors({ password: message });
       onPendingChange(false);
     }
   }
@@ -75,12 +85,17 @@ function LoginFields({
         <label htmlFor="login-username" className={labelClass}>用户名</label>
         <Input
           id="login-username"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.username))}
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={(e) => {
+            setUsername(e.target.value);
+            if (fieldErrors.username) setFieldErrors((prev) => ({ ...prev, username: undefined }));
+          }}
           autoComplete="username"
+          aria-invalid={Boolean(fieldErrors.username)}
           required
         />
+        <FieldError message={fieldErrors.username} />
       </div>
       <div className={fieldClass}>
         <div className="flex items-center justify-between gap-3">
@@ -95,17 +110,30 @@ function LoginFields({
         </div>
         <Input
           id="login-password"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.password))}
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined }));
+          }}
           autoComplete="current-password"
+          aria-invalid={Boolean(fieldErrors.password)}
           required
         />
+        <FieldError message={fieldErrors.password} />
       </div>
-      <FieldError message={error} />
     </form>
   );
+}
+
+type RegisterField = 'username' | 'password' | 'confirm' | 'invite';
+
+function mapRegisterError(message: string): Partial<Record<RegisterField, string>> {
+  if (message.includes('用户名') || message.includes('已被占用')) return { username: message };
+  if (message.includes('邀请码')) return { invite: message };
+  if (message.includes('密码')) return { password: message };
+  return { username: message };
 }
 
 function RegisterFields({
@@ -121,13 +149,22 @@ function RegisterFields({
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [inviteCode, setInviteCode] = useState('');
-  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RegisterField, string>>>({});
+
+  function clearField(field: RegisterField) {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
     if (password !== confirm) {
-      setError('两次输入的密码不一致');
+      setFieldErrors({ confirm: '两次输入的密码不一致' });
       return;
     }
     onPendingChange(true);
@@ -135,7 +172,8 @@ function RegisterFields({
       await registerAccount(username, password, inviteCode);
       enterApp(redirect);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败，请稍后重试');
+      const message = err instanceof Error ? err.message : '注册失败，请稍后重试';
+      setFieldErrors(mapRegisterError(message));
       onPendingChange(false);
     }
   }
@@ -146,51 +184,70 @@ function RegisterFields({
         <label htmlFor="reg-username" className={labelClass}>用户名</label>
         <Input
           id="reg-username"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.username))}
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={(e) => {
+            setUsername(e.target.value);
+            clearField('username');
+          }}
           placeholder="3~20 位字母、数字、_ 或 -"
           autoComplete="username"
+          aria-invalid={Boolean(fieldErrors.username)}
           required
         />
+        <FieldError message={fieldErrors.username} />
       </div>
       <div className={fieldClass}>
         <label htmlFor="reg-password" className={labelClass}>密码</label>
         <Input
           id="reg-password"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.password))}
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            clearField('password');
+          }}
           placeholder="至少 8 位，含字母和数字"
           autoComplete="new-password"
+          aria-invalid={Boolean(fieldErrors.password)}
           required
         />
+        <FieldError message={fieldErrors.password} />
       </div>
       <div className={fieldClass}>
         <label htmlFor="reg-confirm" className={labelClass}>确认密码</label>
         <Input
           id="reg-confirm"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.confirm))}
           type="password"
           value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
+          onChange={(e) => {
+            setConfirm(e.target.value);
+            clearField('confirm');
+          }}
           autoComplete="new-password"
+          aria-invalid={Boolean(fieldErrors.confirm)}
           required
         />
+        <FieldError message={fieldErrors.confirm} />
       </div>
       <div className={fieldClass}>
         <label htmlFor="reg-invite" className={labelClass}>邀请码</label>
         <Input
           id="reg-invite"
-          className={inputClass}
+          className={fieldInputClass(Boolean(fieldErrors.invite))}
           value={inviteCode}
-          onChange={(e) => setInviteCode(e.target.value)}
+          onChange={(e) => {
+            setInviteCode(e.target.value);
+            clearField('invite');
+          }}
           placeholder="内测期间需邀请码注册"
+          aria-invalid={Boolean(fieldErrors.invite)}
           required
         />
+        <FieldError message={fieldErrors.invite} />
       </div>
-      <FieldError message={error} />
     </form>
   );
 }
@@ -215,12 +272,18 @@ function ForgotPanel({
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{
+    username?: string;
+    answers?: string;
+    recovery?: string;
+    password?: string;
+    confirm?: string;
+  }>({});
   const [notice, setNotice] = useState('');
 
   async function loadQuestions(e: FormEvent) {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
     setNotice('');
     onPendingChange(true);
     try {
@@ -237,7 +300,9 @@ function ForgotPanel({
         onActionLabelChange('重置密码并登录');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败，请稍后重试');
+      setFieldErrors({
+        username: err instanceof Error ? err.message : '加载失败，请稍后重试',
+      });
     } finally {
       onPendingChange(false);
     }
@@ -245,9 +310,9 @@ function ForgotPanel({
 
   async function onReset(e: FormEvent) {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
     if (newPassword !== confirm) {
-      setError('两次输入的密码不一致');
+      setFieldErrors({ confirm: '两次输入的密码不一致' });
       return;
     }
     onPendingChange(true);
@@ -259,7 +324,16 @@ function ForgotPanel({
       }
       enterApp(redirect);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重置失败，请稍后重试');
+      const message = err instanceof Error ? err.message : '重置失败，请稍后重试';
+      if (message.includes('恢复码') || message.includes('请输入恢复码')) {
+        setFieldErrors({ recovery: message });
+      } else if (message.includes('密码')) {
+        setFieldErrors({ password: message });
+      } else if (mode === 'recovery') {
+        setFieldErrors({ recovery: message });
+      } else {
+        setFieldErrors({ answers: message });
+      }
       onPendingChange(false);
     }
   }
@@ -281,13 +355,17 @@ function ForgotPanel({
             <label htmlFor="forgot-username" className={labelClass}>用户名</label>
             <Input
               id="forgot-username"
-              className={inputClass}
+              className={fieldInputClass(Boolean(fieldErrors.username))}
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                if (fieldErrors.username) setFieldErrors((prev) => ({ ...prev, username: undefined }));
+              }}
+              aria-invalid={Boolean(fieldErrors.username)}
               required
             />
+            <FieldError message={fieldErrors.username} />
           </div>
-          <FieldError message={error} />
         </form>
       ) : (
         <form id={formId} onSubmit={onReset} className="flex flex-col gap-4">
@@ -304,15 +382,20 @@ function ForgotPanel({
                   <label className={labelClass} htmlFor={`answer-${index}`}>{question}</label>
                   <Input
                     id={`answer-${index}`}
-                    className={inputClass}
+                    className={fieldInputClass(Boolean(fieldErrors.answers) && index === 0)}
                     value={answers[index] ?? ''}
                     onChange={(e) => {
                       const next = [...answers];
                       next[index] = e.target.value;
                       setAnswers(next);
+                      if (fieldErrors.answers) {
+                        setFieldErrors((prev) => ({ ...prev, answers: undefined }));
+                      }
                     }}
+                    aria-invalid={Boolean(fieldErrors.answers) && index === 0}
                     required
                   />
+                  {index === 0 && <FieldError message={fieldErrors.answers} />}
                 </div>
               ))}
             </div>
@@ -323,12 +406,19 @@ function ForgotPanel({
               <label htmlFor="recovery-code" className={labelClass}>恢复码</label>
               <Input
                 id="recovery-code"
-                className={inputClass}
+                className={fieldInputClass(Boolean(fieldErrors.recovery))}
                 value={recoveryCode}
-                onChange={(e) => setRecoveryCode(e.target.value)}
+                onChange={(e) => {
+                  setRecoveryCode(e.target.value);
+                  if (fieldErrors.recovery) {
+                    setFieldErrors((prev) => ({ ...prev, recovery: undefined }));
+                  }
+                }}
                 placeholder="XXXX-XXXX-XXXX"
+                aria-invalid={Boolean(fieldErrors.recovery)}
                 required
               />
+              <FieldError message={fieldErrors.recovery} />
             </div>
           )}
 
@@ -336,29 +426,41 @@ function ForgotPanel({
             <label htmlFor="forgot-new" className={labelClass}>新密码</label>
             <Input
               id="forgot-new"
-              className={inputClass}
+              className={fieldInputClass(Boolean(fieldErrors.password))}
               type="password"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => {
+                setNewPassword(e.target.value);
+                if (fieldErrors.password) {
+                  setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                }
+              }}
               placeholder="至少 8 位，含字母和数字"
               autoComplete="new-password"
+              aria-invalid={Boolean(fieldErrors.password)}
               required
             />
+            <FieldError message={fieldErrors.password} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="forgot-confirm" className={labelClass}>确认新密码</label>
             <Input
               id="forgot-confirm"
-              className={inputClass}
+              className={fieldInputClass(Boolean(fieldErrors.confirm))}
               type="password"
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => {
+                setConfirm(e.target.value);
+                if (fieldErrors.confirm) {
+                  setFieldErrors((prev) => ({ ...prev, confirm: undefined }));
+                }
+              }}
               autoComplete="new-password"
+              aria-invalid={Boolean(fieldErrors.confirm)}
               required
             />
+            <FieldError message={fieldErrors.confirm} />
           </div>
-
-          <FieldError message={error} />
 
           {questions.length > 0 && (
             <button

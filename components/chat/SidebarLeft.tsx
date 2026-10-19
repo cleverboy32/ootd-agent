@@ -47,7 +47,7 @@ export function SidebarLeft({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="搜索对话"
-            className="pl-9 h-10 rounded-xl bg-background border-border shadow-sm"
+            className="pl-9 h-10 rounded-xl bg-background border-border shadow-sm transition-colors hover:border-[var(--gold)] focus-visible:border-[var(--gold)] focus-visible:ring-[var(--gold)]/30"
           />
         </div>
       </div>
@@ -57,10 +57,10 @@ export function SidebarLeft({
         <Button
           variant="outline"
           onClick={onNewChat}
-          className="w-full justify-start gap-3 rounded-full py-6 px-4 shadow-sm hover:bg-accent group border-border"
+          className="w-full justify-start gap-3 rounded-full py-6 px-4 shadow-sm group border-border transition-colors hover:border-[var(--gold)] hover:bg-accent"
         >
-          <div className="bg-primary/10 p-1.5 rounded-full group-hover:bg-primary/20 transition-colors">
-            <Plus className="h-4 w-4 text-primary" />
+          <div className="bg-primary/10 p-1.5 rounded-full group-hover:bg-[var(--gold)]/15 transition-colors">
+            <Plus className="h-4 w-4 text-primary group-hover:text-[var(--gold)] transition-colors" />
           </div>
           <span className="font-medium text-sm">新建对话</span>
         </Button>
