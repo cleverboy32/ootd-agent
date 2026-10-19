@@ -61,9 +61,24 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
 
 // 6. Create a more user-friendly apiClient object
 export const apiClient = {
+  /** 默认 GET：不强制 HTTP 缓存（会话/消息等易变接口用这个） */
   get: async (url: string, options: RequestInit = {}) => {
     const response = await fetchWithClient(url, { ...options, method: 'GET' });
     return response.json(); // Automatically parse JSON
+  },
+
+  /**
+   * 不常变的 GET：走浏览器 HTTP 缓存（需服务端配 Cache-Control）。
+   * bust:true → cache:'reload'，写操作后刷新缓存用。
+   */
+  getCached: async (url: string, options: RequestInit & { bust?: boolean } = {}) => {
+    const { bust, ...rest } = options;
+    const response = await fetchWithClient(url, {
+      ...rest,
+      method: 'GET',
+      cache: bust ? 'reload' : 'force-cache',
+    });
+    return response.json();
   },
 
   post: async <T>(url: string, body: T, options: RequestInit = {}) => {

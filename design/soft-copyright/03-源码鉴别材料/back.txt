@@ -1,0 +1,1589 @@
+OOTD智能穿搭助手软件 V1.0    第 266 页
+------------------------------------------------------------------------
+  }
+}
+ 
+ 
+// ===== FILE: app/api/wardrobe/[itemId]/route.ts =====
+import { NextResponse } from 'next/server';
+ 
+import { deleteWardrobeItems, getWardrobeItemDetails } from '@/server/services/wardrobeService';
+ 
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ itemId: string }> }
+) {
+  const { itemId } = await params;
+  // 我们从请求头中获取客户端 ID，这是 API 的标准做法
+  const clientId = req.headers.get('x-client-id');
+ 
+  if (!clientId) {
+    return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+  }
+ 
+  if (!itemId) {
+    return NextResponse.json({ error: 'Item ID is required' }, { status: 400 });
+  }
+ 
+  try {
+    const item = await getWardrobeItemDetails(itemId);
+ 
+    if (!item) {
+      return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+    }
+ 
+    // --- 关键安全检查 ---
+    // 为防止信息泄露，如果物品不属于当前用户，我们同样返回 404
+    if (item.clientProfileId !== clientId) {
+      return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+    }
+    
+    // 准备返回给客户端的数据
+    const responseData = {
+      id: item.id,
+      name: item.subCategory,
+      imageUrl: item.imageUrl,
+    };
+ 
+    // 返回成功响应，并设置缓存头
+    return NextResponse.json(responseData, {
+      status: 200,
+      headers: {
+        // 在浏览器和 CDN 上缓存 1 小时
+
+OOTD智能穿搭助手软件 V1.0    第 267 页
+------------------------------------------------------------------------
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      },
+    });
+ 
+  } catch (error) {
+    console.error(`[API-ERROR] Failed to fetch wardrobe item ${itemId}:`, error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ itemId: string }> }
+) {
+  const { itemId } = await params;
+  const clientId = req.headers.get('x-client-id');
+ 
+  if (!clientId) {
+    return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+  }
+ 
+  if (!itemId) {
+    return NextResponse.json({ error: 'Item ID is required' }, { status: 400 });
+  }
+ 
+  try {
+    const deletedCount = await deleteWardrobeItems([itemId], clientId);
+    if (deletedCount === 0) {
+      return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+    }
+ 
+    return NextResponse.json({ deletedCount }, { status: 200 });
+  } catch (error) {
+    console.error(`[API-ERROR] Failed to delete wardrobe item ${itemId}:`, error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+// ===== FILE: app/api/wardrobe/route.ts =====
+import { NextResponse } from 'next/server';
+import prismadb from 'server/db';
+import { llmGenerate } from '@/server/services/llm/client';
+import { extractJsonText } from '@/server/services/llm/convert';
+import { AGENT_MODELS } from '@/server/config/models';
+import { urlToGenerativePart } from '@/server/utils/image';
+import {
+  clothingItemHasTextEmbedding,
+  clothingItemHasVisualEmbedding,
+  deleteWardrobeItems,
+  findWardrobeItemByImageUrl,
+
+OOTD智能穿搭助手软件 V1.0    第 268 页
+------------------------------------------------------------------------
+  persistTextEmbedding,
+  persistVisualEmbedding,
+} from '@/server/services/wardrobeService';
+import { is429Error, withRetryOn429 } from '@/server/utils/retryOn429';
+import { toUserFacingUploadError } from '@/lib/upload-errors';
+import {
+  normalizeWardrobeAnalysis,
+  WARDROBE_ANALYSIS_JSON_SCHEMA,
+  WARDROBE_ANALYSIS_PROMPT,
+  type WardrobeAnalysisResult,
+} from '@/server/utils/wardrobeAnalysis';
+ 
+export async function GET(req: Request) {
+  try {
+    const clientId = req.headers.get('X-Client-ID');
+    if (!clientId) {
+      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    }
+ 
+    console.log(`[API /api/wardrobe] GET request for clientId: ${clientId}`);
+ 
+    const clothingItems = await prismadb.clothingItem.findMany({
+      where: { clientProfileId: clientId },
+      orderBy: { createdAt: 'desc' },
+    });
+ 
+    return NextResponse.json(clothingItems, { status: 200 });
+  } catch (error) {
+    console.error('Error in GET /api/wardrobe:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+type StepState = 'pending' | 'done' | 'skipped' | 'failed';
+ 
+export interface WardrobeStepStatus {
+  analysis: StepState;
+  textEmbedding: StepState;
+  visualEmbedding: StepState;
+}
+ 
+function failStep(
+  timer: ReturnType<typeof createStepTimer>,
+  steps: WardrobeStepStatus,
+  step: keyof WardrobeStepStatus,
+  message: string,
+  status: number,
+  extra?: Record<string, unknown>
+) {
+  const finalSteps: WardrobeStepStatus = { ...steps, [step]: 'failed' };
+
+OOTD智能穿搭助手软件 V1.0    第 269 页
+------------------------------------------------------------------------
+  timer.log('error', { steps: finalSteps, ...extra });
+  return NextResponse.json({ error: message, steps: finalSteps, ...extra }, { status });
+}
+ 
+function createStepTimer() {
+  const startedAt = Date.now();
+  let lastMark = startedAt;
+  const ms: Record<string, number> = {};
+ 
+  return {
+    mark(step: string) {
+      const now = Date.now();
+      ms[step] = now - lastMark;
+      lastMark = now;
+    },
+    log(outcome: 'success' | 'error', extra?: Record<string, unknown>) {
+      ms.total = Date.now() - startedAt;
+      console.log('[API /api/wardrobe] timing', JSON.stringify({ outcome, ...extra, ms }));
+    },
+  };
+}
+ 
+function isRateLimitResponse(error: unknown, steps: WardrobeStepStatus, item: { id: string }) {
+  if (!is429Error(error)) return null;
+  return NextResponse.json(
+    { error: 'AI 服务请求过于频繁，请稍后再试', code: 'RATE_LIMIT', steps, item },
+    { status: 429 }
+  );
+}
+ 
+export async function POST(req: Request) {
+  const timer = createStepTimer();
+  try {
+    const clientId = req.headers.get('X-Client-ID');
+    if (!clientId) {
+      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    }
+ 
+    const { imageUrl } = await req.json();
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return NextResponse.json({ error: 'imageUrl is required in the request body' }, { status: 400 });
+    }
+ 
+    console.log(`[API /api/wardrobe] Received request for clientId: ${clientId}, imageUrl: ${imageUrl}`);
+ 
+    let item = await findWardrobeItemByImageUrl(clientId, imageUrl);
+    const steps: WardrobeStepStatus = {
+      analysis: item ? 'skipped' : 'pending',
+      textEmbedding: 'pending',
+      visualEmbedding: 'pending',
+
+OOTD智能穿搭助手软件 V1.0    第 270 页
+------------------------------------------------------------------------
+    };
+    timer.mark('lookup_existing');
+ 
+    if (!item) {
+      const imagePart = await urlToGenerativePart(imageUrl);
+      timer.mark('fetch_image');
+ 
+      console.log('[API /api/wardrobe] Calling LLM for analysis...', {
+        model: AGENT_MODELS.wardrobeAnalysis,
+      });
+      const result = await withRetryOn429(
+        () =>
+          llmGenerate({
+            model: AGENT_MODELS.wardrobeAnalysis,
+            contents: [{ role: 'user', parts: [imagePart, { text: WARDROBE_ANALYSIS_PROMPT }] }],
+            jsonSchema: WARDROBE_ANALYSIS_JSON_SCHEMA,
+          }),
+        { label: 'Wardrobe analysis', maxRetries: 4 }
+      );
+      timer.mark('llm_analysis');
+ 
+      const responseText = result.text;
+      console.log(`[API /api/wardrobe] LLM response received: ${responseText}`);
+ 
+      if (!responseText) {
+        return failStep(timer, steps, 'analysis', 'AI 分析没有返回内容，请重试', 502);
+      }
+ 
+      let parsed: WardrobeAnalysisResult;
+      try {
+        parsed = JSON.parse(extractJsonText(responseText));
+      } catch {
+        console.error('[API /api/wardrobe] Failed to parse JSON from AI response:', responseText);
+        return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
+      }
+ 
+      const analysis = normalizeWardrobeAnalysis(parsed);
+      if (!analysis) {
+        console.error('[API /api/wardrobe] Invalid analysis payload:', parsed);
+        return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
+      }
+      timer.mark('parse_and_validate');
+ 
+      console.log('[API /api/wardrobe] Storing new clothing item to database...');
+      item = await prismadb.clothingItem.create({
+        data: {
+          clientProfileId: clientId,
+          imageUrl,
+          mainCategory: analysis.mainCategory,
+          subCategory: analysis.subCategory,
+
+OOTD智能穿搭助手软件 V1.0    第 271 页
+------------------------------------------------------------------------
+          season: analysis.season,
+          material: analysis.material,
+          colors: analysis.colors,
+          tags: analysis.tags,
+          description: analysis.description,
+          searchDescription: analysis.searchDescription,
+          occasions: analysis.occasions,
+          formality: analysis.formality,
+          silhouette: analysis.silhouette,
+        },
+      });
+      steps.analysis = 'done';
+      timer.mark('db_write');
+    }
+ 
+    if (await clothingItemHasTextEmbedding(item.id)) {
+      steps.textEmbedding = 'skipped';
+    } else {
+      try {
+        await persistTextEmbedding(item.id);
+        steps.textEmbedding = 'done';
+        timer.mark('text_embedding');
+      } catch (error) {
+        console.error('[API /api/wardrobe] Text embedding step failed', { itemId: item.id, error });
+        const rateLimit = isRateLimitResponse(error, steps, item);
+        if (rateLimit) {
+          timer.log('error', { itemId: item.id, steps: { ...steps, textEmbedding: 'failed' } });
+          return rateLimit;
+        }
+        return failStep(
+          timer,
+          steps,
+          'textEmbedding',
+          '文本检索向量生成失败，点击重试即可（分析结果已保存）',
+          502,
+          { item }
+        );
+      }
+    }
+ 
+    if (await clothingItemHasVisualEmbedding(item.id)) {
+      steps.visualEmbedding = 'skipped';
+    } else {
+      try {
+        await persistVisualEmbedding(item.id);
+        steps.visualEmbedding = 'done';
+        timer.mark('visual_embedding');
+      } catch (error) {
+        console.error('[API /api/wardrobe] Visual embedding step failed', { itemId: item.id, error });
+        const rateLimit = isRateLimitResponse(error, steps, item);
+
+OOTD智能穿搭助手软件 V1.0    第 272 页
+------------------------------------------------------------------------
+        if (rateLimit) {
+          timer.log('error', { itemId: item.id, steps: { ...steps, visualEmbedding: 'failed' } });
+          return rateLimit;
+        }
+        return failStep(
+          timer,
+          steps,
+          'visualEmbedding',
+          '图片向量生成失败，点击重试即可（分析与文本向量已保存）',
+          502,
+          { item }
+        );
+      }
+    }
+ 
+    timer.log('success', {
+      model: AGENT_MODELS.wardrobeAnalysis,
+      itemId: item.id,
+      subCategory: item.subCategory,
+      steps,
+    });
+ 
+    return NextResponse.json({ ...item, steps }, { status: 201 });
+  } catch (error) {
+    timer.log('error', { model: AGENT_MODELS.wardrobeAnalysis });
+    console.error('Error in POST /api/wardrobe:', error);
+    if (is429Error(error)) {
+      return NextResponse.json(
+        { error: 'AI 服务请求过于频繁，请稍后再试', code: 'RATE_LIMIT' },
+        { status: 429 }
+      );
+    }
+    if (error instanceof Error && error.message.includes('GoogleGenerativeAI')) {
+      return NextResponse.json({ error: 'AI 服务暂时不可用，请稍后重试' }, { status: 502 });
+    }
+    if (error instanceof Error) {
+      return NextResponse.json({ error: toUserFacingUploadError(error.message) }, { status: 500 });
+    }
+    return NextResponse.json({ error: '处理失败，请重试' }, { status: 500 });
+  }
+}
+ 
+export async function DELETE(req: Request) {
+  try {
+    const clientId = req.headers.get('X-Client-ID');
+    if (!clientId) {
+      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    }
+ 
+    const body = (await req.json()) as { ids?: string[] };
+
+OOTD智能穿搭助手软件 V1.0    第 273 页
+------------------------------------------------------------------------
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+ 
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'ids array is required' }, { status: 400 });
+    }
+ 
+    const deletedCount = await deleteWardrobeItems(ids, clientId);
+    return NextResponse.json({ deletedCount }, { status: 200 });
+  } catch (error) {
+    console.error('Error in DELETE /api/wardrobe:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/change-password/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser } from '@/server/auth/currentUser';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import { createSessionToken } from '@/server/auth/session';
+import { setSessionCookie } from '@/server/auth/sessionCookie';
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+}
+ 
+export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) {
+    return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
+  }
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  if (strengthError) {
+    return NextResponse.json({ error: strengthError, code: 'VALIDATION_ERROR' }, { status: 400 });
+  }
+ 
+  try {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    if (!oldOk) {
+      await logAuthEvent({
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        outcome: 'failure',
+
+OOTD智能穿搭助手软件 V1.0    第 274 页
+------------------------------------------------------------------------
+        username: user.username,
+        userId: user.id,
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+      });
+      return NextResponse.json(
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        { status: 403 }
+      );
+    }
+ 
+    // bump sessionVersion：其他设备的 session 全部失效，当前会话续签
+    const nextVersion = user.sessionVersion + 1;
+    await prismadb.user.update({
+      where: { id: user.id },
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    });
+ 
+    const token = await createSessionToken(user.id, nextVersion);
+    const response = NextResponse.json({ ok: true });
+    setSessionCookie(response, token);
+    await logAuthEvent({
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+      outcome: 'success',
+      username: user.username,
+      userId: user.id,
+    });
+    return response;
+  } catch (error) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/login/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { normalizeUsername } from '@/server/auth/credentials';
+import { getLockStatus, registerFailure, resetFailures } from '@/server/auth/lockout';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import { createSessionToken } from '@/server/auth/session';
+import { setSessionCookie } from '@/server/auth/sessionCookie';
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+interface LoginBody {
+  username?: unknown;
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+}
+ 
+function lockedResponse(retryAfterSec: number) {
+
+OOTD智能穿搭助手软件 V1.0    第 275 页
+------------------------------------------------------------------------
+  return NextResponse.json(
+    {
+      error: `失败次数过多，账号已锁定，请 ${Math.ceil(retryAfterSec / 60)} 分钟后再试`,
+      code: 'ACCOUNT_LOCKED',
+      retryAfterSec,
+    },
+    { status: 423 }
+  );
+}
+ 
+export async function POST(req: NextRequest) {
+  const body = (await req.json().catch(() => null)) as LoginBody | null;
+  const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    return NextResponse.json(
+      { error: '请输入用户名和密码', code: 'VALIDATION_ERROR' },
+      { status: 400 }
+    );
+  }
+ 
+  try {
+    const user = await prismadb.user.findUnique({ where: { username } });
+    if (!user) {
+      await logAuthEvent({ action: 'login', outcome: 'failure', username, reason: 'credentials_invalid' });
+      return NextResponse.json(
+        { error: '用户名或密码不正确', code: 'CREDENTIALS_INVALID' },
+        { status: 401 }
+      );
+    }
+ 
+    const lock = getLockStatus(user);
+    if (lock.locked) {
+      await logAuthEvent({ action: 'login', outcome: 'failure', username, reason: 'account_locked' });
+      return lockedResponse(lock.retryAfterSec);
+    }
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    if (!ok) {
+      const next = registerFailure(user);
+      await prismadb.user.update({ where: { id: user.id }, data: next });
+      await logAuthEvent({ action: 'login', outcome: 'failure', username, reason: 'credentials_invalid' });
+      const nowLocked = getLockStatus(next);
+      if (nowLocked.locked) return lockedResponse(nowLocked.retryAfterSec);
+      return NextResponse.json(
+        { error: '用户名或密码不正确', code: 'CREDENTIALS_INVALID' },
+        { status: 401 }
+      );
+    }
+ 
+
+OOTD智能穿搭助手软件 V1.0    第 276 页
+------------------------------------------------------------------------
+    await prismadb.user.update({ where: { id: user.id }, data: resetFailures() });
+    const token = await createSessionToken(user.id, user.sessionVersion);
+    const response = NextResponse.json({ user: { id: user.id, username: user.username } });
+    setSessionCookie(response, token);
+    await logAuthEvent({ action: 'login', outcome: 'success', username, userId: user.id });
+    return response;
+  } catch (error) {
+    console.error('[AUTH_LOGIN]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/logout/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser } from '@/server/auth/currentUser';
+import { clearSessionCookie } from '@/server/auth/sessionCookie';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  const response = NextResponse.json({ ok: true });
+  clearSessionCookie(response);
+  await logAuthEvent({
+    action: 'logout',
+    outcome: 'success',
+    username: user?.username,
+    userId: user?.id,
+  });
+  return response;
+}
+ 
+ 
+// ===== FILE: app/api/auth/recovery-codes/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { generateRecoveryCodes, normalizeRecoveryCode } from '@/server/auth/credentials';
+import { getSessionUser } from '@/server/auth/currentUser';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+/** POST：登录态重新生成 8 个恢复码（旧码全部作废；明文仅本次返回） */
+export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) {
+    return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
+  }
+ 
+  try {
+    const codes = generateRecoveryCodes(8);
+
+OOTD智能穿搭助手软件 V1.0    第 277 页
+------------------------------------------------------------------------
+    const hashes: string[] = [];
+    for (const code of codes) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    }
+ 
+    await prismadb.user.update({
+      where: { id: user.id },
+      data: { recoveryCodeHashes: hashes },
+    });
+    await logAuthEvent({
+      action: 'generate_recovery_codes',
+      outcome: 'success',
+      username: user.username,
+      userId: user.id,
+    });
+    return NextResponse.json({ codes });
+  } catch (error) {
+    console.error('[AUTH_RECOVERY_CODES]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/register/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { isAccessCodeValid } from '@/server/auth/access';
+import { normalizeUsername, validateUsername } from '@/server/auth/credentials';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import { createSessionToken } from '@/server/auth/session';
+import { setSessionCookie } from '@/server/auth/sessionCookie';
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+interface RegisterBody {
+  username?: unknown;
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  inviteCode?: unknown;
+}
+ 
+export async function POST(req: NextRequest) {
+  const body = (await req.json().catch(() => null)) as RegisterBody | null;
+  const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+ 
+  const usernameError = validateUsername(username);
+  if (usernameError) {
+    return NextResponse.json({ error: usernameError, code: 'VALIDATION_ERROR' }, { status: 400 });
+  }
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+
+OOTD智能穿搭助手软件 V1.0    第 278 页
+------------------------------------------------------------------------
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  }
+ 
+  // 邀请码：REGISTRATION_MODE=open 时跳过；默认 invite，复用 ACCESS_CODE
+  const inviteRequired = (process.env.REGISTRATION_MODE?.trim() || 'invite') !== 'open';
+  const inviteCode = typeof body?.inviteCode === 'string' ? body.inviteCode : '';
+  if (inviteRequired && !isAccessCodeValid(inviteCode)) {
+    await logAuthEvent({ action: 'register', outcome: 'failure', username, reason: 'invite_invalid' });
+    return NextResponse.json({ error: '邀请码不正确', code: 'INVITE_INVALID' }, { status: 403 });
+  }
+ 
+  try {
+    const existing = await prismadb.user.findUnique({ where: { username } });
+    if (existing) {
+      await logAuthEvent({ action: 'register', outcome: 'failure', username, reason: 'username_taken' });
+      return NextResponse.json({ error: '用户名已被占用', code: 'USERNAME_TAKEN' }, { status: 409 });
+    }
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    const user = await prismadb.user.create({
+      data: {
+        username,
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        clientProfile: { create: {} },
+      },
+    });
+ 
+    const token = await createSessionToken(user.id, user.sessionVersion);
+    const response = NextResponse.json({ user: { id: user.id, username: user.username } });
+    setSessionCookie(response, token);
+    await logAuthEvent({ action: 'register', outcome: 'success', username, userId: user.id });
+    return response;
+  } catch (error) {
+    console.error('[AUTH_REGISTER]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/reset-password/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  normalizeRecoveryCode,
+  normalizeSecurityAnswer,
+  normalizeUsername,
+} from '@/server/auth/credentials';
+import { getLockStatus, registerFailure, resetFailures } from '@/server/auth/lockout';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import { createSessionToken } from '@/server/auth/session';
+import { setSessionCookie } from '@/server/auth/sessionCookie';
+
+OOTD智能穿搭助手软件 V1.0    第 279 页
+------------------------------------------------------------------------
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  username?: unknown;
+  method?: unknown;
+  answers?: unknown;
+  recoveryCode?: unknown;
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+}
+ 
+interface StoredSecurityQuestion {
+  question: string;
+  answerHash: string;
+}
+ 
+function parseStoredQuestions(raw: unknown): StoredSecurityQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is StoredSecurityQuestion =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as StoredSecurityQuestion).question === 'string' &&
+      typeof (item as StoredSecurityQuestion).answerHash === 'string'
+  );
+}
+ 
+function lockedResponse(retryAfterSec: number) {
+  return NextResponse.json(
+    {
+      error: `失败次数过多，账号已锁定，请 ${Math.ceil(retryAfterSec / 60)} 分钟后再试`,
+      code: 'ACCOUNT_LOCKED',
+      retryAfterSec,
+    },
+    { status: 423 }
+  );
+}
+ 
+export async function POST(req: NextRequest) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
+  const method = body?.method === 'recovery' ? 'recovery' : body?.method === 'questions' ? 'questions' : null;
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+ 
+  if (!username || !method) {
+    return NextResponse.json({ error: '请求参数不完整', code: 'VALIDATION_ERROR' }, { status: 400 });
+  }
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+  if (strengthError) {
+    return NextResponse.json({ error: strengthError, code: 'VALIDATION_ERROR' }, { status: 400 });
+
+OOTD智能穿搭助手软件 V1.0    第 280 页
+------------------------------------------------------------------------
+  }
+ 
+  try {
+    const user = await prismadb.user.findUnique({ where: { username } });
+    if (!user) {
+      return NextResponse.json(
+        { error: '重置失败，请检查输入', code: 'RESET_FAILED' },
+        { status: 403 }
+      );
+    }
+ 
+    const lock = getLockStatus(user);
+    if (lock.locked) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+      return lockedResponse(lock.retryAfterSec);
+    }
+ 
+    let remainingRecoveryHashes: string[] | null = null;
+ 
+    if (method === 'questions') {
+      const stored = parseStoredQuestions(user.securityQuestions);
+      if (stored.length === 0) {
+        return NextResponse.json(
+          { error: '该账号未设置密保问题，请使用恢复码或联系管理员', code: 'RESET_UNAVAILABLE' },
+          { status: 403 }
+        );
+      }
+      const answers = Array.isArray(body?.answers) ? body.answers : [];
+      if (answers.length !== stored.length) {
+        return NextResponse.json(
+          { error: '请回答全部密保问题', code: 'VALIDATION_ERROR' },
+          { status: 400 }
+        );
+      }
+      let allMatch = true;
+      for (let i = 0; i < stored.length; i += 1) {
+        const answer = typeof answers[i] === 'string' ? answers[i] : '';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        if (!ok) allMatch = false;
+      }
+      if (!allMatch) {
+        const next = registerFailure(user);
+        await prismadb.user.update({ where: { id: user.id }, data: next });
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        const nowLocked = getLockStatus(next);
+        if (nowLocked.locked) return lockedResponse(nowLocked.retryAfterSec);
+        return NextResponse.json(
+          { error: '密保答案不正确', code: 'ANSWERS_MISMATCH' },
+          { status: 403 }
+        );
+
+OOTD智能穿搭助手软件 V1.0    第 281 页
+------------------------------------------------------------------------
+      }
+    } else {
+      // recovery：任一未使用恢复码匹配即通过，命中后消费该码
+      const code = normalizeRecoveryCode(
+        typeof body?.recoveryCode === 'string' ? body.recoveryCode : ''
+      );
+      if (!code) {
+        return NextResponse.json({ error: '请输入恢复码', code: 'VALIDATION_ERROR' }, { status: 400 });
+      }
+      let matchedIndex = -1;
+      for (let i = 0; i < user.recoveryCodeHashes.length; i += 1) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+          matchedIndex = i;
+          break;
+        }
+      }
+      if (matchedIndex < 0) {
+        const next = registerFailure(user);
+        await prismadb.user.update({ where: { id: user.id }, data: next });
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        const nowLocked = getLockStatus(next);
+        if (nowLocked.locked) return lockedResponse(nowLocked.retryAfterSec);
+        return NextResponse.json(
+          { error: '恢复码不正确或已被使用', code: 'RECOVERY_INVALID' },
+          { status: 403 }
+        );
+      }
+      remainingRecoveryHashes = user.recoveryCodeHashes.filter((_, i) => i !== matchedIndex);
+    }
+ 
+    // 重置成功：新密码 + sessionVersion+1（旧 session 全失效）+ 清锁定，当前会话自动登录
+    const nextVersion = user.sessionVersion + 1;
+    await prismadb.user.update({
+      where: { id: user.id },
+      data: {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+        sessionVersion: nextVersion,
+        ...resetFailures(),
+        ...(remainingRecoveryHashes ? { recoveryCodeHashes: remainingRecoveryHashes } : {}),
+      },
+    });
+ 
+    const token = await createSessionToken(user.id, nextVersion);
+    const response = NextResponse.json({ ok: true });
+    setSessionCookie(response, token);
+    await logAuthEvent({
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+      outcome: 'success',
+      username,
+      userId: user.id,
+
+OOTD智能穿搭助手软件 V1.0    第 282 页
+------------------------------------------------------------------------
+    });
+    return response;
+  } catch (error) {
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/auth/security-questions/route.ts =====
+import type { Prisma } from '@prisma/client';
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  normalizeSecurityAnswer,
+  normalizeUsername,
+  validateSecurityQuestions,
+  type SecurityQuestionInput,
+} from '@/server/auth/credentials';
+import { getSessionUser } from '@/server/auth/currentUser';
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+import prismadb from '@/server/db';
+import { logAuthEvent } from '@/server/logging/authAudit';
+ 
+interface StoredSecurityQuestion {
+  question: string;
+  answerHash: string;
+}
+ 
+function parseStoredQuestions(raw: unknown): StoredSecurityQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is StoredSecurityQuestion =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as StoredSecurityQuestion).question === 'string' &&
+      typeof (item as StoredSecurityQuestion).answerHash === 'string'
+  );
+}
+ 
+/** GET ?username=x：找回密码时取问题文本；用户不存在统一返回空数组（避免用户名枚举） */
+export async function GET(req: NextRequest) {
+  const username = normalizeUsername(req.nextUrl.searchParams.get('username') ?? '');
+  if (!username) {
+    return NextResponse.json({ questions: [] });
+  }
+ 
+  try {
+    const user = await prismadb.user.findUnique({ where: { username } });
+    const questions = user ? parseStoredQuestions(user.securityQuestions) : [];
+    return NextResponse.json({ questions: questions.map((q) => q.question) });
+
+OOTD智能穿搭助手软件 V1.0    第 283 页
+------------------------------------------------------------------------
+  } catch (error) {
+    console.error('[AUTH_SECURITY_QUESTIONS_GET]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+interface SetQuestionsBody {
+  questions?: unknown;
+}
+ 
+/** POST：登录态设置/覆盖密保问题（答案归一化后哈希存储） */
+export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) {
+    return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
+  }
+ 
+  const body = (await req.json().catch(() => null)) as SetQuestionsBody | null;
+  const inputs = Array.isArray(body?.questions) ? (body.questions as SecurityQuestionInput[]) : [];
+ 
+  const validationError = validateSecurityQuestions(inputs);
+  if (validationError) {
+    return NextResponse.json({ error: validationError, code: 'VALIDATION_ERROR' }, { status: 400 });
+  }
+ 
+  try {
+    const stored: StoredSecurityQuestion[] = [];
+    for (const input of inputs) {
+      stored.push({
+        question: input.question.trim(),
+// [REDACTED: sensitive literal removed for soft-copyright deposit]
+      });
+    }
+ 
+    await prismadb.user.update({
+      where: { id: user.id },
+      data: { securityQuestions: stored as unknown as Prisma.InputJsonValue },
+    });
+    await logAuthEvent({
+      action: 'set_security_questions',
+      outcome: 'success',
+      username: user.username,
+      userId: user.id,
+    });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('[AUTH_SECURITY_QUESTIONS_POST]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+OOTD智能穿搭助手软件 V1.0    第 284 页
+------------------------------------------------------------------------
+ 
+ 
+// ===== FILE: app/api/auth/session/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser } from '@/server/auth/currentUser';
+ 
+/** 登录态探针：永不 401，前端据此决定是否跳登录页 */
+export async function GET(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) {
+    return NextResponse.json({ authenticated: false });
+  }
+ 
+  const questions = Array.isArray(user.securityQuestions) ? user.securityQuestions : [];
+  return NextResponse.json({
+    authenticated: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      hasSecurityQuestions: questions.length > 0,
+    },
+  });
+}
+ 
+ 
+// ===== FILE: app/api/conversations/[conversationId]/messages/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import prismadb from '@/server/db';
+import { MessageContentPart } from '@/lib/types';
+import { buildMessagePage, parseMessagePageLimit } from '@/server/utils/messagePage';
+ 
+type RouteParams = {
+  params: Promise<{
+    conversationId: string;
+  }>;
+};
+ 
+/**
+ * Handles GET requests to fetch one page of messages for a specific conversation.
+ * Query: `limit` (default 20, max 50), `before` (message id cursor; omitted for the latest page).
+ * @param req The Next.js request object.
+ * @param params The route parameters, containing `conversationId`.
+ * @returns `{ messages, nextCursor }` with messages in chronological order, or an error.
+ */
+export async function GET(req: NextRequest, { params }: RouteParams) {
+  const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
+ 
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+
+OOTD智能穿搭助手软件 V1.0    第 285 页
+------------------------------------------------------------------------
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
+  }
+ 
+  const { searchParams } = req.nextUrl;
+  const limit = parseMessagePageLimit(searchParams.get('limit'));
+  const before = searchParams.get('before');
+ 
+  try {
+    const rowsDesc = await prismadb.message.findMany({
+      where: {
+        conversationId,
+        conversation: { clientId },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(before && { cursor: { id: before }, skip: 1 }),
+    });
+    return NextResponse.json(buildMessagePage(rowsDesc, limit));
+  } catch (error) {
+    console.error('[MESSAGES_GET]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+/**
+ * Handles POST requests to add a new message to a conversation.
+ * This also implicitly updates the conversation's `updatedAt` timestamp.
+ * And triggers a background task to analyze user messages for profile information.
+ * @param req The Next.js request object containing the message data.
+ * @param params The route parameters, containing `conversationId`.
+ * @returns A JSON response with the newly created message or an error.
+ */
+export async function POST(req: NextRequest, { params }: RouteParams) {
+  const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
+ 
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
+  }
+ 
+  try {
+    const ownedConversation = await prismadb.conversation.findFirst({
+      where: { id: conversationId, clientId },
+      select: { id: true },
+    });
+
+OOTD智能穿搭助手软件 V1.0    第 286 页
+------------------------------------------------------------------------
+    if (!ownedConversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+ 
+    const body = (await req.json()) as { role?: unknown; content?: unknown };
+    const { role, content } = body;
+ 
+    // AI 消息只由服务端生成链路写入（graph/nodes.ts 占位 + helpers.ts 更新），客户端只能写用户消息
+    if (role !== 'user' || !Array.isArray(content) || content.length === 0) {
+      return NextResponse.json(
+        { error: 'Only user messages with non-empty content can be posted' },
+        { status: 400 }
+      );
+    }
+ 
+    console.log('接收到的消息', JSON.stringify(content))
+ 
+    const newMessage = await prismadb.message.create({
+      data: {
+        conversationId: conversationId,
+        role: 'user',
+        content: content as MessageContentPart[],
+        timestamp: new Date(),
+      },
+    });
+ 
+    return NextResponse.json(newMessage, { status: 201 });
+ 
+  } catch (error) {
+    console.error('[MESSAGES_POST]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/conversations/[conversationId]/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import prismadb from '@/server/db';
+ 
+// Define the type for the route parameters, accommodating Next.js 15's promise-based params
+type RouteParams = {
+  params: Promise<{ conversationId: string }>;
+};
+ 
+/**
+ * Handles DELETE requests to remove a specific conversation.
+ * @param req The Next.js request object (not used in this function).
+ * @param params The route parameters, containing the `conversationId`.
+ * @returns A JSON response indicating success or failure.
+ */
+
+OOTD智能穿搭助手软件 V1.0    第 287 页
+------------------------------------------------------------------------
+export async function DELETE(req: NextRequest, { params }: RouteParams) {
+  const { conversationId } = await params;
+  const clientId = req.headers.get('x-client-id');
+ 
+  if (!conversationId || !clientId) {
+    return NextResponse.json(
+      { error: 'Conversation ID and Client ID are required' },
+      { status: 400 }
+    );
+  }
+ 
+  try {
+    const ownedConversation = await prismadb.conversation.findFirst({
+      where: { id: conversationId, clientId },
+      select: { id: true },
+    });
+    if (!ownedConversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+ 
+    // Attempt to delete the conversation by its ID.
+    // Thanks to `onDelete: Cascade` in the schema, all related messages
+    // will be automatically deleted as well.
+    await prismadb.conversation.delete({
+      where: {
+        id: conversationId,
+      },
+    });
+ 
+    // Return a success response with no body content.
+    return new NextResponse(null, { status: 204 });
+ 
+  } catch (error) {
+    // It's good practice to check for specific Prisma errors,
+    // like if the record to delete was not found.
+    if (error instanceof Error && error.name === 'P2025') { // Prisma's record not found error code
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+ 
+    console.error('[CONVERSATION_DELETE]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+// ===== FILE: app/api/conversations/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import prismadb from '@/server/db';
+import type { MessageContentPart } from '@/lib/types';
+ 
+/**
+
+OOTD智能穿搭助手软件 V1.0    第 288 页
+------------------------------------------------------------------------
+ * Handles GET requests to fetch conversations for a specific client.
+ * Expects a `clientId` as a URL search parameter.
+ * @param req The Next.js request object.
+ * @returns A JSON response with the list of conversations or an error.
+ */
+export async function GET(req: NextRequest) {
+  const clientId = req.headers.get('X-Client-ID');
+ 
+  if (!clientId) {
+    return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+  }
+ 
+  try {
+    const conversations = await prismadb.conversation.findMany({
+      where: {
+        clientId: clientId,
+      },
+      orderBy: {
+        updatedAt: 'desc', // Show most recently updated conversations first
+      },
+    });
+    return NextResponse.json(conversations);
+  } catch (error) {
+    console.error('[CONVERSATIONS_GET]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+interface CreateConversationBody {
+  title?: unknown;
+  firstMessage?: { role?: unknown; content?: unknown };
+}
+ 
+/**
+ * Handles POST requests to create a new conversation.
+ * Body: `title`, optional `firstMessage` ({ role: 'user', content: MessageContentPart[] })
+ * persisted in the same write so a new chat costs one round trip instead of two.
+ * @param req The Next.js request object.
+ * @returns A JSON response with the newly created conversation or an error.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const body = (await req.json()) as CreateConversationBody;
+    const { title, firstMessage } = body;
+    const clientId = req.headers.get('X-Client-ID');
+ 
+    if (!clientId) {
+      return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+    }
+ 
+
+OOTD智能穿搭助手软件 V1.0    第 289 页
+------------------------------------------------------------------------
+    if (typeof title !== 'string' || !title) {
+        return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
+ 
+    if (
+      firstMessage !== undefined &&
+      (firstMessage.role !== 'user' ||
+        !Array.isArray(firstMessage.content) ||
+        firstMessage.content.length === 0)
+    ) {
+      return NextResponse.json(
+        { error: 'firstMessage must be a user message with non-empty content' },
+        { status: 400 }
+      );
+    }
+ 
+    const newConversation = await prismadb.conversation.create({
+      data: {
+        title,
+        clientId,
+        ...(firstMessage && {
+          messages: {
+            create: {
+              role: 'user',
+              content: firstMessage.content as MessageContentPart[],
+              timestamp: new Date(),
+            },
+          },
+        }),
+      },
+    });
+ 
+    return NextResponse.json(newConversation, { status: 201 });
+  } catch (error) {
+    console.error('[CONVERSATIONS_POST]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+// ===== FILE: app/api/profile/visual-analysis/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
+import prismadb from '@/server/db';
+import { analyzeVisualProfileFromImage } from '@/server/agents/visual/profile';
+import { logVisualProfileAudit } from '@/server/logging/visualProfile';
+import {
+  isClientOwnedUploadUrl,
+  mergeVisualAnalysisIntoProfile,
+} from '@/server/utils/profileMetadata';
+import { profileFromDbRecord } from '@/server/agents/user-profile';
+
+OOTD智能穿搭助手软件 V1.0    第 290 页
+------------------------------------------------------------------------
+import { normalizeVisualFeaturesForZh } from '@/lib/hairColorDisplay';
+ 
+export async function POST(req: NextRequest) {
+  const clientId = req.headers.get('X-Client-ID');
+  if (!clientId) {
+    return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+  }
+ 
+  const startMs = Date.now();
+ 
+  try {
+    const body = await req.json();
+    const imageUrl = typeof body?.imageUrl === 'string' ? body.imageUrl.trim() : '';
+ 
+    if (!imageUrl) {
+      return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 });
+    }
+ 
+    if (!isClientOwnedUploadUrl(imageUrl, clientId)) {
+      return NextResponse.json({ error: 'Invalid image URL' }, { status: 403 });
+    }
+ 
+    const visualResult = await analyzeVisualProfileFromImage(imageUrl);
+ 
+    if (!visualResult.is_valid_portrait) {
+      void logVisualProfileAudit({
+        timestamp: new Date().toISOString(),
+        clientId,
+        imageUrl,
+        durationMs: Date.now() - startMs,
+        success: false,
+        error: 'not_a_valid_portrait',
+      });
+      return NextResponse.json(
+        { error: '请上传清晰的正面人像照片' },
+        { status: 422 }
+      );
+    }
+ 
+    const client = await prismadb.clientProfile.upsert({
+      where: { id: clientId },
+      update: {},
+      create: { id: clientId, profileData: {} },
+    });
+ 
+    const existingProfile = (client.profileData as Record<string, unknown>) || {};
+    const normalizedVisual = {
+      ...visualResult,
+      visual_features: normalizeVisualFeaturesForZh(visualResult.visual_features),
+    };
+
+OOTD智能穿搭助手软件 V1.0    第 291 页
+------------------------------------------------------------------------
+    const mergedProfile = mergeVisualAnalysisIntoProfile(existingProfile, normalizedVisual, imageUrl);
+ 
+    const updatedClient = await prismadb.clientProfile.update({
+      where: { id: clientId },
+      data: { profileData: mergedProfile as Prisma.InputJsonValue },
+    });
+ 
+    void logVisualProfileAudit({
+      timestamp: new Date().toISOString(),
+      clientId,
+      imageUrl,
+      durationMs: Date.now() - startMs,
+      success: true,
+      result: {
+        skin_tone: visualResult.skin_tone,
+        body_shape: visualResult.body_shape,
+        hair_color: visualResult.visual_features.hair_color,
+      },
+    });
+ 
+    const profileData = profileFromDbRecord(
+      (updatedClient.profileData as Record<string, unknown>) || {}
+    );
+ 
+    return NextResponse.json({
+      profileData: {
+        ...profileData,
+        visual_profile_verified: true,
+        selfie_image_url: imageUrl,
+        selfie_analyzed_at: mergedProfile.selfie_analyzed_at,
+        location: typeof mergedProfile.location === 'string' ? mergedProfile.location : undefined,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[VISUAL_PROFILE_API] ClientID: ${clientId}`, error);
+ 
+    void logVisualProfileAudit({
+      timestamp: new Date().toISOString(),
+      clientId,
+      imageUrl: '',
+      durationMs: Date.now() - startMs,
+      success: false,
+      error: message,
+    });
+ 
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+
+OOTD智能穿搭助手软件 V1.0    第 292 页
+------------------------------------------------------------------------
+ 
+// ===== FILE: app/api/upload/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { v4 as uuidv4 } from 'uuid';
+import { uploadObjectToCOS } from '@/server/services/cos';
+import { ensureLlmSafeImageBuffer } from '@/server/utils/image';
+ 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+ 
+function extensionForMime(mimeType: string): string {
+  switch (mimeType) {
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/jpeg':
+    default:
+      return 'jpeg';
+  }
+}
+ 
+export async function POST(req: NextRequest) {
+  const clientId = req.headers.get('x-client-id');
+  if (!clientId) {
+    return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
+  }
+ 
+  const startedAt = Date.now();
+  try {
+    const formData = await req.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: 'file is required' }, { status: 400 });
+    }
+    if (!file.type.startsWith('image/')) {
+      return NextResponse.json({ error: 'Only image uploads are allowed' }, { status: 400 });
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 413 });
+    }
+ 
+    const readStartedAt = Date.now();
+    const rawBuffer = Buffer.from(await file.arrayBuffer());
+    const readMs = Date.now() - readStartedAt;
+ 
+    const convertStartedAt = Date.now();
+    const safe = await ensureLlmSafeImageBuffer(rawBuffer, file.type);
+    const convertMs = Date.now() - convertStartedAt;
+
+OOTD智能穿搭助手软件 V1.0    第 293 页
+------------------------------------------------------------------------
+ 
+    const relativeKey = `user-uploads/${clientId}/${uuidv4()}.${extensionForMime(safe.mimeType)}`;
+    const cosStartedAt = Date.now();
+    const publicUrl = await uploadObjectToCOS(safe.buffer, safe.mimeType, relativeKey);
+    const cosMs = Date.now() - cosStartedAt;
+ 
+    console.log('[API /api/upload] timing', JSON.stringify({
+      outcome: 'success',
+      ms: {
+        read_file: readMs,
+        convert: convertMs,
+        cos_upload: cosMs,
+        total: Date.now() - startedAt,
+      },
+      bytes: safe.buffer.length,
+      mime: safe.mimeType,
+      sourceMime: file.type,
+    }));
+ 
+    return NextResponse.json({ publicUrl });
+  } catch (error) {
+    console.log('[API /api/upload] timing', JSON.stringify({
+      outcome: 'error',
+      ms: { total: Date.now() - startedAt },
+    }));
+    console.error('[API /api/upload]', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+ 
+ 
+// ===== FILE: app/api/access/logout/route.ts =====
+import { NextResponse } from 'next/server';
+import { ACCESS_COOKIE_NAME } from '@/server/auth/access';
+ 
+export async function POST() {
+  const response = NextResponse.json({ mode: 'browse' });
+  response.cookies.set({
+    name: ACCESS_COOKIE_NAME,
+    value: '',
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 0,
+  });
+  return response;
+}
+ 
+ 
+
+OOTD智能穿搭助手软件 V1.0    第 294 页
+------------------------------------------------------------------------
+// ===== FILE: app/api/access/status/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  ACCESS_COOKIE_NAME,
+  isAccessConfigured,
+  verifyAccessSessionToken,
+} from '@/server/auth/access';
+import { getSessionUser } from '@/server/auth/currentUser';
+import { getAuthMode } from '@/server/auth/mode';
+ 
+/** 前端能力探针：access 模式看访问码 cookie，user 模式看登录 session */
+export async function GET(req: NextRequest) {
+  if (getAuthMode() === 'user') {
+    const user = await getSessionUser(req);
+    return NextResponse.json({
+      mode: user ? 'verified' : 'browse',
+      configured: true,
+      authMode: 'user',
+    });
+  }
+ 
+  const verified = await verifyAccessSessionToken(
+    req.cookies.get(ACCESS_COOKIE_NAME)?.value
+  );
+ 
+  return NextResponse.json({
+    mode: verified ? 'verified' : 'browse',
+    configured: isAccessConfigured(),
+    authMode: 'access',
+  });
+}
+ 
+ 
+// ===== FILE: app/api/access/verify/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  ACCESS_COOKIE_MAX_AGE_SECONDS,
+  ACCESS_COOKIE_NAME,
+  createAccessSessionToken,
+  isAccessCodeValid,
+  isAccessConfigured,
+} from '@/server/auth/access';
+ 
+export async function POST(req: NextRequest) {
+  if (!isAccessConfigured()) {
+    return NextResponse.json(
+      { error: 'Access verification is not configured.' },
+      { status: 503 }
+    );
+  }
+
+OOTD智能穿搭助手软件 V1.0    第 295 页
+------------------------------------------------------------------------
+ 
+  const body = (await req.json().catch(() => null)) as { code?: unknown } | null;
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!isAccessCodeValid(code)) {
+    return NextResponse.json({ error: '访问码不正确' }, { status: 401 });
+  }
+ 
+  const response = NextResponse.json({ mode: 'verified' });
+  response.cookies.set({
+    name: ACCESS_COOKIE_NAME,
+    value: await createAccessSessionToken(),
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: ACCESS_COOKIE_MAX_AGE_SECONDS,
+  });
+  return response;
+}
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 

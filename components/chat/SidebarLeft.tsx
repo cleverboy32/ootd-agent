@@ -67,7 +67,7 @@ export function SidebarLeft({
       </div>}
 
       {/* --- Conversation History List (Updated) --- */}
-      <div className="flex-1 overflow-y-auto px-4">
+      <div className="flex-1 overflow-y-auto no-scrollbar px-4">
         <div className="flex flex-col gap-2">
           {/* Condition 1: Initial Loading State */}
           {isLoading && conversations.length === 0 ? (

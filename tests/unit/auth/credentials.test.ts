@@ -68,6 +68,16 @@ describe('validateSecurityQuestions', () => {
       ]) ?? '',
       /1~50/
     );
+    assert.equal(
+      validateSecurityQuestions(
+        [
+          { question: '我的小学名字是什么', answer: '' },
+          { question: '我出生的城市是哪里', answer: '' },
+        ],
+        { allowEmptyAnswers: true },
+      ),
+      null,
+    );
   });
 });
 

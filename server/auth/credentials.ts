@@ -25,11 +25,18 @@ export interface SecurityQuestionInput {
   answer: string;
 }
 
-/** 返回错误文案；校验通过返回 null */
-export function validateSecurityQuestions(inputs: SecurityQuestionInput[]): string | null {
+/**
+ * 返回错误文案；校验通过返回 null。
+ * allowEmptyAnswers：安全中心回显后「答案留空=保持原答案」时跳过答案长度校验。
+ */
+export function validateSecurityQuestions(
+  inputs: SecurityQuestionInput[],
+  options?: { allowEmptyAnswers?: boolean },
+): string | null {
   if (!Array.isArray(inputs) || inputs.length < 2 || inputs.length > 3) {
     return '请设置 2~3 个密保问题';
   }
+  const allowEmptyAnswers = options?.allowEmptyAnswers === true;
   const seen = new Set<string>();
   for (const item of inputs) {
     const question = typeof item?.question === 'string' ? item.question.trim() : '';
@@ -39,6 +46,7 @@ export function validateSecurityQuestions(inputs: SecurityQuestionInput[]): stri
     const normalized = normalizeSecurityAnswer(
       typeof item?.answer === 'string' ? item.answer : ''
     );
+    if (normalized.length === 0 && allowEmptyAnswers) continue;
     if (normalized.length < 1 || normalized.length > 50) return '密保答案需为 1~50 字';
   }
   return null;

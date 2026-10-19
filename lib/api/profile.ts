@@ -59,9 +59,12 @@ function normalizeProfileData(raw: Partial<ProfileData> | undefined): ProfileDat
   };
 }
 
-export async function fetchProfile(): Promise<ProfileData> {
+/** 档案 GET：走 getCached（服务端需 Cache-Control）；写后 bust:true */
+export async function fetchProfile(options?: { bust?: boolean }): Promise<ProfileData> {
   const clientId = getClientId();
-  const res = (await apiClient.get(`/api/clients/${clientId}`)) as ClientProfileResponse;
+  const res = (await apiClient.getCached(`/api/clients/${clientId}`, {
+    bust: options?.bust,
+  })) as ClientProfileResponse;
   return normalizeProfileData(res.profileData);
 }
 
@@ -69,7 +72,10 @@ export async function analyzeVisualProfile(imageUrl: string): Promise<ProfileDat
   const res = (await apiClient.post('/api/profile/visual-analysis', {
     imageUrl,
   })) as { profileData: Partial<ProfileData> };
-  return normalizeProfileData(res.profileData);
+  const normalized = normalizeProfileData(res.profileData);
+  // 写成功后把 GET 缓存刷成最新，避免返回档案页读到旧 force-cache
+  void fetchProfile({ bust: true }).catch(() => undefined);
+  return normalized;
 }
 
 export function computeProfileCompleteness(profile: ProfileData): { filled: number; total: number } {

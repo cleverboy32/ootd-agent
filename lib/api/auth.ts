@@ -72,6 +72,22 @@ export async function fetchSecurityQuestions(username: string): Promise<string[]
   return data.questions;
 }
 
+/** 登录态：拉取当前用户已设置的密保问题文本（不含答案） */
+export async function fetchMySecurityQuestions(): Promise<{
+  questions: string[];
+  configured: boolean;
+}> {
+  const res = await fetch(withBasePath('/api/auth/security-questions'), {
+    credentials: 'same-origin',
+  });
+  const data = await parseOrThrow<{ questions: string[]; configured?: boolean }>(res);
+  const questions = Array.isArray(data.questions) ? data.questions : [];
+  return {
+    questions,
+    configured: data.configured === true || questions.length > 0,
+  };
+}
+
 export async function setSecurityQuestions(
   questions: { question: string; answer: string }[]
 ): Promise<void> {

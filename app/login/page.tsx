@@ -2,11 +2,11 @@
 
 import { Suspense, useState, type FormEvent } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   fetchSecurityQuestions,
   login,
@@ -27,43 +27,75 @@ function enterApp(redirect: string): void {
   window.location.assign(withBasePath(redirect));
 }
 
-const labelClass = 'block text-sm font-medium text-foreground mb-1.5';
+const fieldClass = 'space-y-2';
+const labelClass = 'block text-sm font-medium text-foreground/80';
+const inputClass =
+  'h-11 rounded-xl bg-background px-3.5 text-sm shadow-none border-border focus-visible:border-ring focus-visible:ring-ring/30';
 
-function LoginTab({ redirect }: { redirect: string }) {
+function FieldError({ message }: { message: string }) {
+  if (!message) return null;
+  return (
+    <p className="rounded-lg bg-destructive/8 px-3 py-2 text-sm text-destructive" role="alert">
+      {message}
+    </p>
+  );
+}
+
+function LoginFields({
+  formId,
+  redirect,
+  onForgot,
+  onPendingChange,
+}: {
+  formId: string;
+  redirect: string;
+  onForgot: () => void;
+  onPendingChange: (pending: boolean) => void;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [pending, setPending] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setPending(true);
+    onPendingChange(true);
     try {
       await login(username, password);
       enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
-      setPending(false);
+      onPendingChange(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div>
+    <form id={formId} onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className={fieldClass}>
         <label htmlFor="login-username" className={labelClass}>用户名</label>
         <Input
           id="login-username"
+          className={inputClass}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
           required
         />
       </div>
-      <div>
-        <label htmlFor="login-password" className={labelClass}>密码</label>
+      <div className={fieldClass}>
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor="login-password" className={labelClass}>密码</label>
+          <button
+            type="button"
+            onClick={onForgot}
+            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            忘记密码？
+          </button>
+        </div>
         <Input
           id="login-password"
+          className={inputClass}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -71,21 +103,25 @@ function LoginTab({ redirect }: { redirect: string }) {
           required
         />
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? '登录中…' : '登录'}
-      </Button>
+      <FieldError message={error} />
     </form>
   );
 }
 
-function RegisterTab({ redirect }: { redirect: string }) {
+function RegisterFields({
+  formId,
+  redirect,
+  onPendingChange,
+}: {
+  formId: string;
+  redirect: string;
+  onPendingChange: (pending: boolean) => void;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState('');
-  const [pending, setPending] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -94,22 +130,23 @@ function RegisterTab({ redirect }: { redirect: string }) {
       setError('两次输入的密码不一致');
       return;
     }
-    setPending(true);
+    onPendingChange(true);
     try {
       await registerAccount(username, password, inviteCode);
       enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '注册失败，请稍后重试');
-      setPending(false);
+      onPendingChange(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div>
+    <form id={formId} onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className={fieldClass}>
         <label htmlFor="reg-username" className={labelClass}>用户名</label>
         <Input
           id="reg-username"
+          className={inputClass}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="3~20 位字母、数字、_ 或 -"
@@ -117,10 +154,11 @@ function RegisterTab({ redirect }: { redirect: string }) {
           required
         />
       </div>
-      <div>
+      <div className={fieldClass}>
         <label htmlFor="reg-password" className={labelClass}>密码</label>
         <Input
           id="reg-password"
+          className={inputClass}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -129,10 +167,11 @@ function RegisterTab({ redirect }: { redirect: string }) {
           required
         />
       </div>
-      <div>
+      <div className={fieldClass}>
         <label htmlFor="reg-confirm" className={labelClass}>确认密码</label>
         <Input
           id="reg-confirm"
+          className={inputClass}
           type="password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
@@ -140,25 +179,35 @@ function RegisterTab({ redirect }: { redirect: string }) {
           required
         />
       </div>
-      <div>
+      <div className={fieldClass}>
         <label htmlFor="reg-invite" className={labelClass}>邀请码</label>
         <Input
           id="reg-invite"
+          className={inputClass}
           value={inviteCode}
           onChange={(e) => setInviteCode(e.target.value)}
           placeholder="内测期间需邀请码注册"
           required
         />
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? '注册中…' : '注册并登录'}
-      </Button>
+      <FieldError message={error} />
     </form>
   );
 }
 
-function ForgotTab({ redirect }: { redirect: string }) {
+function ForgotPanel({
+  formId,
+  redirect,
+  onBack,
+  onPendingChange,
+  onActionLabelChange,
+}: {
+  formId: string;
+  redirect: string;
+  onBack: () => void;
+  onPendingChange: (pending: boolean) => void;
+  onActionLabelChange: (label: string) => void;
+}) {
   const [username, setUsername] = useState('');
   const [questions, setQuestions] = useState<string[] | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -168,28 +217,29 @@ function ForgotTab({ redirect }: { redirect: string }) {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [pending, setPending] = useState(false);
 
   async function loadQuestions(e: FormEvent) {
     e.preventDefault();
     setError('');
     setNotice('');
-    setPending(true);
+    onPendingChange(true);
     try {
       const loaded = await fetchSecurityQuestions(username);
       if (loaded.length === 0) {
         setQuestions([]);
         setMode('recovery');
         setNotice('该账号未设置密保问题，请使用恢复码重置');
+        onActionLabelChange('重置密码并登录');
       } else {
         setQuestions(loaded);
         setAnswers(new Array(loaded.length).fill(''));
         setMode('questions');
+        onActionLabelChange('重置密码并登录');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败，请稍后重试');
     } finally {
-      setPending(false);
+      onPendingChange(false);
     }
   }
 
@@ -200,7 +250,7 @@ function ForgotTab({ redirect }: { redirect: string }) {
       setError('两次输入的密码不一致');
       return;
     }
-    setPending(true);
+    onPendingChange(true);
     try {
       if (mode === 'questions') {
         await resetPasswordByQuestions(username, answers, newPassword);
@@ -210,147 +260,280 @@ function ForgotTab({ redirect }: { redirect: string }) {
       enterApp(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : '重置失败，请稍后重试');
-      setPending(false);
+      onPendingChange(false);
     }
   }
 
-  // 第一步：输用户名取密保问题
-  if (questions === null) {
-    return (
-      <form onSubmit={loadQuestions} className="space-y-4">
-        <div>
-          <label htmlFor="forgot-username" className={labelClass}>用户名</label>
-          <Input
-            id="forgot-username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-          />
-        </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button type="submit" className="w-full" disabled={pending}>
-          {pending ? '查询中…' : '下一步'}
-        </Button>
-      </form>
-    );
-  }
-
   return (
-    <form onSubmit={onReset} className="space-y-4">
-      {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
+    <div className="space-y-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        返回登录
+      </button>
 
-      {mode === 'questions' && questions.length > 0 && (
-        <div className="space-y-3">
-          {questions.map((question, index) => (
-            <div key={question}>
-              <label className={labelClass} htmlFor={`answer-${index}`}>{question}</label>
+      {questions === null ? (
+        <form id={formId} onSubmit={loadQuestions} className="flex flex-col gap-4">
+          <div className={fieldClass}>
+            <label htmlFor="forgot-username" className={labelClass}>用户名</label>
+            <Input
+              id="forgot-username"
+              className={inputClass}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+            />
+          </div>
+          <FieldError message={error} />
+        </form>
+      ) : (
+        <form id={formId} onSubmit={onReset} className="flex flex-col gap-4">
+          {notice && (
+            <p className="rounded-lg bg-muted/80 px-3 py-2 text-sm text-muted-foreground">
+              {notice}
+            </p>
+          )}
+
+          {mode === 'questions' && questions.length > 0 && (
+            <div className="space-y-4">
+              {questions.map((question, index) => (
+                <div key={question} className={fieldClass}>
+                  <label className={labelClass} htmlFor={`answer-${index}`}>{question}</label>
+                  <Input
+                    id={`answer-${index}`}
+                    className={inputClass}
+                    value={answers[index] ?? ''}
+                    onChange={(e) => {
+                      const next = [...answers];
+                      next[index] = e.target.value;
+                      setAnswers(next);
+                    }}
+                    required
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {mode === 'recovery' && (
+            <div className={fieldClass}>
+              <label htmlFor="recovery-code" className={labelClass}>恢复码</label>
               <Input
-                id={`answer-${index}`}
-                value={answers[index] ?? ''}
-                onChange={(e) => {
-                  const next = [...answers];
-                  next[index] = e.target.value;
-                  setAnswers(next);
-                }}
+                id="recovery-code"
+                className={inputClass}
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                placeholder="XXXX-XXXX-XXXX"
                 required
               />
             </div>
-          ))}
-        </div>
+          )}
+
+          <div className={fieldClass}>
+            <label htmlFor="forgot-new" className={labelClass}>新密码</label>
+            <Input
+              id="forgot-new"
+              className={inputClass}
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="至少 8 位，含字母和数字"
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <div className={fieldClass}>
+            <label htmlFor="forgot-confirm" className={labelClass}>确认新密码</label>
+            <Input
+              id="forgot-confirm"
+              className={inputClass}
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+
+          <FieldError message={error} />
+
+          {questions.length > 0 && (
+            <button
+              type="button"
+              className="w-full text-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setMode(mode === 'questions' ? 'recovery' : 'questions')}
+            >
+              {mode === 'questions' ? '密保答案忘了？使用恢复码' : '返回密保问题'}
+            </button>
+          )}
+        </form>
       )}
-
-      {mode === 'recovery' && (
-        <div>
-          <label htmlFor="recovery-code" className={labelClass}>恢复码</label>
-          <Input
-            id="recovery-code"
-            value={recoveryCode}
-            onChange={(e) => setRecoveryCode(e.target.value)}
-            placeholder="XXXX-XXXX-XXXX"
-            required
-          />
-        </div>
-      )}
-
-      <div>
-        <label htmlFor="forgot-new" className={labelClass}>新密码</label>
-        <Input
-          id="forgot-new"
-          type="password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-          placeholder="至少 8 位，含字母和数字"
-          autoComplete="new-password"
-          required
-        />
-      </div>
-      <div>
-        <label htmlFor="forgot-confirm" className={labelClass}>确认新密码</label>
-        <Input
-          id="forgot-confirm"
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          required
-        />
-      </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? '重置中…' : '重置密码并登录'}
-      </Button>
-
-      {questions.length > 0 && (
-        <button
-          type="button"
-          className="w-full text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
-          onClick={() => setMode(mode === 'questions' ? 'recovery' : 'questions')}
-        >
-          {mode === 'questions' ? '密保答案忘了？使用恢复码' : '返回密保问题'}
-        </button>
-      )}
-    </form>
+    </div>
   );
 }
 
 function LoginPageInner() {
   const searchParams = useSearchParams();
   const redirect = safeRedirect(searchParams.get('redirect'));
+  const [panel, setPanel] = useState<'login' | 'register' | 'forgot'>('login');
+  const [pending, setPending] = useState(false);
+  const [forgotActionLabel, setForgotActionLabel] = useState('下一步');
+
+  const loginFormId = 'login-form';
+  const registerFormId = 'register-form';
+  const forgotFormId = 'forgot-form';
+
+  const title =
+    panel === 'forgot'
+      ? '重置密码'
+      : panel === 'register'
+        ? '创建账号'
+        : '欢迎回来';
+  const description =
+    panel === 'forgot'
+      ? '通过密保问题或恢复码设置新密码'
+      : panel === 'register'
+        ? '内测邀请制，注册后即可同步衣橱与搭配'
+        : '登录后同步你的衣橱、档案与搭配记录';
+
+  const activeFormId =
+    panel === 'forgot'
+      ? forgotFormId
+      : panel === 'register'
+        ? registerFormId
+        : loginFormId;
+
+  const actionLabel =
+    panel === 'forgot'
+      ? (pending ? (forgotActionLabel === '下一步' ? '查询中…' : '重置中…') : forgotActionLabel)
+      : panel === 'register'
+        ? (pending ? '注册中…' : '注册并登录')
+        : (pending ? '登录中…' : '登录');
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-2">
-          <Image src={LOGO_SRC} alt="Fashion AI Logo" width={32} height={32} className="rounded-md" />
-          <span className="font-semibold text-xl tracking-tight">Fashion AI</span>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {/* 与主页侧栏一致的品牌顶栏 */}
+      <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center border-b border-border/40 bg-background/80 px-4 backdrop-blur-sm lg:px-6">
+        <Link href="/" className="flex items-center gap-2 font-semibold">
+          <Image
+            src={LOGO_SRC}
+            alt="Fashion AI Logo"
+            width={28}
+            height={28}
+            className="rounded-md"
+            priority
+          />
+          <span className="text-lg tracking-tight">Fashion AI</span>
+        </Link>
+      </header>
+
+      <main className="relative flex flex-1 items-center justify-center overflow-hidden px-4 py-10">
+        {/* 品牌线稿背景：cover 铺满宽度（原先 contain 会左右留白） */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          <Image
+            src={withBasePath('/brand-hero-gold.png')}
+            alt=""
+            fill
+            priority
+            quality={100}
+            unoptimized
+            sizes="200vw"
+            className="object-cover object-center opacity-50 scale-[1.15] translate-x-[100px]"
+          />
+          {/* 仅在表单中心做很轻的可读性提亮，不罩整图 */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.28)_0%,rgba(255,255,255,0.08)_35%,transparent_60%)]" />
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>账号</CardTitle>
-            <CardDescription>登录后同步你的衣橱、档案与搭配记录</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="login">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="login">登录</TabsTrigger>
-                <TabsTrigger value="register">注册</TabsTrigger>
-                <TabsTrigger value="forgot">忘记密码</TabsTrigger>
-              </TabsList>
-              <TabsContent value="login" className="pt-4">
-                <LoginTab redirect={redirect} />
-              </TabsContent>
-              <TabsContent value="register" className="pt-4">
-                <RegisterTab redirect={redirect} />
-              </TabsContent>
-              <TabsContent value="forgot" className="pt-4">
-                <ForgotTab redirect={redirect} />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-      </div>
+        <div className="relative z-10 w-full max-w-[400px]">
+          <div className="mb-6">
+            <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{description}</p>
+          </div>
+
+          {panel === 'forgot' ? (
+            <ForgotPanel
+              formId={forgotFormId}
+              redirect={redirect}
+              onBack={() => {
+                setPanel('login');
+                setPending(false);
+                setForgotActionLabel('下一步');
+              }}
+              onPendingChange={setPending}
+              onActionLabelChange={setForgotActionLabel}
+            />
+          ) : panel === 'register' ? (
+            <RegisterFields
+              formId={registerFormId}
+              redirect={redirect}
+              onPendingChange={setPending}
+            />
+          ) : (
+            <LoginFields
+              formId={loginFormId}
+              redirect={redirect}
+              onForgot={() => {
+                setPanel('forgot');
+                setPending(false);
+                setForgotActionLabel('下一步');
+              }}
+              onPendingChange={setPending}
+            />
+          )}
+
+          <Button
+            type="submit"
+            form={activeFormId}
+            variant="default"
+            size="lg"
+            className="mt-8 h-11 w-full rounded-xl"
+            disabled={pending}
+          >
+            {actionLabel}
+          </Button>
+
+          {panel !== 'forgot' && (
+            <p className="mt-6 text-center text-sm text-muted-foreground">
+              {panel === 'login' ? (
+                <>
+                  还没有账号？{' '}
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setPanel('register');
+                      setPending(false);
+                    }}
+                  >
+                    注册
+                  </button>
+                </>
+              ) : (
+                <>
+                  已有账号？{' '}
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setPanel('login');
+                      setPending(false);
+                    }}
+                  >
+                    登录
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+
+          <p className="mt-4 text-center text-xs text-muted-foreground/80">
+            登录即表示你同意合理使用本服务，生成内容仅供穿搭参考
+          </p>
+        </div>
+      </main>
     </div>
   );
 }

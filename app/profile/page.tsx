@@ -17,7 +17,6 @@ export default function ProfilePage() {
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState('');
 
-  // Initial load — no synchronous setState before first await (avoids react-hooks/set-state-in-effect)
   useEffect(() => {
     fetchProfile()
       .then((data) => {
@@ -35,7 +34,7 @@ export default function ProfilePage() {
     if (isRetry) setRetrying(true);
     setError('');
     try {
-      const data = await fetchProfile();
+      const data = await fetchProfile({ bust: true });
       setProfile(data);
     } catch (err) {
       setError(getFriendlyErrorMessage(err, '加载档案失败，请稍后重试'));

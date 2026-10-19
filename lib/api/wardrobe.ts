@@ -9,8 +9,9 @@ export interface WardrobeItemData {
   imageUrl: string;
 }
 
+/** 单品详情变更少，走 getCached（服务端已有 max-age=3600） */
 export const getWardrobeItem = async (itemId: string): Promise<WardrobeItemData> => {
-  return apiClient.get(`${API_BASE}/wardrobe/${itemId}`);
+  return apiClient.getCached(`${API_BASE}/wardrobe/${itemId}`);
 };
 
 export const deleteWardrobeItem = async (itemId: string): Promise<{ deletedCount: number }> => {

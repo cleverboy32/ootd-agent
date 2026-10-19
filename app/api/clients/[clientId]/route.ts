@@ -100,11 +100,19 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
             where: { id: clientId },
         });
         
+        // 档案变更不频繁：浏览器可 private 缓存，配合客户端 fetch cache:'force-cache'
+        const cacheHeaders = {
+          'Cache-Control': 'private, max-age=60',
+        };
+
         if (!clientProfile) {
-            return NextResponse.json({ id: clientId, profileData: {} });
+            return NextResponse.json(
+              { id: clientId, profileData: {} },
+              { headers: cacheHeaders },
+            );
         }
 
-        return NextResponse.json(clientProfile);
+        return NextResponse.json(clientProfile, { headers: cacheHeaders });
     } catch (error) {
         console.error(`[CLIENT_PROFILE_GET] ClientID: ${clientId}`, error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
