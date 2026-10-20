@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AccessBanner } from "@/components/access/AccessBanner";
 import { AccessProvider } from "@/components/access/AccessProvider";
+import { SavedOutfitsBootstrap } from "@/components/collect/SavedOutfitsBootstrap";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,6 +32,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AccessProvider>
+          <SavedOutfitsBootstrap />
           {children}
           <AccessBanner />
         </AccessProvider>

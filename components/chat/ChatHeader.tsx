@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { LogOut, Shirt, UserCircle, Shield } from 'lucide-react';
+import { Heart, LogOut, Shirt, UserCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchSession, logout } from '@/lib/api/auth';
 import { withBasePath } from '@/lib/utils';
@@ -55,6 +55,14 @@ export function ChatHeader() {
             className="invisible absolute right-0 top-full z-50 pt-1 opacity-0 transition-[opacity,visibility] duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
           >
             <div className="min-w-40 rounded-xl border border-border bg-background p-1 shadow-md">
+              <Link
+                href="/collect"
+                role="menuitem"
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+              >
+                <Heart className="h-4 w-4 text-muted-foreground" />
+                我的搭配
+              </Link>
               <Link
                 href="/profile"
                 role="menuitem"

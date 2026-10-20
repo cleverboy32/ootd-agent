@@ -14,9 +14,20 @@ const neonConnection = neon(process.env.DATABASE_URL!);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const adapter = new PrismaNeon(neonConnection as any);
 
-// In a development environment, use the global variable to prevent hot-reloading
-// from creating new PrismaClient instances. In production, always create a new one.
-const prismadb = globalThis.prisma || new PrismaClient({ adapter });
+function createPrismaClient(): PrismaClient {
+  return new PrismaClient({ adapter });
+}
+
+// Dev HMR 会复用 globalThis.prisma；schema 新增 model 后旧实例没有对应 delegate，需重建。
+let prismadb = globalThis.prisma ?? createPrismaClient();
+if (
+  process.env.NODE_ENV !== 'production' &&
+  typeof (prismadb as { savedOutfit?: { findMany?: unknown } }).savedOutfit?.findMany !==
+    'function'
+) {
+  void prismadb.$disconnect().catch(() => undefined);
+  prismadb = createPrismaClient();
+}
 if (process.env.NODE_ENV !== 'production') globalThis.prisma = prismadb;
 export default prismadb;
 

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
+  Heart,
   LayoutDashboard,
   MessageSquare,
   UserCircle,
@@ -10,7 +11,7 @@ import {
 } from "lucide-react";
 import { LOGO_SRC } from "@/lib/utils";
 
-export type AppSidebarSection = "chat" | "wardrobe" | "profile";
+export type AppSidebarSection = "chat" | "wardrobe" | "profile" | "collect";
 
 interface AppSidebarProps {
   activeSection: AppSidebarSection;
@@ -78,6 +79,13 @@ export function AppSidebar({
           </Link>
 
           {wardrobeNav}
+
+          <Link
+            href="/collect"
+            className={activeSection === "collect" ? activeItemClassName : itemClassName}
+          >
+            <NavLabel icon={Heart}>我的搭配</NavLabel>
+          </Link>
 
           <Link
             href="/profile"

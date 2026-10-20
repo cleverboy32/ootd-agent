@@ -1,6 +1,8 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SidebarLeft } from "@/components/chat/SidebarLeft";
+import { SidebarRight } from "@/components/chat/SidebarRight";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatMessagesList } from "@/components/chat/ChatMessagesList";
 import { GreetingSection } from "@/components/chat/GreetingSection";
@@ -10,9 +12,9 @@ import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
 import type { Message } from "@/lib/types";
 import { useChatHandler } from "@/hooks/useChatHandler";
+import { stripBasePath } from "@/lib/utils";
 
-
-export default function FashionAIPage() {
+function FashionAIPageInner() {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -20,6 +22,11 @@ export default function FashionAIPage() {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const prevLastMessageRef = useRef<Message | undefined>(undefined);
+  const deepLinkHandledRef = useRef<string | null>(null);
+  const pendingScrollMessageIdRef = useRef<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   const {
     messages,
@@ -37,7 +44,42 @@ export default function FashionAIPage() {
     fetchConversations();
   }, [fetchConversations]);
 
+  // 收藏跳转：/?c=conversationId&m=messageId → 打开会话并滚到消息
   useEffect(() => {
+    const conversationId = searchParams.get("c");
+    const messageId = searchParams.get("m");
+    if (!conversationId) return;
+
+    const key = `${conversationId}:${messageId ?? ""}`;
+    if (deepLinkHandledRef.current === key) return;
+    deepLinkHandledRef.current = key;
+
+    pendingScrollMessageIdRef.current = messageId;
+    stickToBottomRef.current = false;
+    void (async () => {
+      await setActiveConversationId(conversationId);
+      // 清掉 query，避免刷新反复跳
+      router.replace(stripBasePath("/") || "/");
+    })();
+  }, [searchParams, setActiveConversationId, router]);
+
+  // 会话加载完成后滚到目标消息
+  useEffect(() => {
+    const messageId = pendingScrollMessageIdRef.current;
+    if (!messageId || isLoading || messages.length === 0) return;
+
+    const el = document.getElementById(`message-${messageId}`);
+    if (!el) return;
+    stickToBottomRef.current = false;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      pendingScrollMessageIdRef.current = null;
+    });
+  }, [messages, isLoading, activeConversationId]);
+
+  useEffect(() => {
+    // 深链定位中不要被「切会话贴底」抢走
+    if (pendingScrollMessageIdRef.current) return;
     stickToBottomRef.current = true;
   }, [activeConversationId]);
 
@@ -99,8 +141,10 @@ export default function FashionAIPage() {
         />
       </main>
 
+      <SidebarRight />
+
       {/* Floating Help Button */}
-      <div className="fixed bottom-6 right-6 z-30">
+      <div className="fixed bottom-6 right-6 z-30 lg:hidden">
         <Button variant="outline" size="icon" className="h-12 w-12 rounded-full border-border shadow-lg bg-background hover:bg-accent text-muted-foreground">
           <HelpCircle className="h-6 w-6" />
         </Button>
@@ -109,5 +153,10 @@ export default function FashionAIPage() {
   );
 }
 
-
-
+export default function FashionAIPage() {
+  return (
+    <Suspense fallback={null}>
+      <FashionAIPageInner />
+    </Suspense>
+  );
+}

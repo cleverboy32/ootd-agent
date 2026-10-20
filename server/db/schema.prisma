@@ -45,8 +45,33 @@ model User {
   sessionVersion      Int          @default(0)
   clientProfileId     String       @unique
   clientProfile       ClientProfile @relation(fields: [clientProfileId], references: [id])
+  savedOutfits        SavedOutfit[]
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
+}
+
+/// 用户收藏的穿搭方案快照（归属 userId；托管模式可按 eligibleForPlan 抽取）
+model SavedOutfit {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sourceMessageId      String?
+  sourceConversationId String?
+  sourceOutfitId       String
+
+  title           String
+  coverImageUrl   String?
+  /// { concept, items: [{ wardrobeItemId?, name, layer, imageUrl? }], visual? }
+  snapshot        Json
+
+  eligibleForPlan Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, sourceMessageId, sourceOutfitId])
+  @@index([userId, createdAt])
 }
 
 model Conversation {

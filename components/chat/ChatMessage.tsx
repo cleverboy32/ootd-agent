@@ -1,9 +1,9 @@
-import React, { memo } from "react";
+import React, { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import Image from "next/image";
 import remarkGfm from "remark-gfm";
 import { ImageState, Message, MessageProgress } from "@/lib/types";
-import { User, AlertTriangle, RefreshCw, Check, Loader2, Minus } from "lucide-react";
+import { User, AlertTriangle, RefreshCw, Check, Loader2, Minus, Heart } from "lucide-react";
 import { useChatHandler } from "@/hooks/useChatHandler";
 import { useImageRetry } from "@/hooks/useImageRetry";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
 import { useAccess } from "@/components/access/AccessProvider";
 import { LOGO_SRC } from "@/lib/utils";
+import { useSavedOutfitsStore } from "@/store/savedOutfits";
 
 const IMAGE_MARKER_REGEX = /\[IMAGE=([^\]]+)\]/g;
 
@@ -64,6 +65,48 @@ function ImageFailedPlaceholder({
   );
 }
 
+function CollectOutfitButton({
+  messageId,
+  outfitId,
+}: {
+  messageId: string;
+  outfitId: string;
+}) {
+  const savedId = useSavedOutfitsStore((s) => s.getSavedId(messageId, outfitId));
+  const toggleSave = useSavedOutfitsStore((s) => s.toggleSave);
+  const [pending, setPending] = useState(false);
+  const saved = Boolean(savedId);
+
+  async function onClick(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (pending) return;
+    setPending(true);
+    try {
+      await toggleSave(messageId, outfitId);
+    } catch (err) {
+      console.error('[COLLECT] toggle failed', err);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => void onClick(e)}
+      disabled={pending}
+      aria-label={saved ? '取消收藏' : '收藏方案'}
+      aria-pressed={saved}
+      className="absolute right-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:border-[var(--gold)] hover:text-[var(--gold)] disabled:opacity-50"
+    >
+      <Heart
+        className={`size-4 ${saved ? 'fill-[var(--gold)] text-[var(--gold)]' : ''}`}
+      />
+    </button>
+  );
+}
+
 function InlineImageMarker({
   outfitId,
   messageId,
@@ -79,7 +122,10 @@ function InlineImageMarker({
 
   if (state && state !== "loading" && state !== "failed") {
     return (
-      <ZoomableOutfitImage src={state} alt="AI 生成的穿搭效果图" />
+      <span className="relative inline-block align-middle">
+        <ZoomableOutfitImage src={state} alt="AI 生成的穿搭效果图" />
+        <CollectOutfitButton messageId={messageId} outfitId={outfitId} />
+      </span>
     );
   }
 
@@ -95,7 +141,15 @@ function InlineImageMarker({
   return <ImageLoadingPlaceholder />;
 }
 
-function MarkdownBlock({ text }: { text: string }) {
+function MarkdownBlock({
+  text,
+  messageId,
+  imageStates,
+}: {
+  text: string;
+  messageId?: string;
+  imageStates?: Record<string, ImageState>;
+}) {
   const processedText = text.replace(
     /\[衣橱物品:(?:id=)?([^\]]+)\]/g,
     "[衣橱物品](/wardrobe-item/$1)"
@@ -127,12 +181,29 @@ function MarkdownBlock({ text }: { text: string }) {
           );
         },
         p: ({ children }) => <p className="leading-relaxed whitespace-pre-wrap">{children}</p>,
-        img: (props) => (
-          <ZoomableOutfitImage
-            src={props.src as string}
-            alt={props.alt || "AI 生成的穿搭效果图"}
-          />
-        ),
+        img: (props) => {
+          const src = props.src as string;
+          const outfitId =
+            imageStates &&
+            Object.entries(imageStates).find(([, value]) => value === src)?.[0];
+          if (messageId && outfitId) {
+            return (
+              <span className="relative inline-block align-middle">
+                <ZoomableOutfitImage
+                  src={src}
+                  alt={props.alt || "AI 生成的穿搭效果图"}
+                />
+                <CollectOutfitButton messageId={messageId} outfitId={outfitId} />
+              </span>
+            );
+          }
+          return (
+            <ZoomableOutfitImage
+              src={src}
+              alt={props.alt || "AI 生成的穿搭效果图"}
+            />
+          );
+        },
       }}
     >
       {processedText}
@@ -168,14 +239,21 @@ const ContentRenderer = ({
   }
 
   if (segments.length === 0) {
-    return <MarkdownBlock text={text} />;
+    return (
+      <MarkdownBlock text={text} messageId={messageId} imageStates={imageStates} />
+    );
   }
 
   return (
     <>
       {segments.map((segment, index) =>
         segment.type === "text" ? (
-          <MarkdownBlock key={`text-${index}`} text={segment.content} />
+          <MarkdownBlock
+            key={`text-${index}`}
+            text={segment.content}
+            messageId={messageId}
+            imageStates={imageStates}
+          />
         ) : (
           <InlineImageMarker
             key={`img-${segment.outfitId}-${index}`}
@@ -277,6 +355,8 @@ export const ChatMessage = memo(
 
     return (
       <div
+        id={`message-${msg.id}`}
+        data-message-id={msg.id}
         className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
       >
         <div
@@ -326,6 +406,28 @@ export const ChatMessage = memo(
                         />
                       );
                     } else if (part.type === "image") {
+                      const outfitIdFromState =
+                        msg.imageStates &&
+                        Object.entries(msg.imageStates).find(
+                          ([, value]) => value === part.content
+                        )?.[0];
+                      if (outfitIdFromState) {
+                        return (
+                          <span
+                            key={part.id || index}
+                            className="relative inline-block align-middle"
+                          >
+                            <ZoomableOutfitImage
+                              src={part.content}
+                              alt={part.alt || "Generated image"}
+                            />
+                            <CollectOutfitButton
+                              messageId={msg.id}
+                              outfitId={outfitIdFromState}
+                            />
+                          </span>
+                        );
+                      }
                       return (
                         <ZoomableOutfitImage
                           key={part.id || index}
