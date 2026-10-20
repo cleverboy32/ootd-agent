@@ -11,6 +11,7 @@ import { WardrobeItem } from "./WardrobeItem";
 import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
 import { useAccess } from "@/components/access/AccessProvider";
+import { outfitImageAnchorId } from "@/lib/api/savedOutfits";
 import { LOGO_SRC } from "@/lib/utils";
 import { useSavedOutfitsStore } from "@/store/savedOutfits";
 
@@ -122,7 +123,10 @@ function InlineImageMarker({
 
   if (state && state !== "loading" && state !== "failed") {
     return (
-      <span className="relative inline-block align-middle">
+      <span
+        id={outfitImageAnchorId(messageId, outfitId)}
+        className="relative inline-block align-middle scroll-mb-36"
+      >
         <ZoomableOutfitImage src={state} alt="AI 生成的穿搭效果图" />
         <CollectOutfitButton messageId={messageId} outfitId={outfitId} />
       </span>
@@ -188,7 +192,10 @@ function MarkdownBlock({
             Object.entries(imageStates).find(([, value]) => value === src)?.[0];
           if (messageId && outfitId) {
             return (
-              <span className="relative inline-block align-middle">
+              <span
+                id={outfitImageAnchorId(messageId, outfitId)}
+                className="relative inline-block align-middle scroll-mb-36"
+              >
                 <ZoomableOutfitImage
                   src={src}
                   alt={props.alt || "AI 生成的穿搭效果图"}
@@ -415,7 +422,8 @@ export const ChatMessage = memo(
                         return (
                           <span
                             key={part.id || index}
-                            className="relative inline-block align-middle"
+                            id={outfitImageAnchorId(msg.id, outfitIdFromState)}
+                            className="relative inline-block align-middle scroll-mb-36"
                           >
                             <ZoomableOutfitImage
                               src={part.content}

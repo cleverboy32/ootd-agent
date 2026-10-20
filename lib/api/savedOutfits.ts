@@ -30,13 +30,21 @@ export interface SavedOutfit {
   updatedAt: string;
 }
 
-/** 跳回对话中的来源消息 */
-export function savedOutfitChatHref(item: Pick<SavedOutfit, 'sourceConversationId' | 'sourceMessageId'>): string | null {
+/** DOM id：对话里效果图锚点，供收藏深链滚动定位 */
+export function outfitImageAnchorId(messageId: string, outfitId: string): string {
+  return `outfit-${messageId}-${outfitId}`;
+}
+
+/** 跳回对话中的来源方案效果图 */
+export function savedOutfitChatHref(
+  item: Pick<SavedOutfit, 'sourceConversationId' | 'sourceMessageId' | 'sourceOutfitId'>
+): string | null {
   if (!item.sourceConversationId || !item.sourceMessageId) return null;
   const params = new URLSearchParams({
     c: item.sourceConversationId,
     m: item.sourceMessageId,
   });
+  if (item.sourceOutfitId) params.set('o', item.sourceOutfitId);
   return `/?${params.toString()}`;
 }
 

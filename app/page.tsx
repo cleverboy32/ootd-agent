@@ -12,6 +12,7 @@ import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
 import type { Message } from "@/lib/types";
 import { useChatHandler } from "@/hooks/useChatHandler";
+import { outfitImageAnchorId } from "@/lib/api/savedOutfits";
 import { stripBasePath } from "@/lib/utils";
 
 function FashionAIPageInner() {
@@ -22,8 +23,10 @@ function FashionAIPageInner() {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const prevLastMessageRef = useRef<Message | undefined>(undefined);
+  /** 正在处理的深链 key；URL 清空后复位，允许同卡再点 */
   const deepLinkHandledRef = useRef<string | null>(null);
   const pendingScrollMessageIdRef = useRef<string | null>(null);
+  const pendingScrollOutfitIdRef = useRef<string | null>(null);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -35,6 +38,7 @@ function FashionAIPageInner() {
     activeConversationId,
     fetchConversations,
     setActiveConversationId,
+    loadOlderMessages,
   } = useChatStore();
 
   const { handleSend } = useChatHandler();
@@ -44,37 +48,82 @@ function FashionAIPageInner() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // 收藏跳转：/?c=conversationId&m=messageId → 打开会话并滚到消息
+  /** 优先滚到效果图：block=end 让图落在视口下方，避开底部输入栏 */
+  function tryScrollToOutfit(messageId: string, outfitId: string | null): boolean {
+    const outfitEl =
+      outfitId && document.getElementById(outfitImageAnchorId(messageId, outfitId));
+    const el = outfitEl ?? document.getElementById(`message-${messageId}`);
+    if (!el) return false;
+    stickToBottomRef.current = false;
+    el.scrollIntoView({
+      behavior: "smooth",
+      block: outfitEl ? "end" : "center",
+    });
+    return true;
+  }
+
+  // 收藏跳转：/?c=&m=&o= → 打开会话并滚到效果图
+  // 同会话时 setActiveConversationId 会短路，必须在此处直接滚动
   useEffect(() => {
     const conversationId = searchParams.get("c");
     const messageId = searchParams.get("m");
-    if (!conversationId) return;
+    const outfitId = searchParams.get("o");
+    if (!conversationId || !messageId) {
+      deepLinkHandledRef.current = null;
+      return;
+    }
 
-    const key = `${conversationId}:${messageId ?? ""}`;
+    const key = `${conversationId}:${messageId}:${outfitId ?? ""}`;
     if (deepLinkHandledRef.current === key) return;
     deepLinkHandledRef.current = key;
 
     pendingScrollMessageIdRef.current = messageId;
+    pendingScrollOutfitIdRef.current = outfitId;
     stickToBottomRef.current = false;
+
     void (async () => {
-      await setActiveConversationId(conversationId);
-      // 清掉 query，避免刷新反复跳
+      const alreadyOpen =
+        useChatStore.getState().activeConversationId === conversationId;
+
+      if (!alreadyOpen) {
+        await setActiveConversationId(conversationId);
+      }
+
+      // 同会话：图已在 DOM 则立刻滚；若在更早分页里则往上翻页直到找到
+      let attempts = 0;
+      while (
+        pendingScrollMessageIdRef.current === messageId &&
+        attempts < 20
+      ) {
+        if (tryScrollToOutfit(messageId, outfitId)) {
+          pendingScrollMessageIdRef.current = null;
+          pendingScrollOutfitIdRef.current = null;
+          break;
+        }
+        const { nextCursor, isLoadingOlder, messages: msgs } =
+          useChatStore.getState();
+        const alreadyLoaded = msgs.some((m) => m.id === messageId);
+        if (alreadyLoaded || !nextCursor || isLoadingOlder) break;
+        await loadOlderMessages();
+        // 等 DOM 挂上再找锚点
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+        attempts += 1;
+      }
+
       router.replace(stripBasePath("/") || "/");
     })();
-  }, [searchParams, setActiveConversationId, router]);
+  }, [searchParams, setActiveConversationId, loadOlderMessages, router]);
 
-  // 会话加载完成后滚到目标消息
+  // 切会话加载完成后，再尝试滚一次（异步加载场景）
   useEffect(() => {
     const messageId = pendingScrollMessageIdRef.current;
     if (!messageId || isLoading || messages.length === 0) return;
-
-    const el = document.getElementById(`message-${messageId}`);
-    if (!el) return;
-    stickToBottomRef.current = false;
-    requestAnimationFrame(() => {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (tryScrollToOutfit(messageId, pendingScrollOutfitIdRef.current)) {
       pendingScrollMessageIdRef.current = null;
-    });
+      pendingScrollOutfitIdRef.current = null;
+    }
   }, [messages, isLoading, activeConversationId]);
 
   useEffect(() => {
