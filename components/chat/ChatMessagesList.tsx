@@ -16,6 +16,7 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
     isLoadingOlder,
     nextCursor,
     waitReply,
+    deepLinkPin,
     loadOlderMessages,
   } = useChatStore();
 
@@ -26,11 +27,13 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
   const prevScrollHeightRef = useRef(0);
 
   // 头部插入更早消息后补偿 scrollTop，保持当前阅读位置不动
+  // 深链定位期间禁止补偿，否则会顶掉 scrollIntoView
   useLayoutEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const prevFirstId = prevFirstIdRef.current;
     if (
+      !deepLinkPin &&
       prevFirstId &&
       firstMessageId !== prevFirstId &&
       messages.some(m => m.id === prevFirstId)
@@ -42,10 +45,11 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
   });
 
   // 依赖 firstMessageId 以便每页加载后重建 observer：内容不足一屏时 sentinel 持续可见，需要重新触发
+  // 深链翻页中由 page 主动 loadOlder，避免 sentinel 再抢一次
   useEffect(() => {
     const root = scrollContainerRef.current;
     const sentinel = topSentinelRef.current;
-    if (!root || !sentinel || !nextCursor) return;
+    if (!root || !sentinel || !nextCursor || deepLinkPin) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -55,11 +59,7 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [scrollContainerRef, firstMessageId, nextCursor, loadOlderMessages]);
-
-  useEffect(() => {
-    console.log(isLoading, messages);
-  }, [isLoading, messages])
+  }, [scrollContainerRef, firstMessageId, nextCursor, loadOlderMessages, deepLinkPin]);
 
   // New: Show a loading state for the entire chat history
   // This triggers when isLoading is true but there are no messages to display yet.

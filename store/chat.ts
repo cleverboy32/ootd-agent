@@ -2,15 +2,28 @@ import { create } from 'zustand';
 import { Conversation, Message, MessageContentPart } from '@/lib/types';
 import * as chatApi from '@/lib/api/chat';
 
+/** 会话级消息缓存：切走再回来时直接还原，避免重复全屏 loading */
+interface CachedConversationMessages {
+  messages: Message[];
+  nextCursor: string | null;
+}
+
 interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
   messages: Message[];
   /** `before` cursor for the next older page; null when the oldest message is loaded */
   nextCursor: string | null;
+  /** 本会话内已打开过的会话消息（内存，刷新仍丢） */
+  messageCache: Record<string, CachedConversationMessages>;
   isLoading: boolean;
   isLoadingOlder: boolean;
   waitReply: boolean;
+  /**
+   * 收藏深链定位中：头部插入更早消息时不要做 scrollTop 补偿，
+   * 否则会顶掉 scrollIntoView 的最终位置。
+   */
+  deepLinkPin: boolean;
 }
 
 interface ChatActions {
@@ -26,7 +39,27 @@ interface ChatActions {
   updateMessages: (updater: (messages: Message[]) => Message[]) => void; // The new powerful action
   setLoading: (isLoading: boolean) => void;
   setWaitReply: (waiting: boolean) => void;
+  setDeepLinkPin: (pinned: boolean) => void;
   deleteConversation: (conversationId: string) => Promise<void>;
+}
+
+function withActiveCache(
+  state: ChatState,
+  messages: Message[],
+  nextCursor: string | null = state.nextCursor
+): Pick<ChatState, 'messages' | 'nextCursor' | 'messageCache'> {
+  const { activeConversationId, messageCache } = state;
+  if (!activeConversationId) {
+    return { messages, nextCursor, messageCache };
+  }
+  return {
+    messages,
+    nextCursor,
+    messageCache: {
+      ...messageCache,
+      [activeConversationId]: { messages, nextCursor },
+    },
+  };
 }
 
 export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
@@ -35,13 +68,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   activeConversationId: null,
   messages: [],
   nextCursor: null,
+  messageCache: {},
   isLoading: false,
   isLoadingOlder: false,
   waitReply: false,
+  deepLinkPin: false,
   
   // --- Actions 实现 ---
   setLoading: (isLoading) => set({ isLoading }),
   setWaitReply: (waiting) => set({ waitReply: waiting }),
+  setDeepLinkPin: (pinned) => set({ deepLinkPin: pinned }),
 
   fetchConversations: async () => {
     set({ isLoading: true });
@@ -57,19 +93,18 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   },
 
   deleteConversation: async (conversationId) => {
-    const { conversations, activeConversationId } = get();
+    const { conversations, activeConversationId, messageCache } = get();
     try {
-      // 1. Call the API function
       await chatApi.deleteConversation(conversationId);
 
-      // 2. Filter out the deleted conversation from local state
       const updatedConversations = conversations.filter(c => c.id !== conversationId);
-      
+      const { [conversationId]: _removed, ...restCache } = messageCache;
+
       const newState: Partial<ChatState> = {
         conversations: updatedConversations,
+        messageCache: restCache,
       };
 
-      // 3. If active conversation is deleted, reset the view
       if (activeConversationId === conversationId) {
         newState.activeConversationId = null;
         newState.messages = [];
@@ -77,28 +112,69 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       }
 
       set(newState);
-
     } catch (error) {
       console.error("Failed to delete conversation", error);
-      // Here you could add feedback for the user
     }
   },
-  
-  // ... inside the create<ChatState & ChatActions>((set, get) => ({ ...
 
-  // Find your existing setActiveConversationId and replace it with this:
   setActiveConversationId: async (id) => {
     if (id === get().activeConversationId) return;
 
+    // 切走前把当前会话写入缓存
+    const prev = get();
+    let messageCache = prev.messageCache;
+    if (prev.activeConversationId) {
+      messageCache = {
+        ...messageCache,
+        [prev.activeConversationId]: {
+          messages: prev.messages,
+          nextCursor: prev.nextCursor,
+        },
+      };
+    }
+
     if (!id) {
-      set({ activeConversationId: null, messages: [], nextCursor: null, isLoading: false, isLoadingOlder: false });
+      set({
+        activeConversationId: null,
+        messages: [],
+        nextCursor: null,
+        isLoading: false,
+        isLoadingOlder: false,
+        waitReply: false,
+        messageCache,
+      });
       return;
     }
 
-    set({ activeConversationId: id, messages: [], nextCursor: null, isLoading: true, isLoadingOlder: false });
+    const cached = messageCache[id];
+    if (cached) {
+      set({
+        activeConversationId: id,
+        messages: cached.messages,
+        nextCursor: cached.nextCursor,
+        isLoading: false,
+        isLoadingOlder: false,
+        waitReply: false,
+        messageCache,
+      });
+      return;
+    }
+
+    set({
+      activeConversationId: id,
+      messages: [],
+      nextCursor: null,
+      isLoading: true,
+      isLoadingOlder: false,
+      waitReply: false,
+      messageCache,
+    });
     const { messages, nextCursor } = await chatApi.getMessages(id);
     if (get().activeConversationId === id) {
-      set({ messages, nextCursor, isLoading: false });
+      set(state => ({
+        ...withActiveCache(state, messages, nextCursor),
+        isLoading: false,
+      }));
     }
   },
 
@@ -116,7 +192,8 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       set(state => {
         const loaded = new Set(state.messages.map(m => m.id));
         const older = page.messages.filter(m => !loaded.has(m.id));
-        return { messages: [...older, ...state.messages], nextCursor: page.nextCursor };
+        const messages = [...older, ...state.messages];
+        return withActiveCache(state, messages, page.nextCursor);
       });
     } catch (error) {
       console.error("Failed to load older messages", error);
@@ -127,7 +204,24 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
   // 乐观渲染：建会话（含首条消息，单次往返）期间用户消息已上屏
   startNewConversation: async (userMessage) => {
-    set({ activeConversationId: null, messages: [userMessage], nextCursor: null, isLoadingOlder: false });
+    const prev = get();
+    let messageCache = prev.messageCache;
+    if (prev.activeConversationId) {
+      messageCache = {
+        ...messageCache,
+        [prev.activeConversationId]: {
+          messages: prev.messages,
+          nextCursor: prev.nextCursor,
+        },
+      };
+    }
+    set({
+      activeConversationId: null,
+      messages: [userMessage],
+      nextCursor: null,
+      isLoadingOlder: false,
+      messageCache,
+    });
     return get().persistNewConversation(userMessage);
   },
 
@@ -152,7 +246,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       const { activeConversationId, messages } = get();
       if (activeConversationId !== null || messages[0]?.id !== userMessage.id) return '';
 
-      set({ activeConversationId: newConversation.id });
+      set(state => ({
+        activeConversationId: newConversation.id,
+        messageCache: {
+          ...state.messageCache,
+          [newConversation.id]: {
+            messages: state.messages,
+            nextCursor: state.nextCursor,
+          },
+        },
+      }));
       return newConversation.id;
     } catch (error) {
       console.error("Failed to start new conversation", error);
@@ -166,20 +269,17 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   addUserMessage: async (userMessage) => {
     const { activeConversationId, messages } = get();
     if (!activeConversationId) return;
-    
-    set({ messages: [...messages, userMessage] });
+
+    set(state => withActiveCache(state, [...messages, userMessage]));
     try {
       await chatApi.postMessage(activeConversationId, { role: 'user', content: userMessage.content });
     } catch (error) {
       console.error("Failed to save user message", error);
-      // 可选: 实现回滚逻辑
     }
   },
   
   updateMessages: (updater) => {
-    set(state => ({
-      messages: updater(state.messages)
-    }));
+    set(state => withActiveCache(state, updater(state.messages)));
   },
 }));
 

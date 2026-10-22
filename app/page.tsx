@@ -39,6 +39,7 @@ function FashionAIPageInner() {
     fetchConversations,
     setActiveConversationId,
     loadOlderMessages,
+    setDeepLinkPin,
   } = useChatStore();
 
   const { handleSend } = useChatHandler();
@@ -48,18 +49,87 @@ function FashionAIPageInner() {
     fetchConversations();
   }, [fetchConversations]);
 
-  /** 优先滚到效果图：block=end 让图落在视口下方，避开底部输入栏 */
-  function tryScrollToOutfit(messageId: string, outfitId: string | null): boolean {
-    const outfitEl =
-      outfitId && document.getElementById(outfitImageAnchorId(messageId, outfitId));
-    const el = outfitEl ?? document.getElementById(`message-${messageId}`);
-    if (!el) return false;
-    stickToBottomRef.current = false;
-    el.scrollIntoView({
-      behavior: "smooth",
-      block: outfitEl ? "end" : "center",
+  /** 有 o= 时必须命中效果图锚点，不能先滚到气泡再当成功（否则图挂上后位置已偏） */
+  function resolveOutfitEl(
+    messageId: string,
+    outfitId: string | null
+  ): HTMLElement | null {
+    if (outfitId) {
+      return document.getElementById(
+        outfitImageAnchorId(messageId, outfitId)
+      );
+    }
+    return document.getElementById(`message-${messageId}`);
+  }
+
+  function waitFrames(n = 2): Promise<void> {
+    return new Promise((resolve) => {
+      const step = (left: number) => {
+        if (left <= 0) resolve();
+        else requestAnimationFrame(() => step(left - 1));
+      };
+      step(n);
     });
-    return true;
+  }
+
+  async function waitImages(el: HTMLElement): Promise<void> {
+    const imgs = Array.from(el.querySelectorAll("img"));
+    await Promise.all(
+      imgs.map(
+        (img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                img.addEventListener("load", () => resolve(), { once: true });
+                img.addEventListener("error", () => resolve(), { once: true });
+              })
+      )
+    );
+  }
+
+  async function waitUntilNotLoadingOlder(): Promise<void> {
+    for (let i = 0; i < 60; i++) {
+      if (!useChatStore.getState().isLoadingOlder) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  /**
+   * 定位效果图：instant 避免与翻页 scrollTop 补偿打架；
+   * 等图 + 高度稳定后再停，解决「需加载历史时最终位置不准」。
+   */
+  async function scrollToOutfitSettled(
+    messageId: string,
+    outfitId: string | null
+  ): Promise<boolean> {
+    stickToBottomRef.current = false;
+    await waitFrames(2);
+    const el = resolveOutfitEl(messageId, outfitId);
+    if (!el) return false;
+
+    const block: ScrollLogicalPosition = outfitId ? "end" : "center";
+    const align = () => {
+      const current = resolveOutfitEl(messageId, outfitId);
+      current?.scrollIntoView({ behavior: "instant", block });
+    };
+
+    align();
+    await waitImages(el);
+    const msgEl = document.getElementById(`message-${messageId}`);
+    if (msgEl) await waitImages(msgEl);
+    await waitFrames(2);
+    align();
+
+    // 翻页后上方懒加载图还会撑高，滚动条位置会漂；稳定后再停
+    const scroller = scrollContainerRef.current;
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 80));
+      const before = scroller?.scrollTop ?? 0;
+      align();
+      const after = scroller?.scrollTop ?? 0;
+      if (Math.abs(after - before) < 2) break;
+    }
+    return !!resolveOutfitEl(messageId, outfitId);
   }
 
   // 收藏跳转：/?c=&m=&o= → 打开会话并滚到效果图
@@ -80,50 +150,91 @@ function FashionAIPageInner() {
     pendingScrollMessageIdRef.current = messageId;
     pendingScrollOutfitIdRef.current = outfitId;
     stickToBottomRef.current = false;
+    setDeepLinkPin(true);
 
     void (async () => {
-      const alreadyOpen =
-        useChatStore.getState().activeConversationId === conversationId;
+      try {
+        const alreadyOpen =
+          useChatStore.getState().activeConversationId === conversationId;
 
-      if (!alreadyOpen) {
-        await setActiveConversationId(conversationId);
-      }
-
-      // 同会话：图已在 DOM 则立刻滚；若在更早分页里则往上翻页直到找到
-      let attempts = 0;
-      while (
-        pendingScrollMessageIdRef.current === messageId &&
-        attempts < 20
-      ) {
-        if (tryScrollToOutfit(messageId, outfitId)) {
-          pendingScrollMessageIdRef.current = null;
-          pendingScrollOutfitIdRef.current = null;
-          break;
+        if (!alreadyOpen) {
+          await setActiveConversationId(conversationId);
+          await waitUntilNotLoadingOlder();
+          // 等首屏消息渲染
+          for (let i = 0; i < 40; i++) {
+            if (
+              !useChatStore.getState().isLoading &&
+              useChatStore.getState().messages.length > 0
+            ) {
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 50));
+          }
         }
-        const { nextCursor, isLoadingOlder, messages: msgs } =
-          useChatStore.getState();
-        const alreadyLoaded = msgs.some((m) => m.id === messageId);
-        if (alreadyLoaded || !nextCursor || isLoadingOlder) break;
-        await loadOlderMessages();
-        // 等 DOM 挂上再找锚点
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        );
-        attempts += 1;
+
+        // 翻页直到目标消息进入 store，再等 DOM 锚点
+        let attempts = 0;
+        while (
+          pendingScrollMessageIdRef.current === messageId &&
+          attempts < 40
+        ) {
+          const { nextCursor, messages: msgs } = useChatStore.getState();
+          const alreadyLoaded = msgs.some((m) => m.id === messageId);
+
+          if (alreadyLoaded) {
+            if (await scrollToOutfitSettled(messageId, outfitId)) {
+              pendingScrollMessageIdRef.current = null;
+              pendingScrollOutfitIdRef.current = null;
+              break;
+            }
+            // 有 o= 但效果图锚点未挂上：等几轮；末次退回消息气泡
+            if (outfitId && attempts >= 35) {
+              if (await scrollToOutfitSettled(messageId, null)) {
+                pendingScrollMessageIdRef.current = null;
+                pendingScrollOutfitIdRef.current = null;
+                break;
+              }
+            }
+            await new Promise((r) => setTimeout(r, 100));
+            attempts += 1;
+            continue;
+          }
+
+          if (!nextCursor) break;
+          await loadOlderMessages();
+          await waitUntilNotLoadingOlder();
+          await waitFrames(2);
+          attempts += 1;
+        }
+      } finally {
+        setDeepLinkPin(false);
+        router.replace(stripBasePath("/") || "/");
       }
-
-      router.replace(stripBasePath("/") || "/");
     })();
-  }, [searchParams, setActiveConversationId, loadOlderMessages, router]);
+  }, [
+    searchParams,
+    setActiveConversationId,
+    loadOlderMessages,
+    setDeepLinkPin,
+    router,
+  ]);
 
-  // 切会话加载完成后，再尝试滚一次（异步加载场景）
+  // 切会话异步加载：若主流程尚未滚到，再补一次
   useEffect(() => {
     const messageId = pendingScrollMessageIdRef.current;
     if (!messageId || isLoading || messages.length === 0) return;
-    if (tryScrollToOutfit(messageId, pendingScrollOutfitIdRef.current)) {
-      pendingScrollMessageIdRef.current = null;
-      pendingScrollOutfitIdRef.current = null;
-    }
+    if (useChatStore.getState().deepLinkPin) return;
+    void (async () => {
+      if (
+        await scrollToOutfitSettled(
+          messageId,
+          pendingScrollOutfitIdRef.current
+        )
+      ) {
+        pendingScrollMessageIdRef.current = null;
+        pendingScrollOutfitIdRef.current = null;
+      }
+    })();
   }, [messages, isLoading, activeConversationId]);
 
   useEffect(() => {
