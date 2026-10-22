@@ -23,3 +23,11 @@ export function loadSkill(name: string): string {
   cache.set(name, body);
   return body;
 }
+
+/** 按给定顺序拼接技能正文。空名单返回空字符串；未知名字沿用 loadSkill 抛错。 */
+export function buildSkillBlocks(names: string[]): string {
+  if (names.length === 0) return '';
+  return names
+    .map((name) => `\n【技能 ${name}】\n${loadSkill(name)}\n`)
+    .join('');
+}

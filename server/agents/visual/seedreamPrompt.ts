@@ -2,16 +2,27 @@ import type { StylistOutfit } from '@/server/agents/stylist';
 import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import type { ClothingItem } from '@prisma/client';
 
-/** 去掉 Stylist 英文 visual 字段里容易诱导欧美杂志风的措辞 */
+/** 去掉 Stylist 英文 visual 字段里容易诱导欧美杂志风的措辞。maxLen 只用于场景和姿态。 */
 export function simplifyVisualText(text: string, maxLen = 160): string {
-  return text
+  const cleaned = text
     .replace(/\bfashion model\b/gi, '')
     .replace(/\beditorial\b/gi, '')
     .replace(/\bcinematic\b/gi, '')
     .replace(/\bgolden hour glow\b/gi, 'warm natural light')
     .replace(/\s{2,}/g, ' ')
-    .trim()
-    .slice(0, maxLen);
+    .trim();
+  if (!Number.isFinite(maxLen) || cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen);
+}
+
+/**
+ * snow skirt 是滑雪服下摆的防雪裙。原样留给画图模型时，skirt 会被画成半身裙。
+ */
+export function disambiguateImageGarmentTerms(text: string): string {
+  return text.replace(
+    /\bsnow skirts?\b/gi,
+    'jacket-hem powder gaiter（防雪裙，属于外套下摆，不是半身裙）'
+  );
 }
 
 /** 参考图旁注：只保留索引用短标签，细节走衣橱原文段，避免 slice 截断 description */
@@ -139,15 +150,18 @@ export function buildSeedreamImagePrompt(
 ): string {
   const subject = buildModelSubjectDescription(userProfile);
   const scene = simplifyVisualText(outfit.visual_composition.background);
-  // outfit_details 需要更长，避免细节（front pleats / tie-front 等）被 160 字砍掉
-  const outfitDesc = simplifyVisualText(outfit.visual_composition.outfit_details, 320);
+  // 穿着描述含配饰颜色，截断会把句尾的帽子、雪镜切掉
+  const outfitDesc = disambiguateImageGarmentTerms(
+    simplifyVisualText(outfit.visual_composition.outfit_details, Number.POSITIVE_INFINITY)
+  );
   const pose = simplifyVisualText(outfit.visual_composition.model_pose);
   const textOnly = listTextOnlyItems(outfit, referenceLabels);
   const wardrobeDescs = listWardrobeItemDescriptions(outfit, ragCache);
   const itemSummary = outfit.selected_items
     .map((i) => `${i.name}(${i.layer})`)
-    .join('、')
-    .slice(0, 180);
+    .join('、');
+  const garmentBlob = `${outfitDesc} ${itemSummary}`;
+  const skiBottom = /ski pants|滑雪裤|powder gaiter|防雪裙/i.test(garmentBlob);
 
   const lines = [
     `真实街拍穿搭照片，${subject}。`,
@@ -182,8 +196,12 @@ export function buildSeedreamImagePrompt(
   if (textOnly.length > 0) {
     const names = textOnly.map((i) => `${i.name}(${i.layer})`).join('、');
     lines.push(
-      `无参考图单品（按文字融入整套，禁止省略或被遮挡）：${names}。`
+      `无参考图单品（以这段文字为准，禁止用参考图的品类或颜色替代，禁止省略或被遮挡）：${names}。`
     );
+  }
+
+  if (skiBottom) {
+    lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
   }
 
   if (outfitNeedsOpenLayering(outfit)) {
@@ -210,6 +228,6 @@ export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '生成真实摄影风格的整套穿搭展示图，不要插画、3D 或明显 AI 合成感。',
   '模特必须是东亚/中国面孔，禁止生成欧美模特。',
   '以整套造型为主：参考图还原各单品款式颜色，配饰自然融入全身穿搭；禁止做成单品特写拼贴。',
-  '服装必须与参考图及衣橱单品原文一致；若穿着描述与衣橱原文冲突，以衣橱原文与参考图为准。',
+  '有参考图的单品必须与参考图及衣橱原文一致，冲突时以参考图和衣橱原文为准。没有参考图的单品以穿着描述为准，禁止用参考图的品类替代它们。',
   '有外套+内搭时外套须敞开，露出内搭本体，禁止只画外套内衬。',
 ].join('');

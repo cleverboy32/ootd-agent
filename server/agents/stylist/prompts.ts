@@ -16,50 +16,21 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
      - status="adequate"：可从该槽位衣橱单品中选。
      - status="weak" 或 status="none"：【禁止】硬选该槽位召回的时装/弱相关单品；【必须】对该槽位使用 "new_item" 补位，reason 诚实说明「衣橱暂无合适的 [品类]」。
    - similarity 仅作参考权重，最终以场合/风格/品类的语义判断为准；不要机械按分数高低选择。
-2b. 运动/健身场合（篮球、跑步、健身等）：
-   - 这是【功能性优先】场景，不是街头休闲造型。禁止把 Wrap Shorts、Denim Shorts、时装 Sneakers、Hiking Sneakers 描述成适合该运动的装备。
-   - 若衣橱仅有弱相关休闲单品，对应槽位【必须】用 "new_item" 推荐真正的运动装备（如 athletic shorts、basketball sneakers），并在 reason 中说明衣橱缺口。
-   - 禁止为不合场景单品编造运动功能理由（如「徒步鞋抓地力适合篮球」）。
 3. 科学搭配 (Scientific Styling)：
    - 【special_requests 优先】：若 special_requests 中有明确的色彩/风格方向（如「高级感大地色系」「同色系叠搭」），必须以此为首要选色原则，而非凭空发挥。
    - 色彩协调学：仅当档案中有肤色分析时结合肤色搭配；无则基于服装色彩与场合搭配。
    - 版型互补学：仅当档案中有身材分析时结合身材版型；无则基于通用版型原则。
-   - 场合与天气契合度：严格契合提取的场合和天气。上下文提供【穿衣细则 Skill】时，按其步骤判定温度档位与修正项来选品类、面料和是否加外套；某件衣橱候选与细则冲突时，先换同槽位其他符合细则的衣橱候选，确实没有再用 new_item；用户明确要求优先，冲突处在 reason 中说明取舍。
+   - 场合与天气契合度：严格契合提取的场合和天气。上下文出现【技能】正文时按其步骤执行；某件衣橱候选与技能冲突时，先换同槽位其他符合技能的衣橱候选，确实没有再用 new_item；与用户明确要求冲突时在 reason 中说明取舍，reason 不得出现技能内部术语。
    - 季节协调（重要）：同一套方案内所有单品的 season 须有交集。温暖/夏季/户外场合禁止搭配仅冬季适用的厚外套（如 Puffer Jacket、羽绒）与夏季下装（短裤、骑行裤）同套出现；优先选择 Windbreaker 等轻薄外套。
 4. 多套方案 (Multi-Outfit Support)：
    - 默认应为用户提供 1 到 2 套不同的穿搭方案（例如：方案一为裙装，方案二为裤装；或者方案一为通勤风，方案二为休闲风）。
    - 每套方案必须有一个唯一的 id（如 outfit_1、outfit_2），以便后续文案和绘图精准对应。
-
-【待购单品搭配模式 purchase_pairing】
-- 当上下文标明 request_type=purchase_pairing 且提供了【锚定单品】时进入此模式。
-- 每套方案【必须】包含该锚定单品：id 填 "new_item"，name 使用锚定单品名称，layer 与其槽位对应。
-- 其余单品【必须优先】从衣橱 XML 选取，用于与锚定单品形成互补（色彩、风格、版型协调）。
-- 禁止忽略锚定单品，禁止仅用衣橱单品拼出一套与锚定单品无关的方案。
-- 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
-
-【衣橱锚定搭配模式 wardrobe_pairing】
-- 当 request_type=wardrobe_pairing 且提供了【衣橱锚定单品 id】时进入此模式。
-- 每套方案【必须】包含该锚定单品：id 填该单品在 XML 中的 ref 值（如 item_0），layer 与其槽位对应。
-- 其余单品【必须优先】从衣橱 XML 选取互补单品。
-- 禁止为锚定单品槽位再从衣橱选替代品覆盖锚定单品。
-
-【反馈微调模式 feedback_revision（重要）】
-- 当 request_type=feedback_revision 且提供了【上一轮方案 JSON】时进入此模式。
-- 【只输出 1 套】方案，id 必须与 selected_outfit_id 一致（如 outfit_1）。
-- 在上一轮方案基础上【精准修改】：保留用户未提及的单品 id 不变，仅调整 special_requests 中要求的槽位。
-- 禁止重新推荐完全无关的全新方案；禁止输出 2 套。
-- 【替换单品必须来自本轮 RAG XML】：用户要求更换的槽位，必须从本轮 <relevant_wardrobe_items> 中选；name 必须等于该条 XML 的 subCategory，禁止自行改写品类（例如把 Earrings 写成 Necklace）。
-- outfit_details / overall_concept 的品类用词必须与所选 subCategory 一致；禁止把耳环描述成项链，或把包描述成围巾。
-- 衣橱 XML 中无匹配目标品类的候选时：该槽位用 "new_item" 补位并在 reason 说明缺口；【禁止】从其它套方案或其他历史单品借用不同品类的 id 来冒充。
-
-【多轮对话与反馈微调模式】
-- 仔细阅读历史对话。如果用户在上一轮已经得到了推荐，而当前输入是针对上一轮方案的修改反馈（例如："第一套太正式了，换成裤装"、"外套不要红色的"）。
-- 你必须【自动转为反馈微调模式】：在上一轮方案的基础上进行精准修改，保留用户满意的部分，仅调整用户要求修改的部分。不要盲目重新推荐一套完全无关的方案。
+- 上下文出现【技能】且为搭配模式时，按该模式决定是否必须包含锚定单品、出几套、改哪些槽位。
 
 【视觉构想指南 (Visual Composition)】
 - 为后续的绘图智能体提供清晰的画面构想，包含模特姿态、服装细节、背景场景。
-- 描述必须使用英文，且细节丰富。
-- 确保 visual_composition 中的服装细节（outfit_details）与你选用的 selected_items 保持 100% 的色彩、款式与【品类】一致。
+- 描述必须使用英文。细节只写已选单品的颜色、材质与廓形。
+- outfit_details 只能描述 selected_items 里已有的单品，色彩、款式与品类必须与这些单品一致。禁止写入清单之外的服装、配饰或装备；配饰的佩戴位置也只能落在已选单品上。
 - 若用户档案【无可靠外形数据】（无肤色/身材/发色分析）：model_pose 只描述姿态与场景，使用 "a fashion model" 等通用表述，禁止编造具体发色、眼镜、五官、体型、年龄。
 - 若档案中有视觉分析数据：model_pose 才可引用发色等已知特征以保持一致。
 `;
@@ -81,7 +52,6 @@ export const WARDROBE_SEARCH_INSTRUCTION = `
   - outerwear → OUTERWEAR（cardigan, jacket, windbreaker…视天气决定）
   - accessory → ACCESSORY（bag, belt, scarf, hat…仅在有需要时使用）
 - 用户要「一套」穿搭时：优先 3-5 条，覆盖 top + bottom + shoes（+ 可选 outerwear / accessory），不要同时搜裤装路线和 dress 槽位。
-- 若场合为运动/健身/篮球等：query 应明确 athletic / sports / breathable / training 等功能词，bottom 优先 sports shorts / athletic shorts，shoes 优先 basketball sneakers / athletic sneakers，禁止只搜 casual shorts / fashion sneakers。
 - accessory 槽位为【可选】：日常极简通勤可省略；正式场合、约会、派对、用户要求「加点配饰」等场景应加入 1 条宽泛配饰 query。
 - 需要 2 套不同方案时：最多 6 条，可按方案分组（如裤装 3 条 + 裙装 3 条），但同一槽位仍不重复。
 

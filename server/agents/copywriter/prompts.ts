@@ -1,5 +1,6 @@
 import { GatekeeperIntent, outfitIdToLabel } from '../intent';
 import type { StylistResult } from '../stylist/agent';
+import { buildSkillBlocks } from '@/server/skills/loadSkill';
 
 export const COPYWRITER_ADVICE_SYSTEM_INSTRUCTION = `
 你是一个情商极高、充满时尚感和亲和力的时尚博主 (Copywriter Agent)。
@@ -43,45 +44,9 @@ export const COPYWRITER_SYSTEM_INSTRUCTION = `
      * 方案 ID 从搭配师 JSON 的 outfits[].id 复制粘贴（如 {{IMG:outfit_1}}）。
      * 占位符必须单独起一行，前后各空一行。
 
-3. 排版模板（必须遵循此结构，可微调语气但不可改变骨架）：
+3. 排版：
    - 这是【即时聊天对话】，不是书信、邮件或公文。禁止出现「展信佳」「此致敬礼」「顺祝商祺」「谨启」「惠鉴」等书信落款或套话。
-   - 开场：1-2 句口语化寒暄，点出场合/天气/用户需求（不要用「尊敬的」「您好，很高兴为您服务」等客服腔）。
-   - 过渡：一句引出方案，如「我为你准备了 N 套穿搭：」。
-   - 每套方案用 ### 小标题 + 分层 bullet 描述单品，结尾单独一行放效果图占位符。
-   - 收尾：一句轻松的互动结语即可（如「喜欢哪套？告诉我帮你微调～」），禁止书信式落款。
-
-   【单套方案示例骨架】
-   ---
-   今天气温有点凉，打球前记得保暖哦！🏓 我为你准备了一套活力运动风：
-
-   ### 🎀 方案一：粉色活力运动风
-
-   * **内搭**：推荐你衣橱里的 {{W:物品ID}}，淡粉色甜美又有活力。
-   * **下装**：搭配一条 🛍️ 灰色运动短裤，舒适好活动。
-   * **鞋履**：🛍️ 白色复古德训鞋，轻盈跟脚。
-
-   {{IMG:outfit_1}}
-   ---
-
-   【两套方案示例骨架】
-   ---
-   哈罗！约会的话我帮你搭了两套风格不同的 look ✨
-
-   ### 💕 方案一：甜美裙装风
-   * **连衣裙**：你衣橱里的 {{W:物品ID}} 温柔又显气质……
-   * **鞋履**：🛍️ 米色高跟凉鞋，拉长腿部线条。
-
-   {{IMG:outfit_1}}
-
-   ---
-
-   ### 🌟 方案二：利落裤装风
-   * **上装**：{{W:物品ID}} 搭配 🛍️ 高腰阔腿裤，干练大方。
-
-   {{IMG:outfit_2}}
-
-   两套都喜欢的话，告诉我你更倾向哪套～
-   ---
+   - 上下文出现【技能】时，开场、套数和收尾按该技能执行，不要套用其他场景的开场。
 
 4. 格式规范：
    - 使用 Markdown：### 小标题、* bullet 分项、--- 分隔多套方案。
@@ -89,29 +54,22 @@ export const COPYWRITER_SYSTEM_INSTRUCTION = `
    - 不要输出任何 JSON 格式，直接输出纯 Markdown 文本。
 `;
 
-export const COPYWRITER_REVISION_ADDENDUM = `
-【反馈微调模式 — 当前为 revision，必须遵守】
-- 这是用户对【已有方案】的修改，不是全新推荐。
-- 【禁止】使用「下午好呀」「为您定制了」「我为你准备了 N 套」等全新推荐开场。
-- 开场 1 句简短确认修改即可，如「好的，已在第一套里把鞋履换成高跟鞋～」。
-- 【只描述 1 套】方案，小标题可用 ### 方案一（已微调）。
-- 在 bullet 中点出【变更项】，其余单品简要带过。
-- 收尾用「还要再调哪里吗？」，禁止「喜欢哪套？告诉我帮你微调～」。
+const ADVICE_CONTINUATION_HINT =
+  /公式|建议|方法|色彩|配色|风格|大地|同色|高级感|美拉德|中性色/;
 
-【无换品微调 — 仅当收到「单品未变」标记时生效，覆盖上方规则】
-- 【禁止】使用「微调」「已调整」「换了 XX」「做了一点改动」等暗示替换单品的词。
-- 开场改为诚实告知，例如「好消息！原方案其实已经很适合这个[天气/场合]了，我来帮你拆解一下原因～」
-- 重点解释每件单品为何适合该天气或场合（面料透气性、防风防雨功能、颜色对气色的影响等），而非描述"变更"。
-- 收尾用「你还有其他想调整的地方吗？」。
-`;
-
-export const COPYWRITER_ADVICE_CONTINUATION_ADDENDUM = `
-【建议延续模式 — 当前穿搭是对刚才风格建议的衣橱实践】
-- 开场【必须】自然衔接刚才的建议话题，语气像「好！把刚才聊的XX公式在你的衣橱里试一下～」。
-- 【禁止】使用「Hi！今天给你准备了」「为您定制了」等与上下文断开的通用开场。
-- 可以在描述单品时点出它如何体现刚才建议的色彩/风格原则（如「这件奶油色针织，就是同色系叠搭的核心」）。
-- 收尾可邀请用户告诉你喜欢哪套，或者想进一步调整哪里。
-`;
+export function selectCopywriterSkillName(
+  intent?: GatekeeperIntent,
+  revisionNoItemChange?: boolean
+): string {
+  if (intent?.request_type === 'feedback_revision') {
+    return revisionNoItemChange ? 'reply-revision-unchanged' : 'reply-revision';
+  }
+  const specialRequests = intent?.special_requests?.trim() ?? '';
+  if (specialRequests.length > 0 && ADVICE_CONTINUATION_HINT.test(specialRequests)) {
+    return 'reply-advice-continuation';
+  }
+  return 'reply-outfit';
+}
 
 export function buildCopywriterPrompt(
   stylistResult: StylistResult,
@@ -121,12 +79,7 @@ export function buildCopywriterPrompt(
 ): { prompt: string; systemInstruction: string } {
   const isRevision = intent?.request_type === 'feedback_revision';
   const specialRequests = intent?.special_requests?.trim() ?? '';
-
-  // 建议延续：special_requests 里有明确的风格/色彩主题，说明这套方案是从建议对话衍生的
-  const isAdviceContinuation =
-    !isRevision &&
-    specialRequests.length > 0 &&
-    /公式|建议|方法|色彩|配色|风格|大地|同色|高级感|美拉德|中性色/.test(specialRequests);
+  const isAdviceContinuation = selectCopywriterSkillName(intent, revisionNoItemChange) === 'reply-advice-continuation';
 
   const revisionNote = isRevision
     ? `\n【微调上下文】\n- 目标方案: ${outfitIdToLabel(intent?.selected_outfit_id)}\n- 修改要求: ${specialRequests || '无'}\n${revisionNoItemChange ? '- 【单品未变】本次调整未替换任何单品，请遵守「无换品微调」规则\n' : ''}`
@@ -146,12 +99,9 @@ ${JSON.stringify(stylistResult, null, 2)}
 请为以上方案进行温暖、优雅的文案润色。严格遵循占位符注入规则与排版模板，以即时聊天口吻输出，禁止书信落款。直接开始输出你的 Markdown 文本：
 `;
 
-  let systemInstruction = COPYWRITER_SYSTEM_INSTRUCTION;
-  if (isRevision) {
-    systemInstruction = `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_REVISION_ADDENDUM}`;
-  } else if (isAdviceContinuation) {
-    systemInstruction = `${COPYWRITER_SYSTEM_INSTRUCTION}\n${COPYWRITER_ADVICE_CONTINUATION_ADDENDUM}`;
-  }
+  const systemInstruction = `${COPYWRITER_SYSTEM_INSTRUCTION}${buildSkillBlocks([
+    selectCopywriterSkillName(intent, revisionNoItemChange),
+  ])}`;
 
   return { prompt, systemInstruction };
 }

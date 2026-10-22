@@ -4,7 +4,7 @@ import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
-import { isAthleticOccasion } from '@/server/utils/ragMatchQuality';
+import { selectStylistOutfitSkillNames, selectStylistSkillNames } from './skillSelection';
 import { WardrobeSearchQuery, parseWardrobeSearchSlot, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
 import { alignStylistItemsWithWardrobe } from '@/server/utils/stylistItemAlign';
@@ -36,7 +36,7 @@ import {
 } from './prompts';
 import { buildAndLogStylistSelection } from '@/server/logging/stylist';
 import type { StylistSelectionSlotSnapshot } from '@/server/logging/stylist';
-import { loadSkill } from '@/server/skills/loadSkill';
+import { buildSkillBlocks } from '@/server/skills/loadSkill';
 
 export type { StylistOutfit, StylistResult, StyleAdviceResult, StylistAgentOptions } from './schema';
 
@@ -122,13 +122,7 @@ function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
   return map[slot] ?? 'inner_top';
 }
 
-function buildWeatherSkillBlock(intent: GatekeeperIntent): string {
-  if (!intent.weather?.trim()) return '';
-  return `
-【穿衣细则 Skill】
-${loadSkill('weather-dressing')}
-`;
-}
+export { selectStylistSkillNames };
 
 async function planWardrobeSearchQueries(
   history: Content[],
@@ -142,7 +136,7 @@ async function planWardrobeSearchQueries(
 
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchorItem;
   const isRevision = intent.request_type === 'feedback_revision';
-  const athleticOccasion = isAthleticOccasion(intent, userMessage);
+  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage));
   const pairingBlock = isPairing
     ? `
 【锚定单品】
@@ -172,8 +166,7 @@ ${REVISION_SEARCH_ADDENDUM}
             : ''
         }`
       : `- 若用户要「一套」穿搭：按槽位检索（上装 + 下装 + 鞋，视天气加外套），不要混搭裤装与连衣裙路线。
-- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。
-${athleticOccasion ? '- 当前为【运动场合】：检索 query 必须体现 athletic/sports 功能属性，下装搜 sports shorts，鞋搜 basketball/athletic sneakers。' : ''}`;
+- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。`;
 
   const prompt = `
 【今日用户时尚档案】
@@ -188,7 +181,7 @@ ${athleticOccasion ? '- 当前为【运动场合】：检索 query 必须体现 
 - 场合: ${intent.occasion}
 - 风格: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${buildWeatherSkillBlock(intent)}${pairingBlock}${revisionBlock}
+${skillBlock}${pairingBlock}${revisionBlock}
 【用户当前消息】
 ${userMessage || '（无文字，请根据对话历史推断）'}
 
@@ -320,6 +313,7 @@ export async function callStylistAgent(
   let ragIndexMap = new Map<string, string>();
   let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
   const userMessage = extractUserMessage(initialParts);
+  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage));
   if (clientId && ragCache) {
     try {
       console.log(
@@ -408,7 +402,7 @@ ${JSON.stringify(previousOutfit, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${buildWeatherSkillBlock(intent)}${anchorBlock}${revisionBlock}
+${skillBlock}${anchorBlock}${revisionBlock}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '互补单品'})】
 ${
   wardrobeXml ||
@@ -416,7 +410,6 @@ ${
     ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item)*'
     : '*(用户衣橱为空，请推荐全新单品)*')
 }
-${isAthleticOccasion(intent, userMessage) ? '\n【提醒】当前为运动场合：请先阅读 <wardrobe_match_summary>，对 status=weak/none 的核心槽位使用 new_item，禁止硬选时装类单品。' : ''}
 `;
 
   const contents: Content[] = [...history, { role: 'user', parts: [{ text: contextPrompt }] }];
@@ -427,7 +420,7 @@ ${isAthleticOccasion(intent, userMessage) ? '\n【提醒】当前为运动场合
         llmGenerate({
           model: AGENT_MODELS.stylist,
           contents,
-          systemInstruction: STYLIST_SYSTEM_INSTRUCTION,
+          systemInstruction: `${STYLIST_SYSTEM_INSTRUCTION}${buildSkillBlocks(selectStylistOutfitSkillNames(intent))}`,
           temperature: 0.4,
           jsonSchema: stylistSchema,
           signal: options.signal,

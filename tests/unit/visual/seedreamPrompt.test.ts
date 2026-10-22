@@ -3,6 +3,7 @@ import { after, describe, it } from 'node:test';
 import {
   buildModelSubjectDescription,
   buildSeedreamImagePrompt,
+  SEEDREAM_SYSTEM_INSTRUCTION,
   simplifyVisualText,
 } from '@/server/agents/visual/seedreamPrompt';
 import type { StylistOutfit } from '@/server/agents/stylist';
@@ -154,7 +155,40 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /衣橱单品原文/);
     assert.match(prompt, /front pleats/);
     assert.match(prompt, /以衣橱原文|结构细节以此为准/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /没有参考图的单品以穿着描述为准/);
     // 参考图短标签不应把整段 description 硬塞进 48 字窗口后静默丢失语义来源
     assert.doesNotMatch(prompt, /图1Wide-Leg Trousers \| bottom \| BOTTOM/);
+  });
+
+  it('keeps ski-pants wording and accessory colors that sit past the old 320-char cut', () => {
+    const ski: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'fleece', name: 'Fleece Pullover', layer: 'inner_top', reason: '中间层' },
+        { id: 'new_item', name: 'Insulated Waterproof Ski Jacket', layer: 'outerwear', reason: '新品' },
+        { id: 'new_item', name: 'Insulated Waterproof Ski Pants', layer: 'bottom', reason: '新品' },
+        { id: 'new_item', name: 'Ski Boots', layer: 'shoes', reason: '新品' },
+        { id: 'new_item', name: 'Ski Gloves, Beanie & Goggles', layer: 'accessory', reason: '新品' },
+      ],
+      visual_composition: {
+        model_pose: 'A fashion model standing confidently on a snowy ski slope, holding ski poles, smiling warmly',
+        outfit_details:
+          'Wearing a dark brown oversized fleece pullover as a mid-layer, topped with a navy waterproof insulated ski jacket (hip-length, relaxed fit with snow skirt), paired with black insulated ski pants (high-waisted, straight-leg, adjustable waist), and black ski boots (mid-calf, buckled, chunky sole). Accessories include a gray ribbed knit beanie, black waterproof ski gloves, and clear anti-fog ski goggles.',
+        background: 'A sunlit snowy ski resort with pine trees, ski lifts, and soft blue sky',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      ski,
+      undefined,
+      ['Fleece Pullover | inner_top | A dark brown oversized fleece pullover'],
+      null
+    );
+    assert.doesNotMatch(prompt, /snow skirt/i);
+    assert.match(prompt, /防雪裙，属于外套下摆，不是半身裙/);
+    assert.match(prompt, /gray ribbed knit beanie/);
+    assert.match(prompt, /clear anti-fog ski goggles/);
+    assert.match(prompt, /Ski Gloves, Beanie & Goggles\(accessory\)/);
+    assert.match(prompt, /下装必须是长滑雪裤/);
+    assert.match(prompt, /禁止用参考图的品类或颜色替代/);
   });
 });
