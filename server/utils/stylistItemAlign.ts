@@ -74,8 +74,23 @@ export function reconcileAccessoryConcept(
   return concept;
 }
 
+const LAYER_BY_MAIN_CATEGORY: Record<string, string> = {
+  TOP: 'inner_top',
+  BOTTOM: 'bottom',
+  ONE_PIECE: 'dress',
+  FOOTWEAR: 'shoes',
+  OUTERWEAR: 'outerwear',
+  ACCESSORY: 'accessory',
+};
+
+/** 衣橱大类对应的穿搭层级。未知大类不改，留给模型自己的 layer。 */
+export function layerForMainCategory(mainCategory?: string | null): string | undefined {
+  if (!mainCategory?.trim()) return undefined;
+  return LAYER_BY_MAIN_CATEGORY[mainCategory.trim().toUpperCase()];
+}
+
 /**
- * 用衣橱元数据强制对齐 Stylist 输出的 name，并修正明显品类冲突的文案。
+ * 用衣橱元数据强制对齐 Stylist 输出的 name 与 layer，并修正明显品类冲突的文案。
  */
 export function alignStylistItemsWithWardrobe(
   result: StylistResult,
@@ -92,6 +107,8 @@ export function alignStylistItemsWithWardrobe(
       const nameChanged = Boolean(oldName) && oldName.toLowerCase() !== newName.toLowerCase();
 
       item.name = newName;
+      const layer = layerForMainCategory(cached.mainCategory);
+      if (layer) item.layer = layer;
 
       if (nameChanged) {
         outfit.overall_concept = replaceIgnoringCase(outfit.overall_concept, oldName, newName);

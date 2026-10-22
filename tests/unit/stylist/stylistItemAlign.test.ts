@@ -6,6 +6,7 @@ import {
 } from '@/server/utils/revisionSearchSlots';
 import {
   alignStylistItemsWithWardrobe,
+  layerForMainCategory,
   reconcileAccessoryOutfitDetails,
 } from '@/server/utils/stylistItemAlign';
 import type { StylistResult } from '@/server/agents/stylist/schema';
@@ -98,6 +99,57 @@ describe('alignStylistItemsWithWardrobe', () => {
       result.outfits[0].visual_composition.outfit_details,
       /pendant necklace resting at the collarbone/i
     );
+  });
+});
+
+describe('layerForMainCategory', () => {
+  it('maps outerwear and top to their outfit layers', () => {
+    assert.equal(layerForMainCategory('OUTERWEAR'), 'outerwear');
+    assert.equal(layerForMainCategory('top'), 'inner_top');
+    assert.equal(layerForMainCategory(''), undefined);
+  });
+});
+
+describe('alignStylistItemsWithWardrobe layer', () => {
+  it('rewrites a zip knit jacket marked as inner_top back to outerwear', () => {
+    const result: StylistResult = {
+      outfits: [
+        {
+          id: 'outfit_2',
+          overall_concept: '条纹针织单穿',
+          selected_items: [
+            {
+              id: 'hoodie-1',
+              name: 'Knit Zip-Up Hoodie',
+              layer: 'inner_top',
+              reason: '针织卫衣单穿就够暖',
+            },
+          ],
+          visual_composition: {
+            model_pose: 'standing',
+            outfit_details: 'A striped knit zip-up hoodie.',
+            background: 'street',
+          },
+        },
+      ],
+    };
+
+    alignStylistItemsWithWardrobe(
+      result,
+      new Map([
+        [
+          'hoodie-1',
+          {
+            subCategory: 'Knit Zip-Up Hoodie',
+            description: 'A beige, gray, and blue striped knit zip-up hoodie.',
+            mainCategory: 'OUTERWEAR' as const,
+          },
+        ],
+      ])
+    );
+
+    assert.equal(result.outfits[0].selected_items[0].layer, 'outerwear');
+    assert.equal(result.outfits[0].selected_items[0].name, 'Knit Zip-Up Hoodie');
   });
 });
 
