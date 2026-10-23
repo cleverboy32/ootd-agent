@@ -9,6 +9,8 @@ export interface StylistOutfit {
     name: string;
     layer: string;
     reason: string;
+    /** 新品的一句外观。衣橱单品留空，结构以衣橱描述为准。 */
+    description?: string;
   }[];
   visual_composition: {
     model_pose: string;
@@ -59,17 +61,18 @@ export const stylistSchema: Schema = {
                 id: { type: Type.STRING, description: '衣橱单品填真实 ID；用户待购锚定单品或 AI 推荐新品填 "new_item"' },
                 name: { type: Type.STRING, description: '单品名称' },
                 layer: { type: Type.STRING, description: '穿搭层级，如 inner_top (内搭上装), outerwear (外套), bottom (下装), shoes (鞋履), accessory (配饰)' },
-                reason: { type: Type.STRING, description: '选用此单品的专业时尚理由' },
+                reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
+                description: { type: Type.STRING, description: '新品必填一句外观，写颜色、材质和能看见的结构：领、门襟、袖和长短。衣橱单品填空字符串。' },
               },
-              required: ['id', 'name', 'layer', 'reason'],
+              required: ['id', 'name', 'layer', 'reason', 'description'],
             },
           },
           visual_composition: {
             type: Type.OBJECT,
             properties: {
-              model_pose: { type: Type.STRING, description: '模特的姿态与神态描述（英文，如：A young woman holding a tennis racket, smiling warmly）' },
-              outfit_details: { type: Type.STRING, description: '只描述 selected_items 已有单品的材质、色彩与廓形（英文）。每件须含精确长度或廓形词（knee-length、ankle-length、cropped、midi、maxi、above-the-knee、wide-leg、straight-leg 等），不得省略。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
-              background: { type: Type.STRING, description: '场景与光影背景描述（英文，如：An indoor modern table tennis court with soft lighting）' },
+              model_pose: { type: Type.STRING, description: '只用中文写姿态和神态：站立或行走、双手位置、视线。禁止写发色、发型、刘海、五官、脸型、年龄、身材、眼镜和人物设定。' },
+              outfit_details: { type: Type.STRING, description: '只用中文写 selected_items 已有单品的材质、色彩与廓形。每件须含长度或廓形词（及膝、到踝、九分、阔腿、直筒、短款、短裤、五分、过膝、中长、长款），不得省略。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
+              background: { type: Type.STRING, description: '只用中文写场景与光线。禁止写人物外形。' },
             },
             required: ['model_pose', 'outfit_details', 'background'],
           },

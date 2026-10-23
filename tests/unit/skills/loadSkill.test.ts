@@ -93,6 +93,154 @@ describe('selectStylistSkillNames', () => {
     );
   });
 
+  it('买新品时注入造型规则，并按用户说法注入一个风格', () => {
+    const hanfu = block(
+      {
+        request_type: 'wardrobe_outfit',
+        special_requests: '想买一件汉服',
+      },
+      '想买一件汉服'
+    );
+    assert.match(hanfu, /【技能 outfit-design】/);
+    assert.match(hanfu, /【技能 style-guofeng】/);
+    assert.match(hanfu, /马面裙必须写前后裙门和两侧褶/);
+    assert.doesNotMatch(hanfu, /style-new-chinese/);
+
+    const cool = block(
+      { request_type: 'wardrobe_outfit', style_preference: '潮酷' },
+      '想看新品'
+    );
+    assert.match(cool, /【技能 style-cool】/);
+    assert.match(cool, /一个夸张比例/);
+    assert.doesNotMatch(cool, /style-sweet/);
+  });
+
+  it('风格词只注入一个，甜酷归潮酷，新中式不归古风', () => {
+    const sweetCool = block({ request_type: 'wardrobe_outfit' }, '甜酷一点');
+    assert.match(sweetCool, /【技能 style-cool】/);
+    assert.doesNotMatch(sweetCool, /style-sweet|outfit-design/);
+
+    const modern = block(
+      { request_type: 'wardrobe_outfit', style_preference: '新中式' },
+      '新中式古风'
+    );
+    assert.match(modern, /【技能 style-new-chinese】/);
+    assert.doesNotMatch(modern, /style-guofeng/);
+
+    const styles: Array<[string, string]> = [
+      ['老钱风', 'style-old-money'],
+      ['甜美约会', 'style-sweet'],
+      ['法式', 'style-french'],
+      ['韩系', 'style-korean'],
+      ['极简', 'style-minimal'],
+      ['文艺一点', 'style-literary'],
+      ['职场通勤', 'style-commute'],
+    ];
+    for (const [message, skill] of styles) {
+      const text = block({ request_type: 'wardrobe_outfit' }, message);
+      assert.match(text, new RegExp(`【技能 ${skill}】`), message);
+    }
+  });
+
+  it('没点名风格时用照片判断的适合风格，这轮原话和日常休闲占位都不让路', () => {
+    const judged = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit', style_preference: '日常休闲' }),
+        '今天怎么穿',
+        { personal_style: '日常休闲', suited_style: '韩系' }
+      )
+    );
+    assert.match(judged, /【技能 style-korean】/);
+
+    const named = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit' }),
+        '想买一件汉服',
+        { personal_style: '日常休闲', suited_style: '韩系' }
+      )
+    );
+    assert.match(named, /【技能 style-guofeng】/);
+    assert.doesNotMatch(named, /style-korean/);
+
+    const stated = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit', style_preference: '日常休闲' }),
+        '帮我搭一套',
+        { personal_style: '老钱', suited_style: '韩系' }
+      )
+    );
+    assert.match(stated, /【技能 style-old-money】/);
+    assert.doesNotMatch(stated, /style-korean/);
+  });
+
+  it('场合里的日常通勤不注入通勤技能', () => {
+    const text = block({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常通勤',
+      style_preference: '简约',
+    });
+    assert.equal(text, '');
+  });
+
+  it('身材技能按档案和原话注入，剪裁限制可以叠加', () => {
+    const pear = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit' }),
+        '帮我搭一套',
+        { body_shape: '梨形，肩窄胯宽', height: '158cm' }
+      )
+    );
+    assert.match(pear, /【技能 body-pear】/);
+    assert.match(pear, /【技能 body-petite】/);
+    assert.match(pear, /上衣的下摆停在胯最宽的地方/);
+    assert.doesNotMatch(pear, /body-apple/);
+
+    const shoulder = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit', special_requests: '宽肩，五五分' }),
+        '',
+        { height: '168cm' }
+      )
+    );
+    assert.match(shoulder, /【技能 body-broad-shoulder】/);
+    assert.match(shoulder, /【技能 body-even】/);
+    assert.doesNotMatch(shoulder, /body-petite/);
+  });
+
+  it('色彩技能按肤色注入，说冷不加冷皮', () => {
+    const warm = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit' }),
+        '帮我搭一套',
+        { skin_tone: '暖调' }
+      )
+    );
+    assert.match(warm, /【技能 color-aesthetics】/);
+    assert.match(warm, /【技能 color-warm】/);
+    assert.match(warm, /不要全身米杏浅驼/);
+    assert.doesNotMatch(warm, /color-cool/);
+
+    const coldWeather = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({
+          request_type: 'wardrobe_outfit',
+          special_requests: '外套有点冷，换个外套',
+        }),
+        '第二套外套有点冷'
+      )
+    );
+    assert.doesNotMatch(coldWeather, /color-cool|color-aesthetics/);
+
+    const contrast = buildSkillBlocks(
+      selectStylistSkillNames(
+        normalizeGatekeeperIntent({ request_type: 'wardrobe_outfit' }),
+        '想要撞色'
+      )
+    );
+    assert.match(contrast, /【技能 color-aesthetics】/);
+    assert.doesNotMatch(contrast, /color-warm|color-cool|color-neutral/);
+  });
+
   it('未知技能名抛出含名称的错误', () => {
     assert.throws(() => buildSkillBlocks(['no-such-skill']), /no-such-skill/);
   });
@@ -130,5 +278,10 @@ describe('selectStylistOutfitSkillNames', () => {
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /衣橱锚定搭配模式/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /反馈微调模式 feedback_revision/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /多轮对话与反馈微调模式/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /新品的 description 必填一句外观/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /整套都用 new_item/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /有色彩技能时，脸周颜色、深浅和面积按技能/);
+    assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /其余槽位用衣橱/);
+    assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /衣橱里已有该季节的外套就用衣橱/);
   });
 });

@@ -57,7 +57,7 @@ export function ProfileOverview({ profile }: ProfileOverviewProps) {
           </div>
           <p className="text-xs text-muted-foreground mt-2">
             已与 AI 聊过 {filled}/{total} 项关键信息
-            {!profile.visual_profile_verified && '，上传自拍可补全外形分析'}
+            {!profile.full_body_verified && '，上传一张至少拍到膝盖的站立照后，效果图会更像你'}
           </p>
         </div>
       </CardContent>

@@ -19,16 +19,16 @@ export const ATHLETIC_OCCASION_HINT =
 const CORE_SLOTS: WardrobeSearchSlot[] = ['top', 'bottom', 'shoes'];
 
 const ATHLETIC_BOTTOM_BAD =
-  /wrap short|denim bermuda|denim short|cargo jean|wide-leg denim|skirt|midi|maxi dress/i;
+  /wrap short|denim bermuda|denim short|cargo jean|wide-leg denim|skirt|midi|maxi dress|半裙|长裙|牛仔短裤|阔腿牛仔/i;
 const ATHLETIC_BOTTOM_GOOD =
-  /biker short|athletic short|sport short|jogger|track pant|activewear|training short/i;
+  /biker short|athletic short|sport short|jogger|track pant|activewear|training short|运动短裤|骑行裤|慢跑/i;
 
 const ATHLETIC_SHOES_BAD =
-  /hiking|fashion sneaker|pearl|loafer|heel|flat|sandal|boot(?!.*basket)/i;
+  /hiking|fashion sneaker|pearl|loafer|heel|flat|sandal|boot(?!.*basket)|乐福|高跟|凉鞋/i;
 const ATHLETIC_SHOES_GOOD =
-  /basketball|high-top|athletic sneaker|running shoe|training shoe|court shoe|sport sneaker/i;
+  /basketball|high-top|athletic sneaker|running shoe|training shoe|court shoe|sport sneaker|运动鞋|篮球鞋|跑鞋/i;
 
-const ATHLETIC_TOP_GOOD = /activewear|athletic|sport|performance|training/i;
+const ATHLETIC_TOP_GOOD = /activewear|athletic|sport|performance|training|运动/i;
 
 export function isAthleticOccasion(intent?: GatekeeperIntent, userMessage?: string): boolean {
   const text = [intent?.occasion, intent?.special_requests, userMessage].filter(Boolean).join(' ');

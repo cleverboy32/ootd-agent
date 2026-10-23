@@ -63,12 +63,12 @@ export const gatekeeperSchema: Schema = {
         special_requests: {
           type: Type.STRING,
           description:
-            '用户明确说出的特殊要求（遮肚子、显腿长等）；purchase_pairing 时填写待购单品搭配说明；style_advice 时【必须】结合历史对话，填入用户最初真正想了解的建议主题（如「高级感色彩搭配公式」「美拉德风穿搭要点」），不要因后续补充场合而丢失原始诉求。【关键】忠实还原用户的提问层级和语气，禁止自行添加「进阶」「深度」等拔高修饰词——用户问「大地色有哪些颜色？」只填「大地色的颜色构成」，用户说「啊 原来分这么多种？」只填「大地色子系列的构成与区别」；只有当用户原话中明确出现「进阶」「深入」「详细」「高阶」等词才允许加"进阶"定性。禁止臆测身材修饰需求。',
+            '用户明确说出的特殊要求。purchase_pairing 时填写待购单品搭配说明。style_advice 时结合历史对话保留最初的知识主题，不要因后续补充场合丢掉它，也不要自行拔高成用户没说的程度。wardrobe_outfit 且用户要买新品或看新品时，记下季节、新品和风格，不要改写成建议清单。禁止臆测身材修饰需求。',
         },
         request_type: {
           type: Type.STRING,
           description:
-            '请求类型：wardrobe_outfit（从衣橱搭一套）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| style_advice（咨询某风格/场景的穿搭建议，如「想了解X风格」「有什么好建议」，偏知识/建议而非直接要一套）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
+            '请求类型：wardrobe_outfit（要看到一套造型，含推荐穿搭、想买衣服、想看新品）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| style_advice（只咨询穿搭知识：方法、公式、颜色怎么配、某风格怎么穿）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
         },
         selected_outfit_id: {
           type: Type.STRING,
@@ -134,7 +134,7 @@ export const gatekeeperSchema: Schema = {
         needed: {
           type: Type.BOOLEAN,
           description:
-            '本轮回复是否依赖实时天气，与 request_type 无关：用户主动询问天气/气温/冷暖时必为 true；要真正出穿搭、受冷暖影响时为 true；与天气无关或用户已自述天气温度时为 false。',
+            '本轮回复是否依赖实时天气，与 request_type 无关。用户主动询问天气、或问今天明天某次出行怎么穿时为 true。为还没到的季节买衣服或准备衣橱时为 false。与天气无关、或用户已自述天气温度时为 false。',
         },
         city: {
           type: Type.STRING,

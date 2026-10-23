@@ -136,6 +136,10 @@ model ClothingItem {
   subCategory  String               // 子类别 (AI 自动生成, e.g., 'T-shirt', 'Jeans')
   season       String[]             @default([]) // 新增：季节
   material     String[]             @default([]) // 新增：材质
+  /// 合适穿着的温度下限（摄氏度，含边界）。空表示不设下限
+  tempMin      Int?
+  /// 合适穿着的温度上限（摄氏度，含边界）。空表示不设上限
+  tempMax      Int?
   description         String?
   colors                String[]
   tags                  String[]

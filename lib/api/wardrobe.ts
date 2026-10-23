@@ -14,6 +14,18 @@ export const getWardrobeItem = async (itemId: string): Promise<WardrobeItemData>
   return apiClient.getCached(`${API_BASE}/wardrobe/${itemId}`);
 };
 
+export const reanalyzeWardrobeItem = async (itemId: string): Promise<Record<string, unknown>> => {
+  const response = await fetch(withBasePath(`${API_BASE}/wardrobe/${itemId}`), {
+    method: 'POST',
+    headers: { 'X-Client-ID': getClientId() },
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({ error: `HTTP error! Status: ${response.status}` }));
+    throw new Error(errorBody.error || `HTTP error! Status: ${response.status}`);
+  }
+  return response.json();
+};
+
 export const deleteWardrobeItem = async (itemId: string): Promise<{ deletedCount: number }> => {
   const response = await apiClient.delete(`${API_BASE}/wardrobe/${itemId}`);
   return response.json();

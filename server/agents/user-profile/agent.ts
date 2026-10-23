@@ -9,6 +9,7 @@ import {
   isVisualProfileVerified,
   readVerifiedVisualProfile,
 } from '@/server/utils/userProfileVisual';
+import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { mergeChatProfileForPersistence } from '@/server/utils/profileMetadata';
 import { extractConfirmedWardrobeId, type GatekeeperIntent } from '../intent';
 import prismadb from 'server/db';
@@ -128,6 +129,11 @@ export function profileFromDbRecord(dbProfile: Record<string, unknown>): UserPro
         ? dbProfile.personal_style
         : '日常休闲',
     ...visual,
+    suited_style: isVisualProfileVerified(dbProfile)
+      ? canonicalSuitedStyle(
+          typeof dbProfile.suited_style === 'string' ? dbProfile.suited_style : ''
+        )
+      : '',
   };
 }
 

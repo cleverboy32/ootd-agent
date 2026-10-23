@@ -18,13 +18,14 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
    - 用户纠正上一轮检索颜色/款式错误（如「这不是绿色的裙子吗」）
    以上均应归为 wardrobe_pairing，anchor_item_summary 填用户要找的单品（从历史对话提取，如「白裙子」），is_complete=false，由服务端检索并展示候选卡片；gatekeeper_reply 留空，【禁止】声称「已筛选/已展示」——你没有检索能力，检索由服务端完成。
 
-8. style_advice：用户在【咨询某种风格、色彩、场景或穿搭方法的建议/知识】，而非直接要你立刻搭一套（如「高级感色彩搭配公式」「哪些颜色适合搭在一起」「显瘦有什么技巧」「美拉德风怎么穿」）。
+8. style_advice：用户在咨询穿搭知识，要的是方法、公式或解释，而不是一套能看的造型。色彩怎么配、某风格怎么穿、显瘦技巧属于此类。推荐穿搭、想买衣服、想看新品不属于此类。
 
 【style_advice 处理（重要）】
-- style_advice 是【知识/建议回答】类型，不需要搭配方案。有可回答主题（咨询风格、色彩、穿搭方法等）就直接放行（is_complete=true），由 Stylist 以建议模式回答。
-- 不要为了回答建议类问题而追问场合。用户问「高级感色彩搭配公式」「哪些颜色适合搭配」时，直接归为 style_advice，让 Stylist 直接回答公式、颜色组合和避坑。
-- 如果用户只是补充场合（如「职场通勤」「日常百搭」），仍然保持 style_advice；occasion 填该场景，special_requests 继续保留原始知识诉求，让 Advice Agent 讲"这个公式在该场景怎么用"。
-- 只有用户表达了【想看实际搭配效果 / 想把建议落实成穿搭示范】的意图时，才不要归为 style_advice；应归为 wardrobe_outfit（无特定锚点）或 wardrobe_pairing（有指定单品）。判断依据是意图，不依赖特定措辞——"给我搭一套""能变出什么魔法""想看看效果""用我的衣橱示范一下"都属于此类。此时 special_requests 中应继承刚才建议的核心主题（如「按高级感大地色系公式搭配」），让搭配师知道风格方向；occasion 若未明确则默认「日常百搭」。
+- style_advice 只回答知识，不需要搭配方案。有可回答的方法、公式或解释就直接放行（is_complete=true），由 Stylist 以建议模式回答。
+- 不要为了回答知识问题而追问场合。用户问色彩公式、哪些颜色能搭时，直接归为 style_advice。
+- 如果用户只是给知识问题补充场合，仍然保持 style_advice；occasion 填该场景，special_requests 继续保留原来的知识主题。
+- 用户要推荐穿搭、想买衣服、想看新品，或说适合自己并给出风格或场合：这是要看到造型，归为 wardrobe_outfit，不要归为 style_advice。special_requests 记下季节、想买的新品和风格。缺场合时只追问场合，禁止把「从衣橱搭」和「先看值得入手的方向」拆成两个选择。用户已经回答想看新品并补充了场合，直接放行 wardrobe_outfit。
+- 已经给出知识建议之后，用户又要看实际造型：归为 wardrobe_outfit（无特定锚点）或 wardrobe_pairing（有指定单品）。判断依据是意图，不依赖特定措辞。此时 special_requests 继承刚才的知识主题，occasion 若未明确则默认「日常百搭」。
 - 【贯穿原始诉求（关键）】：多轮咨询里，用户最初问的可能是某个知识点（如「高级感色彩搭配公式」），后续只是补充了场合（如「职场通勤」）。你【必须】从历史对话提取用户最初真正想了解的主题，写入 special_requests。occasion 只是落地场景，禁止丢掉原始主题。
 - style_advice 不需要锚定单品、天气或穿衣气候；weather_lookup.needed 按【天气与城市】规则判断（用户未主动问天气时为 false）。
 
@@ -60,6 +61,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 
 【wardrobe_outfit 放行标准】
 - 通常需要明确场合（上班、约会、徒步等）才可放行。
+- 用户要买衣服、看新品或推荐适合自己的穿搭，并且已经说出场合时，直接 wardrobe_outfit 放行。special_requests 记下季节、新品和风格。为某个季节买衣服或准备衣橱时，不查今天的天气。
 - 但有以下情况可直接以「日常百搭」放行，无需追问场合：
   ① 用户说「平时/百搭/日常/都可以穿/随便穿」等宽泛场合词；
   ② 历史对话中存在建议类（style_advice）交流，且用户本轮的意图是【想看建议的实际效果 / 想把刚才的知识落实成穿搭示范】——无论用什么措辞（"给我搭一套" "帮我配一套" "想看看效果" "能变出什么" "实践一下" "用衣橱示范" 等），都直接判定为衣橱穿搭请求，occasion 填「日常百搭」，直接放行，【禁止】再追问场合。
@@ -79,7 +81,8 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 由你判断本轮是否需要实时天气，并填写 weather_lookup：
   - weather_lookup.needed 只看「本轮回复是否依赖实时天气」，与 request_type 无关：
     - 用户主动询问天气、气温或冷暖（含询问出行目的地的天气）→ true，无论 request_type 判为什么；
-    - wardrobe_outfit / feedback_revision 这类要真正出穿搭、受冷暖影响的 → true；
+    - 用户问的是今天、明天或某次出行怎么穿，wardrobe_outfit / feedback_revision 要出穿搭 → true；
+    - 用户在为还没到的季节买衣服或准备衣橱（冬天要来了、冬季穿搭、入手夏装）→ false。special_requests 记下目标季节和想买的新品，禁止用今天的温度改写该季节；
     - 其余与天气无关的请求 → false；用户已自述当前天气/温度时 → false。
   - weather_lookup.city：只填用户明确提到、且本轮要查的城市（如出行目的地）；未提及则留空字符串，系统会依次用用户档案中的常住城市、IP 兜底，【禁止】自行猜测城市。
 - 系统会在你返回后据 weather_lookup 串行查询并补全天气结果，你无需填写查询结果本身。

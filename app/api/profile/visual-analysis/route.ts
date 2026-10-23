@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import prismadb from '@/server/db';
-import { analyzeVisualProfileFromImage } from '@/server/agents/visual/profile';
+import {
+  analyzeVisualProfileFromImage,
+  portraitRejectionMessage,
+} from '@/server/agents/visual/profile';
 import { logVisualProfileAudit } from '@/server/logging/visualProfile';
 import {
   isClientOwnedUploadUrl,
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
         error: 'not_a_valid_portrait',
       });
       return NextResponse.json(
-        { error: '请上传清晰的正面人像照片' },
+        { error: portraitRejectionMessage(visualResult.portrait_issue) },
         { status: 422 }
       );
     }
@@ -74,6 +77,7 @@ export async function POST(req: NextRequest) {
       result: {
         skin_tone: visualResult.skin_tone,
         body_shape: visualResult.body_shape,
+        suited_style: visualResult.suited_style,
         hair_color: visualResult.visual_features.hair_color,
       },
     });
@@ -86,6 +90,7 @@ export async function POST(req: NextRequest) {
       profileData: {
         ...profileData,
         visual_profile_verified: true,
+        full_body_verified: true,
         selfie_image_url: imageUrl,
         selfie_analyzed_at: mergedProfile.selfie_analyzed_at,
         location: typeof mergedProfile.location === 'string' ? mergedProfile.location : undefined,

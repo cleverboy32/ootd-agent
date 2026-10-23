@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClothingItem } from '@prisma/client';
-import { callStylistAgent } from '@/server/agents/stylist/agent';
+import { callStylistAgent, planWardrobeSearchQueries } from '@/server/agents/stylist/agent';
 import { normalizeGatekeeperIntent } from '@/server/agents/intent';
 import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 
@@ -55,6 +55,8 @@ function buildMockRagCache(): Map<string, ClothingItem> {
     formality: null,
     silhouette: [] as string[],
     embedding: null,
+    tempMin: null,
+    tempMax: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -106,7 +108,7 @@ function buildMockRagCache(): Map<string, ClothingItem> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const SILHOUETTE_WORDS =
-  /knee[-\s]?length|ankle[-\s]?length|midi|maxi|cropped|above[-\s]?the[-\s]?knee|wide[-\s]?leg|straight[-\s]?leg|short|shorts|mini|floor[-\s]?length/i;
+  /及膝|到踝|九分|阔腿|直筒|短款|短裤|五分|过膝|中长|长款|宽腿|迷你|拖地|knee[-\s]?length|ankle[-\s]?length|midi|maxi|cropped|above[-\s]?the[-\s]?knee|wide[-\s]?leg|straight[-\s]?leg|shorts|mini|floor[-\s]?length/i;
 
 const VALID_ITEM_ID = /^item_\d+$|^new_item$|^mock-/;
 
@@ -136,6 +138,12 @@ describe('Stylist — output schema compliance', () => {
       assert.ok(outfit.visual_composition.outfit_details, 'outfit_details 不能为空');
       assert.ok(outfit.visual_composition.model_pose, 'model_pose 不能为空');
       assert.ok(outfit.visual_composition.background, 'background 不能为空');
+      assert.match(outfit.visual_composition.model_pose, /[\u4e00-\u9fff]/, 'model_pose 须为中文');
+      assert.doesNotMatch(
+        outfit.visual_composition.model_pose,
+        /hair|bangs|young woman|fashion model|脸型|发色|刘海/i,
+        `model_pose 不应改写人物外形: ${outfit.visual_composition.model_pose}`
+      );
     }
   });
 
@@ -288,6 +296,109 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
       assert.ok(shorts, `${outfit.id} 应包含短裤`);
       const reasons = outfit.selected_items.map((item) => item.reason).join(' ');
       assert.match(reasons, WEATHER_WORDS, `${outfit.id} reason 应提及天气取舍`);
+    }
+  });
+
+  it('19℃ 外套有点冷 → 检索仍是薄外套，不写羽绒服或季节词', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'feedback_revision',
+      occasion: '日常通勤',
+      weather: '重庆城区，多云，19℃',
+      style_preference: '简约',
+      special_requests: '外套有点冷，换个外套',
+      dressing_climate: 'mild',
+    });
+    const queries = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '第二套外套有点冷，换个外套吧',
+      null
+    );
+    const outerwear = queries.filter((entry) => entry.slot === 'outerwear');
+    assert.ok(outerwear.length > 0, `应规划外套检索，实际: ${JSON.stringify(queries)}`);
+    const queryText = outerwear.map((entry) => entry.query).join(' ');
+    assert.match(queryText, /薄外套|开衫|衬衫外套|风衣/);
+    assert.doesNotMatch(queryText, /羽绒|棉服|保暖|秋天|puffer|down|parka|warm|autumn/i);
+  });
+
+  it('冬季买衣服且没有今日天气 → 外套检索厚外套，不写防晒', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常出门、约会聚会',
+      weather: '',
+      style_preference: '日常休闲',
+      special_requests: '冬季新品，想买适合自己的冬季外套',
+      dressing_climate: '',
+    });
+    const queries = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '我想买衣服，请推荐适合我的冬季穿搭',
+      null
+    );
+    const outerwear = queries.filter((entry) => entry.slot === 'outerwear');
+    assert.ok(outerwear.length > 0, `应规划冬季外套检索，实际: ${JSON.stringify(queries)}`);
+    const queryText = outerwear.map((entry) => entry.query).join(' ');
+    assert.match(queryText, /大衣|棉服|羽绒/);
+    assert.doesNotMatch(queryText, /防晒|薄外套|开衫/);
+  });
+
+  it('想买冬季穿搭时，衣橱里已有单品也整套都用新品', async () => {
+    const { llmGenerate } = await import('@/server/services/llm/client');
+    const { STYLIST_SYSTEM_INSTRUCTION } = await import('@/server/agents/stylist/prompts');
+    const { stylistSchema } = await import('@/server/agents/stylist/schema');
+    const { AGENT_MODELS } = await import('@/server/config/models');
+
+    const response = await llmGenerate({
+      model: AGENT_MODELS.stylist,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `【今日穿搭意图】
+- 请求类型: wardrobe_outfit
+- 天气温度:
+- 场合: 日常出门
+- 特殊要求: 想买冬季新品外套
+
+【用户衣橱单品列表】
+<item ref="item_0" mainCategory="OUTERWEAR" subCategory="连帽棉服" similarity="0.82">深色连帽棉服，横向绗缝，有填充。</item>
+<item ref="item_1" mainCategory="TOP" subCategory="针织翻领衬衫" similarity="0.74">米白色针织翻领长袖衬衫。</item>
+<item ref="item_2" mainCategory="BOTTOM" subCategory="阔腿长裤" similarity="0.7">米白色阔腿长裤。</item>
+<wardrobe_match_summary>
+<slot name="outerwear" status="adequate"/>
+<slot name="top" status="adequate"/>
+<slot name="bottom" status="adequate"/>
+</wardrobe_match_summary>
+
+请输出 1 套穿搭。`,
+            },
+          ],
+        },
+      ],
+      systemInstruction: STYLIST_SYSTEM_INSTRUCTION,
+      temperature: 0.2,
+      jsonSchema: stylistSchema,
+    });
+
+    const parsed = JSON.parse(response.text ?? '') as {
+      outfits: Array<{ selected_items: Array<{ id: string; layer: string; description?: string; name: string }> }>;
+    };
+    assert.ok(parsed.outfits.length > 0);
+    for (const outfit of parsed.outfits) {
+      assert.ok(outfit.selected_items.length >= 3, `一套新品至少含上装、下装和外套: ${JSON.stringify(outfit.selected_items)}`);
+      for (const item of outfit.selected_items) {
+        assert.equal(item.id, 'new_item', `买衣服时不应使用衣橱单品，实际: ${item.id} ${item.name}`);
+        assert.ok((item.description ?? '').trim().length > 8, `新品应有一句外观: ${item.name}`);
+      }
+      const outerwear = outfit.selected_items.filter((item) => /outer/i.test(item.layer));
+      assert.ok(outerwear.length > 0, `应有冬季外套，实际: ${JSON.stringify(outfit.selected_items)}`);
+      for (const item of outerwear) {
+        assert.match(item.description ?? '', /大衣|棉服|羽绒/);
+      }
     }
   });
 });

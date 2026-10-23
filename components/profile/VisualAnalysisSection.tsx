@@ -28,7 +28,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
   const [retryMode, setRetryMode] = useState<'upload' | 'analyze'>('upload');
 
   const isBusy = status === 'uploading' || status === 'analyzing';
-  const isVerified = Boolean(profile.visual_profile_verified);
+  const isVerified = Boolean(profile.full_body_verified);
 
   const analyzeUploadedImage = async (publicUrl: string) => {
     setStatus('analyzing');
@@ -88,11 +88,11 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
   const triggerUpload = () => inputRef.current?.click();
 
   return (
-    <Card className="w-full">
+    <Card id="visual-analysis" className="w-full">
       <CardHeader>
         <CardTitle>外形分析</CardTitle>
         <CardDescription>
-          上传自拍后，AI 将分析肤色、身材与外形特征，用于更精准的搭配推荐
+          上传一张站立、至少拍到膝盖的日常照片。效果图会参考这张照片里的人，衣服仍按搭配方案来画。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -111,7 +111,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
               <div className="relative w-32 h-40 rounded-lg overflow-hidden border">
                 <Image
                   src={profile.selfie_image_url}
-                  alt="参考自拍"
+                  alt="全身照"
                   fill
                   className="object-cover"
                   unoptimized
@@ -167,7 +167,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
           </div>
         ) : !canMutate ? (
           <p className="text-sm text-muted-foreground">
-            当前为浏览模式，验证访问码后可上传自拍并生成外形分析。
+            当前为浏览模式，验证访问码后可上传全身照。
           </p>
         ) : status !== 'error' ? (
           <div className="flex w-full flex-col items-start gap-4 p-6 border border-dashed rounded-lg">
@@ -181,11 +181,11 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
             ) : (
               <>
                 <p className="text-sm text-muted-foreground">
-                  请上传一张清晰的正面半身或全身自拍，帮助 AI 了解您的肤色与身材特点
+                  请一个人站立拍摄，头顶在画面里，至少拍到膝盖。鞋可以不在画面里。人脸清楚，双臂不要挡在身前。日常衣服即可。长大衣把身形完全罩住时，请换一件日常外衣再拍。
                 </p>
                 <Button onClick={triggerUpload}>
                   <Upload className="mr-2 h-4 w-4" />
-                  上传自拍
+                  上传全身照
                 </Button>
               </>
             )}

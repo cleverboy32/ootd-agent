@@ -39,7 +39,7 @@ export const COPYWRITER_SYSTEM_INSTRUCTION = `
      * 从搭配师 JSON 的 selected_items.id 字段【复制粘贴】，禁止手写、改写或省略任何字符。
      * 正确示例：{{W:cmqg5ec6b0000pvs8q5kp2358}}
      * 禁止输出 [衣橱物品:...] 等其它格式，系统会自动转换。
-   - 推荐新品标记：当引用新推荐的单品（id 为 'new_item'）时，你【必须】在单品名称旁加上 🛍️ 标记。
+   - 推荐新品标记：当引用新推荐的单品（id 为 'new_item'）时，你【必须】在单品名称旁加上 🛍️ 标记。方案里有新品时，不要说整套都是从衣橱里搭的。
    - 效果图占位符：在【每一套】穿搭方案结尾，【必须】单独起一行写：{{IMG:方案ID}}
      * 方案 ID 从搭配师 JSON 的 outfits[].id 复制粘贴（如 {{IMG:outfit_1}}）。
      * 占位符必须单独起一行，前后各空一行。
@@ -75,7 +75,8 @@ export function buildCopywriterPrompt(
   stylistResult: StylistResult,
   personalStyle: string,
   intent?: GatekeeperIntent,
-  revisionNoItemChange?: boolean
+  revisionNoItemChange?: boolean,
+  userMessage?: string
 ): { prompt: string; systemInstruction: string } {
   const isRevision = intent?.request_type === 'feedback_revision';
   const specialRequests = intent?.special_requests?.trim() ?? '';
@@ -90,6 +91,12 @@ export function buildCopywriterPrompt(
     : '';
 
   const prompt = `
+【用户原话】
+${userMessage?.trim() || '（无）'}
+
+【天气实况】
+${intent?.weather?.trim() || '未提供'}
+
 【用户风格定位】
 ${personalStyle || '日常休闲'}
 ${revisionNote}${adviceContinuationNote}

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { reanalyzeWardrobeItem } from '@/server/services/analyzeWardrobeItem';
 import { deleteWardrobeItems, getWardrobeItemDetails } from '@/server/services/wardrobeService';
 
 export async function GET(
@@ -50,6 +51,30 @@ export async function GET(
   } catch (error) {
     console.error(`[API-ERROR] Failed to fetch wardrobe item ${itemId}:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ itemId: string }> }
+) {
+  const { itemId } = await params;
+  const clientId = req.headers.get('x-client-id');
+  if (!clientId || !itemId) {
+    return NextResponse.json({ error: 'Client ID and item ID are required' }, { status: 400 });
+  }
+
+  const existing = await getWardrobeItemDetails(itemId);
+  if (!existing || existing.clientProfileId !== clientId) {
+    return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+  }
+
+  try {
+    const item = await reanalyzeWardrobeItem(itemId);
+    return NextResponse.json(item, { status: 200 });
+  } catch (error) {
+    console.error(`[API-ERROR] Failed to reanalyze wardrobe item ${itemId}:`, error);
+    return NextResponse.json({ error: '重新分析失败，原描述未改' }, { status: 502 });
   }
 }
 

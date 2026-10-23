@@ -175,12 +175,12 @@ function resolveCategoryHint(query: string, slot?: WardrobeSearchSlot): string {
   if (slot) return SLOT_CATEGORY_HINT[slot];
 
   const normalized = query.trim().toLowerCase();
-  if (/dress|gown|skirt/i.test(normalized)) return 'dress';
-  if (/shirt|blouse|top|tee|sweater|cardigan|short sleeve/i.test(normalized)) return 'top';
-  if (/pant|trouser|jean|\bshorts\b|bottom/i.test(normalized)) return 'bottom';
-  if (/shoe|sneaker|boot|heel|footwear|sandal|loafer|slipper/i.test(normalized)) return 'footwear';
-  if (/jacket|coat|outerwear|blazer/i.test(normalized)) return 'outerwear';
-  if (/earring|necklace|bag|belt|scarf|accessory/i.test(normalized)) return 'accessory';
+  if (/dress|gown|skirt|连衣裙|礼服/i.test(normalized)) return 'dress';
+  if (/shirt|blouse|top|tee|sweater|cardigan|short sleeve|衬衫|上衣|针织|背心|短袖/i.test(normalized)) return 'top';
+  if (/pant|trouser|jean|\bshorts\b|bottom|裤|短裤/i.test(normalized)) return 'bottom';
+  if (/shoe|sneaker|boot|heel|footwear|sandal|loafer|slipper|鞋|靴/i.test(normalized)) return 'footwear';
+  if (/jacket|coat|outerwear|blazer|外套|夹克|大衣|风衣|开衫/i.test(normalized)) return 'outerwear';
+  if (/earring|necklace|bag|belt|scarf|accessory|耳环|项链|包|腰带|围巾|配饰/i.test(normalized)) return 'accessory';
 
   return 'clothing item';
 }

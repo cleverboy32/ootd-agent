@@ -18,7 +18,7 @@ export function ChatInputArea({
   input, 
   setInput, 
   isLoading, 
-  handleSend, 
+  handleSend,
 }: ChatInputAreaProps) {
   const { canInvokeAI } = useAccess();
   const fileInputRef = useRef<HTMLInputElement>(null);

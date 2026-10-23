@@ -11,6 +11,7 @@ interface GreetingSectionProps {
 
 export function GreetingSection({ handleSend }: GreetingSectionProps) {
   const { canInvokeAI } = useAccess();
+
   return (
     <div className="max-w-4xl mx-auto pt-16 px-6 sm:px-12">
       <div className="flex flex-col items-start mb-12">

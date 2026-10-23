@@ -55,7 +55,10 @@ export async function logout(): Promise<void> {
 }
 
 export async function fetchSession(): Promise<SessionState> {
-  const res = await fetch(withBasePath('/api/auth/session'), { credentials: 'same-origin' });
+  const res = await fetch(withBasePath('/api/auth/session'), {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
   return parseOrThrow<SessionState>(res);
 }
 

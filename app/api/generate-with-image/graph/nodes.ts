@@ -6,7 +6,9 @@ import { callGatekeeperAgent, type GatekeeperContext } from '@/server/agents/gat
 import {
   buildUserProfileFallback,
   loadUserProfileFromDb,
+  profileFromDbRecord,
 } from '@/server/agents/user-profile';
+import { readFullBodyImageUrl } from '@/server/utils/profileMetadata';
 import { callStylistAgent, callStylistAdvice } from '@/server/agents/stylist';
 import { callCopywriterAgentStream, callCopywriterAdviceStream } from '@/server/agents/copywriter';
 import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
@@ -66,6 +68,7 @@ async function executeParallelAgents(
     | 'revisionNoItemChange'
     | 'cachedPersonalStyle'
     | 'userProfile'
+    | 'fullBodyImageUrl'
     | 'messageId'
     | 'sessionItems'
   >,
@@ -83,6 +86,18 @@ async function executeParallelAgents(
 
   console.log('[ORCHESTRATOR:LANGGRAPH] 启动并行双轨执行链 (文案流 + 视觉导演并行画图)...');
 
+  let portraitImageUrl = state.fullBodyImageUrl;
+  if (portraitImageUrl === undefined && runtime.clientId) {
+    try {
+      const client = await prismadb.clientProfile.findUnique({ where: { id: runtime.clientId } });
+      const dbProfile = (client?.profileData as Record<string, unknown>) || {};
+      portraitImageUrl = readFullBodyImageUrl(dbProfile, runtime.clientId) ?? '';
+    } catch (e) {
+      console.warn('[ORCHESTRATOR:LANGGRAPH] Failed to load full-body photo:', e);
+      portraitImageUrl = '';
+    }
+  }
+
   const copywriterStartedAt = Date.now();
   const copywriterPromise = callCopywriterAgentStream(
     stylistResult,
@@ -95,7 +110,11 @@ async function executeParallelAgents(
       signal: runtime.abortSignal,
     },
     state.intent ?? undefined,
-    state.revisionNoItemChange
+    state.revisionNoItemChange,
+    runtime.initialParts
+      .filter((part): part is { text: string } => 'text' in part && Boolean(part.text?.trim()))
+      .map((part) => part.text.trim())
+      .join('\n')
   ).finally(() => {
     runtime.trace.markStage('copywriter', Date.now() - copywriterStartedAt);
   });
@@ -130,6 +149,7 @@ async function executeParallelAgents(
         state.userProfile,
         stylistResult.anchor_image_url,
         additionalPurchaseRefs,
+        portraitImageUrl || undefined,
         runtime.abortSignal
       );
     }
@@ -366,10 +386,16 @@ export async function loadProfileNode(
 
   // 关键路径只读 DB；档案增量由 Gate profile_update 异步写库，不再串行 Profile LLM
   let userProfile;
+  let fullBodyImageUrl: string | undefined;
   try {
-    userProfile = runtime.clientId
-      ? await loadUserProfileFromDb(runtime.clientId)
-      : buildUserProfileFallback();
+    if (runtime.clientId) {
+      const client = await prismadb.clientProfile.findUnique({ where: { id: runtime.clientId } });
+      const dbProfile = (client?.profileData as Record<string, unknown>) || {};
+      userProfile = profileFromDbRecord(dbProfile);
+      fullBodyImageUrl = readFullBodyImageUrl(dbProfile, runtime.clientId);
+    } else {
+      userProfile = buildUserProfileFallback();
+    }
   } catch (e) {
     console.warn('[ORCHESTRATOR:LANGGRAPH] loadUserProfileFromDb failed, using fallback:', e);
     userProfile = buildUserProfileFallback();
@@ -379,6 +405,7 @@ export async function loadProfileNode(
 
   return {
     userProfile,
+    fullBodyImageUrl: fullBodyImageUrl ?? '',
     previousStylistCache,
   };
 }

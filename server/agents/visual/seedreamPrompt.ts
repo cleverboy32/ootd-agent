@@ -49,8 +49,20 @@ export function listWardrobeItemDescriptions(
   return lines;
 }
 
-/** 模特主体描述：优先 env 覆盖，其次用户已验证档案，最后默认中国面孔 */
-export function buildModelSubjectDescription(userProfile?: UserProfileResult | null): string {
+/** 参考图第一张是人物全身照时使用的标签。衣服图不得用这个前缀。 */
+export const PERSON_REFERENCE_LABEL =
+  '人物参考（只取脸、发型、肤色和身体比例，禁止穿这张照片里的衣服）';
+
+export function isPersonReferenceLabel(label: string): boolean {
+  return label.trim().startsWith('人物参考');
+}
+
+/** 模特主体描述：优先 env 覆盖，其次用户已验证档案，最后默认中国面孔。有全身照时不使用这段。 */
+export function buildModelSubjectDescription(
+  userProfile?: UserProfileResult | null,
+  options?: { hasPersonReference?: boolean }
+): string {
+  if (options?.hasPersonReference) return '';
   const override = process.env.IMAGE_MODEL_SUBJECT?.trim();
   if (override) return override;
 
@@ -95,10 +107,50 @@ export function isInnerOrTopLayer(layer: string): boolean {
   );
 }
 
-/** 外套 + 内搭/上装叠穿：需要强制敞开露出内搭 */
+/** 外套 + 内搭叠穿时，现代外套需要敞开。斗篷、比甲、系带、盘扣按描述的门襟，不强制敞开。 */
+const CLOSED_OUTER_PATTERN = /斗篷|比甲|系带|盘扣/;
+
 export function outfitNeedsOpenLayering(outfit: StylistOutfit): boolean {
-  const layers = outfit.selected_items.map((i) => i.layer);
-  return layers.some(isOuterwearLayer) && layers.some(isInnerOrTopLayer);
+  const hasOuter = outfit.selected_items.some((item) => isOuterwearLayer(item.layer));
+  const hasInner = outfit.selected_items.some((item) => isInnerOrTopLayer(item.layer));
+  if (!hasOuter || !hasInner) return false;
+  const outerText = outfit.selected_items
+    .filter((item) => isOuterwearLayer(item.layer))
+    .map((item) => `${item.name} ${item.description ?? ''}`)
+    .join('\n');
+  return !CLOSED_OUTER_PATTERN.test(outerText);
+}
+
+const GARMENT_DRAW_RULES: { pattern: RegExp; rule: string }[] = [
+  {
+    pattern: /马面裙/,
+    rule: '马面裙：前后是平的裙门，褶只在两侧。禁止画成开衩直筒裙、西装裙或普通百褶裙。',
+  },
+  {
+    pattern: /比甲/,
+    rule: '比甲：无袖对襟，衣长停在描述写的位置。禁止加帽子，禁止画成拖到脚踝的长马甲。',
+  },
+  {
+    pattern: /璎珞/,
+    rule: '璎珞：贴在领口到胸前的一组垂饰。禁止画成双层珍珠项链。',
+  },
+];
+
+/** 无参考图时，专用款式补一句画图模型能执行的禁令。连帽斗篷保留帽子，其余斗篷禁止加帽。 */
+export function garmentDrawConstraints(outfit: StylistOutfit): string[] {
+  const blob = [
+    ...outfit.selected_items.map((item) => `${item.name} ${item.description ?? ''}`),
+    outfit.visual_composition.outfit_details,
+  ].join('\n');
+  const rules = GARMENT_DRAW_RULES.filter((entry) => entry.pattern.test(blob)).map((entry) => entry.rule);
+  if (/斗篷/.test(blob)) {
+    rules.push(
+      /连帽/.test(blob)
+        ? '斗篷：保留描述里的帽子，衣长停在描述写的位置。禁止无故拖到脚踝。'
+        : '斗篷：没有帽子。衣长停在描述写的位置。禁止加帽子，禁止画成连帽长披风。'
+    );
+  }
+  return rules;
 }
 
 /**
@@ -108,7 +160,7 @@ export function outfitNeedsOpenLayering(outfit: StylistOutfit): boolean {
 export function listTextOnlyItems(
   outfit: StylistOutfit,
   referenceLabels: string[]
-): Array<{ name: string; layer: string; id: string }> {
+): Array<{ name: string; layer: string; id: string; description?: string }> {
   const refBlob = referenceLabels.join(' ').toLowerCase();
   return outfit.selected_items.filter((item) => {
     const name = item.name.trim();
@@ -148,7 +200,9 @@ export function buildSeedreamImagePrompt(
   referenceLabels: string[],
   userProfile?: UserProfileResult | null
 ): string {
-  const subject = buildModelSubjectDescription(userProfile);
+  const hasPersonReference = isPersonReferenceLabel(referenceLabels[0] ?? '');
+  const garmentLabels = hasPersonReference ? referenceLabels.slice(1) : referenceLabels;
+  const subject = buildModelSubjectDescription(userProfile, { hasPersonReference });
   const scene = simplifyVisualText(outfit.visual_composition.background);
   // 穿着描述含配饰颜色，截断会把句尾的帽子、雪镜切掉
   const outfitDesc = disambiguateImageGarmentTerms(
@@ -164,17 +218,27 @@ export function buildSeedreamImagePrompt(
   const skiBottom = /ski pants|滑雪裤|powder gaiter|防雪裙/i.test(garmentBlob);
 
   const lines = [
-    `真实街拍穿搭照片，${subject}。`,
+    hasPersonReference
+      ? '真实街拍穿搭照片。图1是用户本人，成片里的脸必须是同一个人。可以轻度整理皮肤，禁止换脸，禁止美颜成另一张脸。'
+      : `真实街拍穿搭照片，${subject}。`,
     OVERALL_OUTFIT_LOOK_CONSTRAINT,
-    '摄影：自然光或柔和侧光，85mm 人像镜头，浅景深，真实皮肤纹理，轻微胶片颗粒；避免过度磨皮、塑料感、CGI 渲染、欧美模特、时尚杂志硬光、夸张滤镜。',
+    '摄影：白天或阴天的普通自然光，人脸和衣服都清楚，像手机随手拍。禁止浅景深、大光斑、胶片颗粒、夜景路灯、强橙光、塑料皮肤和塑料面料。',
   ];
 
-  if (referenceLabels.length > 0) {
-    const refSummary = referenceLabels
-      .map((label, i) => `图${i + 1}${shortReferenceLabel(label)}`)
-      .join('；');
+  if (hasPersonReference) {
     lines.push(
-      `单品参考（${refSummary}）：穿齐图1至图${referenceLabels.length}，按参考还原款式与颜色，并统一成一套全身穿搭呈现。`
+      '人物参考：五官、脸型、眼睛、鼻子、嘴唇、发型和身体比例都跟图1，只换衣服和姿势。禁止复制图1里的服装。皮肤可以均匀一点，去掉临时的痘印和硬阴影，保留毛孔和原来的冷暖肤色。禁止瘦脸、大眼、改鼻、磨成塑料皮肤、看起来年轻一截。禁止拉腿、瘦腰、缩肩、改头身比。脸要清楚，禁止虚化和换脸。'
+    );
+  }
+
+  if (garmentLabels.length > 0) {
+    const firstGarmentIndex = hasPersonReference ? 2 : 1;
+    const refSummary = garmentLabels
+      .map((label, i) => `图${firstGarmentIndex + i}${shortReferenceLabel(label)}`)
+      .join('；');
+    const lastGarmentIndex = firstGarmentIndex + garmentLabels.length - 1;
+    lines.push(
+      `单品参考（${refSummary}）：穿齐图${firstGarmentIndex}至图${lastGarmentIndex}，按参考还原款式、颜色和面料纹理。针织和毛呢保持起毛与罗纹，禁止画成光滑棉布或塑料；牛仔只保留参考图里已有的褪色，禁止自行加渐变水洗。`
     );
   }
 
@@ -194,14 +258,25 @@ export function buildSeedreamImagePrompt(
   }
 
   if (textOnly.length > 0) {
-    const names = textOnly.map((i) => `${i.name}(${i.layer})`).join('、');
+    const names = textOnly
+      .map((item) => {
+        const appearance = item.description?.trim();
+        const label = `${item.name}(${item.layer})`;
+        return appearance ? `${label}：${appearance}` : label;
+      })
+      .join('、');
     lines.push(
-      `无参考图单品（以这段文字为准，禁止用参考图的品类或颜色替代，禁止省略或被遮挡）：${names}。`
+      `无参考图单品（以这句外观为准，禁止用参考图的品类或颜色替代，禁止省略或被遮挡）：${names}。`
     );
   }
 
   if (skiBottom) {
     lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
+  }
+
+  const drawRules = garmentDrawConstraints(outfit);
+  if (drawRules.length > 0) {
+    lines.push(`款式硬性限制：${drawRules.join('')}`);
   }
 
   if (outfitNeedsOpenLayering(outfit)) {
@@ -217,8 +292,12 @@ export function buildSeedreamImagePrompt(
   }
 
   if (scene) lines.push(`场景：${scene}，日常真实环境，背景自然不喧宾夺主。`);
+  lines.push('光线用均匀的白天或阴天自然光。场景文字里的路灯、夜景和暖光不要画成强橙光或大光斑。');
   if (pose) lines.push(`姿态：${pose}，放松自然，非 T 台摆拍。`);
 
+  if (hasPersonReference) {
+    lines.push('再次确认：脸是图1本人，五官和身材比例不变。皮肤只做轻度整理，不要换成另一个人。');
+  }
   lines.push('全身或膝上中景，整套穿搭一眼可读，织物纹理清晰，表情自然。');
 
   return lines.join('\n');
@@ -226,8 +305,9 @@ export function buildSeedreamImagePrompt(
 
 export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '生成真实摄影风格的整套穿搭展示图，不要插画、3D 或明显 AI 合成感。',
-  '模特必须是东亚/中国面孔，禁止生成欧美模特。',
+  '没有人物参考图时，模特是东亚/中国面孔，禁止生成欧美模特。有人物参考图时，脸必须是该图本人，禁止改成另一张东亚脸。可轻度整理皮肤：肤色更均匀，去掉临时痘印和硬阴影，保留毛孔和冷暖。禁止瘦脸、改五官、塑料皮肤、改变头身比和身材比例。',
   '以整套造型为主：参考图还原各单品款式颜色，配饰自然融入全身穿搭；禁止做成单品特写拼贴。',
-  '有参考图的单品必须与参考图及衣橱原文一致，冲突时以参考图和衣橱原文为准。没有参考图的单品以穿着描述为准，禁止用参考图的品类替代它们。',
-  '有外套+内搭时外套须敞开，露出内搭本体，禁止只画外套内衬。',
+  '有参考图的单品，款式和颜色跟参考图。面料纹理以参考图为准，文字没写到的起毛、罗纹、针织也要保留。禁止把毛呢或针织画成光滑衬衫，禁止把针织画成塑料，禁止自行添加牛仔裤渐变褪色。没有参考图的单品以穿着描述为准，禁止用参考图的品类替代它们。',
+  '若参考图中有人物全身照，该图只用于脸、发型、肤色和身体比例，禁止把照片里的衣服画进成片；服装以单品参考图和穿着描述为准。',
+  '现代夹克、皮衣、西装外套有内搭时敞开或半敞，露出内搭，禁止只画外套内衬。斗篷、比甲、系带和盘扣的外层按描述的门襟，不要为了露内搭改成长披风。',
 ].join('');

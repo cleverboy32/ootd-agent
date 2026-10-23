@@ -75,6 +75,11 @@ export const OutfitPipelineAnnotation = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => null,
   }),
+  /** 已通过全身照校验的照片 URL。不放进 UserProfileResult，避免进入造型师提示词。 */
+  fullBodyImageUrl: Annotation<string | undefined>({
+    reducer: (_left, right) => right,
+    default: () => undefined,
+  }),
   stylistResult: Annotation<StylistResult | null>({
     reducer: (_left, right) => right,
     default: () => null,

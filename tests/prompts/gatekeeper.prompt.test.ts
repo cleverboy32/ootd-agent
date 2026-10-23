@@ -96,6 +96,35 @@ describe('Gatekeeper — style advice intent', () => {
     assert.equal(result.is_complete, true, 'style_advice 有主题应直接放行');
   });
 
+  it('「我想买衣服，推荐冬季穿搭」→ 不进 style_advice', async () => {
+    const result = await callGatekeeperAgent(
+      [],
+      [{ text: '冬天要来了，我想买衣服，请推荐适合我的冬季穿搭' }],
+      {}
+    );
+
+    assert.notEqual(result.extracted_intent.request_type, 'style_advice');
+    if (result.extracted_intent.request_type === 'clarify') {
+      assert.doesNotMatch(result.gatekeeper_reply ?? '', /值得入手|从现有衣橱|先看/);
+    }
+  });
+
+  it('追问后说想看新品并给了场合 → wardrobe_outfit', async () => {
+    const history: Content[] = [
+      userMsg('冬天要来了，我想买衣服，请推荐适合我的冬季穿搭'),
+      aiMsg('你是想先从现有衣橱里搭，还是先看冬季值得入手的单品方向？这些冬装主要穿在什么场合？'),
+    ];
+
+    const result = await callGatekeeperAgent(
+      history,
+      [{ text: '想看新品，适合我的时尚风格，适合日常出门和约会聚会' }],
+      {}
+    );
+
+    assert.equal(result.extracted_intent.request_type, 'wardrobe_outfit');
+    assert.match(result.extracted_intent.occasion, /日常|约会/);
+  });
+
   it('style_advice 放行后用户说「给我搭一套」→ wardrobe_outfit', async () => {
     const history: Content[] = [
       userMsg('高级感色彩搭配公式是什么'),
@@ -185,6 +214,23 @@ describe('Gatekeeper — wardrobe outfit intent', () => {
     assert.equal(result.is_complete, true);
     assert.ok(result.extracted_intent.occasion, '应提取场合');
     assert.equal(result.weather_lookup?.needed, true, '出穿搭仍需查天气');
+  });
+
+  it('为冬天买衣服 → 不查今天的天气', async () => {
+    const history: Content[] = [
+      userMsg('想看新品，适合我的时尚风格，适合日常出门和约会聚会'),
+      aiMsg('可以，接下来按冬季新品来准备。'),
+    ];
+
+    const result = await callGatekeeperAgent(
+      history,
+      [{ text: '我想买衣服，请推荐适合我的冬季穿搭' }],
+      { profileLocation: '重庆' }
+    );
+
+    assert.equal(result.extracted_intent.request_type, 'wardrobe_outfit');
+    assert.equal(result.weather_lookup?.needed, false, '为冬天买衣服不查今天的天气');
+    assert.match(result.extracted_intent.special_requests, /冬/);
   });
 
   it('无场合 → wardrobe_outfit 不放行，追问场合', async () => {

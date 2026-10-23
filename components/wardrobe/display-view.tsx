@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WardrobeGrid } from '@/components/wardrobe/wardrobe-grid';
 import { Button } from '@/components/ui/button';
 import { getClientId, withBasePath } from '@/lib/utils';
-import { deleteWardrobeItem, deleteWardrobeItems } from '@/lib/api/wardrobe';
+import { deleteWardrobeItem, deleteWardrobeItems, reanalyzeWardrobeItem } from '@/lib/api/wardrobe';
 import { useAccess } from '@/components/access/AccessProvider';
 
 const categories = [
@@ -49,6 +49,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
@@ -132,6 +133,29 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     }
   };
 
+  const handleReanalyzeSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`重新分析选中的 ${selectedIds.size} 件衣物？失败的会保留原描述。`)) return;
+
+    setIsReanalyzing(true);
+    const failed: string[] = [];
+    try {
+      for (const id of selectedIds) {
+        try {
+          const updated = (await reanalyzeWardrobeItem(id)) as ClothingItem;
+          setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+        } catch {
+          failed.push(id);
+        }
+      }
+      if (failed.length > 0) {
+        window.alert(`${failed.length} 件重新分析失败，原描述还在。`);
+      }
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     if (!window.confirm(`确定删除选中的 ${selectedIds.size} 件衣物吗？删除后需重新上传。`)) return;
@@ -168,21 +192,30 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={isDeleting || visibleCount === 0}
+                disabled={isDeleting || isReanalyzing || visibleCount === 0}
                 onClick={allVisibleSelected ? () => setSelectedIds(new Set()) : handleSelectAllInTab}
               >
                 {allVisibleSelected ? '取消全选' : '全选当前分类'}
               </Button>
               <Button
                 type="button"
+                variant="outline"
+                size="sm"
+                disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
+                onClick={handleReanalyzeSelected}
+              >
+                {isReanalyzing ? '分析中...' : `重新分析选中 (${selectedIds.size})`}
+              </Button>
+              <Button
+                type="button"
                 variant="destructive"
                 size="sm"
-                disabled={isDeleting || selectedIds.size === 0}
+                disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
                 onClick={handleDeleteSelected}
               >
                 {isDeleting ? '删除中...' : `删除选中 (${selectedIds.size})`}
               </Button>
-              <Button type="button" variant="ghost" size="sm" disabled={isDeleting} onClick={exitSelectionMode}>
+              <Button type="button" variant="ghost" size="sm" disabled={isDeleting || isReanalyzing} onClick={exitSelectionMode}>
                 完成
               </Button>
             </>

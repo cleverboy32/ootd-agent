@@ -5,7 +5,7 @@ import {
   createCosPutUrl,
   getCosPublicUrl,
 } from '@/server/services/cos';
-import { isClientOwnedUploadUrl } from '@/server/utils/profileMetadata';
+import { isClientOwnedUploadUrl, readFullBodyImageUrl } from '@/server/utils/profileMetadata';
 
 const envNames = [
   'COS_SECRET_ID',
@@ -76,6 +76,23 @@ describe('COS storage', () => {
         'client-1'
       ),
       false
+    );
+  });
+
+  it('reads a full-body photo only when the new flag and owner match', () => {
+    const owned =
+      'https://ootd-1234567890.cos.ap-nanjing.myqcloud.com/shows/user-uploads/client-1/photo.jpg';
+    assert.equal(
+      readFullBodyImageUrl({ full_body_verified: true, selfie_image_url: owned }, 'client-1'),
+      owned
+    );
+    assert.equal(
+      readFullBodyImageUrl({ visual_profile_verified: true, selfie_image_url: owned }, 'client-1'),
+      undefined
+    );
+    assert.equal(
+      readFullBodyImageUrl({ full_body_verified: true, selfie_image_url: owned }, 'client-2'),
+      undefined
     );
   });
 });

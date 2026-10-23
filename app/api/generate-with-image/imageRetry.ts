@@ -17,6 +17,7 @@ import {
   unregisterInFlight,
 } from '@/server/lifecycle/shutdown';
 import { isAbortError } from '@/server/utils/abort';
+import { readFullBodyImageUrl } from '@/server/utils/profileMetadata';
 import {
   applyImageResultsToText,
   buildImageStates,
@@ -40,6 +41,7 @@ export async function runOutfitImageGeneration(
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
   additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  portraitImageUrl?: string,
   signal?: AbortSignal
 ): Promise<void> {
   const imageId = outfit.id;
@@ -62,6 +64,7 @@ export async function runOutfitImageGeneration(
         userProfile,
         anchorImageUrl,
         additionalPurchaseRefs,
+        portraitImageUrl,
         signal,
       }
     );
@@ -81,7 +84,8 @@ export async function runOutfitImageGeneration(
 export function createImageRetryStream(
   conversationId: string,
   messageId: string,
-  retryOutfitId: string
+  retryOutfitId: string,
+  clientId?: string
 ): ReadableStream {
   const trace = new RequestTrace({
     kind: RequestAuditKind.ImageRetry,
@@ -130,6 +134,12 @@ export function createImageRetryStream(
         ragItemCount = ragCache.size;
 
         const imageStartedAt = Date.now();
+        let portraitImageUrl: string | undefined;
+        if (clientId) {
+          const client = await prismadb.clientProfile.findUnique({ where: { id: clientId } });
+          const dbProfile = (client?.profileData as Record<string, unknown>) || {};
+          portraitImageUrl = readFullBodyImageUrl(dbProfile, clientId);
+        }
         await runOutfitImageGeneration(
           outfit,
           extractSelectedItemUrls(outfit, ragCache),
@@ -143,6 +153,7 @@ export function createImageRetryStream(
           null,
           stylistCache.stylist_result.anchor_image_url,
           undefined,
+          portraitImageUrl,
           abortController.signal
         );
         trace.markStage('imageGen', Date.now() - imageStartedAt);

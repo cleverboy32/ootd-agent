@@ -53,7 +53,9 @@ export const AGENT_MODELS = {
   userProfile: chatModel('LLM_MODEL_USER_PROFILE', VERTEX_DEFAULTS.userProfile),
   summarization: chatModel('LLM_MODEL_SUMMARIZATION', VERTEX_DEFAULTS.summarization),
   reasoning: chatModel('LLM_MODEL_REASONING', VERTEX_DEFAULTS.reasoning),
-  wardrobeAnalysis: chatModel('LLM_MODEL_WARDROBE_ANALYSIS', VERTEX_DEFAULTS.wardrobeAnalysis),
+  wardrobeAnalysis: useVertexChat
+    ? chatModel('LLM_MODEL_WARDROBE_ANALYSIS', VERTEX_DEFAULTS.wardrobeAnalysis)
+    : process.env.LLM_MODEL_WARDROBE_ANALYSIS?.trim() || openaiVisionChat,
 } as const;
 
 /** 视觉导演画图最大并发数 */

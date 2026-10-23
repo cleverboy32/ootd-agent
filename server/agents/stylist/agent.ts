@@ -60,6 +60,7 @@ export async function callStylistAdvice(
 - 风格偏好: ${profile.preferences.join(', ') || '未提供'}
 - 肤色: ${profile.skin_tone || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
+- 适合的风格: ${profile.suited_style || '未判断'}
 - 可靠外形数据: ${hasVisualProfile ? '有（可做个性化建议）' : '无'}
 
 【用户咨询主题】
@@ -124,7 +125,7 @@ function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
 
 export { selectStylistSkillNames };
 
-async function planWardrobeSearchQueries(
+export async function planWardrobeSearchQueries(
   history: Content[],
   intent: GatekeeperIntent,
   profile: UserProfileResult,
@@ -136,7 +137,7 @@ async function planWardrobeSearchQueries(
 
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchorItem;
   const isRevision = intent.request_type === 'feedback_revision';
-  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage));
+  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage, profile));
   const pairingBlock = isPairing
     ? `
 【锚定单品】
@@ -166,7 +167,8 @@ ${REVISION_SEARCH_ADDENDUM}
             : ''
         }`
       : `- 若用户要「一套」穿搭：按槽位检索（上装 + 下装 + 鞋，视天气加外套），不要混搭裤装与连衣裙路线。
-- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。`;
+- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。
+- 特殊要求是为某个季节买衣服或准备衣橱、且没有今天的天气时：用户点名冬季外套，才检索厚外套、大衣、棉服、羽绒服，不要搜薄外套或防晒。已有风格技能时，品类按技能，不要改成厚外套。`;
 
   const prompt = `
 【今日用户时尚档案】
@@ -174,6 +176,7 @@ ${REVISION_SEARCH_ADDENDUM}
 - 肤色: ${profile.skin_tone || '未分析'}
 - 身材: ${profile.body_shape || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
+- 适合的风格: ${profile.suited_style || '未判断'}（用户这轮没点名风格时，按这个风格来搭）
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}
@@ -313,7 +316,7 @@ export async function callStylistAgent(
   let ragIndexMap = new Map<string, string>();
   let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
   const userMessage = extractUserMessage(initialParts);
-  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage));
+  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage, profile));
   if (clientId && ragCache) {
     try {
       console.log(
@@ -393,8 +396,8 @@ ${JSON.stringify(previousOutfit, null, 2)}
 - 肤色属性: ${profile.skin_tone || '未分析'}
 - 身材属性: ${profile.body_shape || '未分析'}
 - 个人风格定位: ${profile.personal_style || '未分析'}
-- 视觉特征: 发色为 ${profile.visual_features.hair_color}，其他特征: ${profile.visual_features.detected_features}
-- 可靠外形数据: ${hasVisualProfile ? '有（可结合肤色身材绘图）' : '无（禁止编造模特外形）'}
+- 适合的风格: ${profile.suited_style || '未判断'}（用户这轮没点名风格时，按这个风格来搭）
+- 可靠外形数据: ${hasVisualProfile ? '有（肤色和身形用于选色和版型；适合的风格用于没点名风格时的造型。禁止把外形写进画面描述，禁止改人物外形）' : '无（禁止编造模特外形）'}
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}

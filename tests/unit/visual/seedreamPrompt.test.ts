@@ -56,9 +56,36 @@ describe('buildModelSubjectDescription', () => {
     assert.match(desc, /165cm/);
     assert.match(desc, /深棕色/);
   });
+
+  it('skips the generic subject when a full-body reference is present', () => {
+    process.env.IMAGE_MODEL_SUBJECT = '固定模特';
+    assert.equal(buildModelSubjectDescription(null, { hasPersonReference: true }), '');
+  });
 });
 
 describe('buildSeedreamImagePrompt', () => {
+  it('keeps the person photo off the garment list', () => {
+    const prompt = buildSeedreamImagePrompt(
+      outfit,
+      undefined,
+      [
+        '人物参考（只取脸、发型、肤色和身体比例，禁止穿这张照片里的衣服）',
+        'Mini Dress (dress) | mint',
+      ],
+      null
+    );
+    assert.match(prompt, /五官、脸型、眼睛、鼻子、嘴唇、发型和身体比例都跟图1/);
+    assert.match(prompt, /禁止换脸/);
+    assert.match(prompt, /轻度整理皮肤/);
+    assert.match(prompt, /保留毛孔/);
+    assert.match(prompt, /禁止拉腿/);
+    assert.match(prompt, /脸是图1本人/);
+    assert.match(prompt, /禁止复制图1里的服装/);
+    assert.match(prompt, /穿齐图2至图2/);
+    assert.doesNotMatch(prompt, /中国年轻女性/);
+    assert.doesNotMatch(prompt, /穿齐图1/);
+  });
+
   it('uses Chinese realism keywords and 图N references', () => {
     const prompt = buildSeedreamImagePrompt(
       outfit,
@@ -69,8 +96,13 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /真实街拍/);
     assert.match(prompt, /东亚|中国/);
     assert.match(prompt, /图1/);
+    assert.match(prompt, /中国年轻女性/);
     assert.doesNotMatch(prompt, /Fashion editorial/i);
-    assert.match(prompt, /避免过度磨皮|塑料感/);
+    assert.match(prompt, /磨皮|塑料/);
+    assert.doesNotMatch(prompt, /85mm/);
+    assert.match(prompt, /禁止浅景深/);
+    assert.match(prompt, /起毛与罗纹/);
+    assert.match(prompt, /禁止自行加渐变水洗/);
   });
 
   it('emphasizes full-outfit look when accessories are present', () => {
@@ -96,7 +128,13 @@ describe('buildSeedreamImagePrompt', () => {
     const layered: StylistOutfit = {
       ...outfit,
       selected_items: [
-        { id: 'new_item', name: '修身奶油色短袖T恤', layer: 'inner_top', reason: '内搭新品' },
+        {
+          id: 'new_item',
+          name: '修身奶油色短袖T恤',
+          layer: 'inner_top',
+          reason: '内搭新品',
+          description: '奶油色棉质短袖T恤，圆领，短袖到上臂，衣身修身。',
+        },
         { id: 'ow', name: '黑色机车皮衣', layer: 'outerwear', reason: '外套' },
         { id: 'bt', name: '格纹半裙', layer: 'bottom', reason: '下装' },
       ],
@@ -116,7 +154,7 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /leather jacket worn open/);
     assert.match(prompt, /穿搭构成/);
     assert.match(prompt, /无参考图单品/);
-    assert.match(prompt, /修身奶油色短袖T恤/);
+    assert.match(prompt, /修身奶油色短袖T恤\(inner_top\)：奶油色棉质短袖T恤，圆领，短袖到上臂，衣身修身。/);
     assert.match(prompt, /叠穿层次/);
     assert.match(prompt, /敞开或半敞/);
   });
@@ -190,5 +228,92 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /Ski Gloves, Beanie & Goggles\(accessory\)/);
     assert.match(prompt, /下装必须是长滑雪裤/);
     assert.match(prompt, /禁止用参考图的品类或颜色替代/);
+  });
+
+  it('专用款式写成禁令，斗篷和系带外层不强制敞开', () => {
+    const hanfu: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '杏色立领对襟短袄',
+          layer: 'inner_top',
+          reason: '内搭',
+          description: '杏色棉，立领，对襟系带，直袖，衣长至腰下。',
+        },
+        {
+          id: 'new_item',
+          name: '浅驼色马面裙',
+          layer: 'bottom',
+          reason: '下装',
+          description: '浅驼色毛呢，高腰，前后裙门，两侧褶，裙长至脚踝。',
+        },
+        {
+          id: 'new_item',
+          name: '浅灰蓝斗篷',
+          layer: 'outerwear',
+          reason: '外披',
+          description: '浅灰蓝羊毛，无领，前开系带，无袖，长度至臀部。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '无领斗篷披在短袄外，马面裙到脚踝。',
+        background: '石板路',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(hanfu, undefined, [], null);
+    assert.match(prompt, /前后是平的裙门，褶只在两侧/);
+    assert.match(prompt, /禁止画成开衩直筒裙/);
+    assert.match(prompt, /禁止加帽子，禁止画成连帽长披风/);
+    assert.doesNotMatch(prompt, /敞开或半敞/);
+
+    const tied: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '米白衬衫', layer: 'inner_top', reason: '内搭', description: '米白衬衫。' },
+        {
+          id: 'new_item',
+          name: '浅驼盘扣外套',
+          layer: 'outerwear',
+          reason: '外套',
+          description: '浅驼毛呢，盘扣门襟，衣长至髋。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '盘扣外套配衬衫。',
+        background: '街道',
+      },
+    };
+    const tiedPrompt = buildSeedreamImagePrompt(tied, undefined, [], null);
+    assert.doesNotMatch(tiedPrompt, /敞开或半敞/);
+
+    const bijia = buildSeedreamImagePrompt(
+      {
+        ...outfit,
+        selected_items: [
+          { id: 'new_item', name: '豆沙粉短袄', layer: 'inner_top', reason: '内搭', description: '交领短袄。' },
+          {
+            id: 'new_item',
+            name: '浅驼比甲',
+            layer: 'outerwear',
+            reason: '外层',
+            description: '无袖对襟，衣长至膝盖上方。',
+          },
+        ],
+        visual_composition: {
+          model_pose: '站立',
+          outfit_details: '比甲罩在短袄外。',
+          background: '庭院',
+        },
+      },
+      undefined,
+      [],
+      null
+    );
+    assert.match(bijia, /禁止画成拖到脚踝的长马甲/);
+    assert.doesNotMatch(bijia, /敞开或半敞/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /斗篷、比甲、系带和盘扣的外层按描述的门襟/);
   });
 });

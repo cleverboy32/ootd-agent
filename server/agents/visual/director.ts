@@ -27,6 +27,7 @@ export async function callVisualDirectorAgent(
     userProfile?: UserProfileResult | null;
     anchorImageUrl?: string;
     additionalPurchaseRefs?: Array<{ url: string; label: string }>;
+    portraitImageUrl?: string;
     signal?: AbortSignal;
   }
 ): Promise<void> {
@@ -47,6 +48,7 @@ export async function callVisualDirectorAgent(
     options?.userProfile,
     options?.anchorImageUrl,
     options?.additionalPurchaseRefs,
+    options?.portraitImageUrl,
     options?.signal
   );
 

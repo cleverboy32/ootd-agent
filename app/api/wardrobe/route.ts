@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import prismadb from 'server/db';
-import { llmGenerate } from '@/server/services/llm/client';
-import { extractJsonText } from '@/server/services/llm/convert';
 import { AGENT_MODELS } from '@/server/config/models';
-import { urlToGenerativePart } from '@/server/utils/image';
+import {
+  analyzeWardrobeImage,
+  wardrobeAnalysisUpdateData,
+} from '@/server/services/analyzeWardrobeItem';
 import {
   clothingItemHasTextEmbedding,
   clothingItemHasVisualEmbedding,
@@ -12,14 +13,8 @@ import {
   persistTextEmbedding,
   persistVisualEmbedding,
 } from '@/server/services/wardrobeService';
-import { is429Error, withRetryOn429 } from '@/server/utils/retryOn429';
+import { is429Error } from '@/server/utils/retryOn429';
 import { toUserFacingUploadError } from '@/lib/upload-errors';
-import {
-  normalizeWardrobeAnalysis,
-  WARDROBE_ANALYSIS_JSON_SCHEMA,
-  WARDROBE_ANALYSIS_PROMPT,
-  type WardrobeAnalysisResult,
-} from '@/server/utils/wardrobeAnalysis';
 
 export async function GET(req: Request) {
   try {
@@ -113,61 +108,24 @@ export async function POST(req: Request) {
     timer.mark('lookup_existing');
 
     if (!item) {
-      const imagePart = await urlToGenerativePart(imageUrl);
-      timer.mark('fetch_image');
-
       console.log('[API /api/wardrobe] Calling LLM for analysis...', {
         model: AGENT_MODELS.wardrobeAnalysis,
       });
-      const result = await withRetryOn429(
-        () =>
-          llmGenerate({
-            model: AGENT_MODELS.wardrobeAnalysis,
-            contents: [{ role: 'user', parts: [imagePart, { text: WARDROBE_ANALYSIS_PROMPT }] }],
-            jsonSchema: WARDROBE_ANALYSIS_JSON_SCHEMA,
-          }),
-        { label: 'Wardrobe analysis', maxRetries: 4 }
-      );
-      timer.mark('llm_analysis');
-
-      const responseText = result.text;
-      console.log(`[API /api/wardrobe] LLM response received: ${responseText}`);
-
-      if (!responseText) {
-        return failStep(timer, steps, 'analysis', 'AI 分析没有返回内容，请重试', 502);
-      }
-
-      let parsed: WardrobeAnalysisResult;
+      let analysis;
       try {
-        parsed = JSON.parse(extractJsonText(responseText));
-      } catch {
-        console.error('[API /api/wardrobe] Failed to parse JSON from AI response:', responseText);
+        analysis = await analyzeWardrobeImage(imageUrl);
+      } catch (error) {
+        console.error('[API /api/wardrobe] Analysis failed:', error);
         return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
       }
-
-      const analysis = normalizeWardrobeAnalysis(parsed);
-      if (!analysis) {
-        console.error('[API /api/wardrobe] Invalid analysis payload:', parsed);
-        return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
-      }
-      timer.mark('parse_and_validate');
+      timer.mark('llm_analysis');
 
       console.log('[API /api/wardrobe] Storing new clothing item to database...');
       item = await prismadb.clothingItem.create({
         data: {
           clientProfileId: clientId,
           imageUrl,
-          mainCategory: analysis.mainCategory,
-          subCategory: analysis.subCategory,
-          season: analysis.season,
-          material: analysis.material,
-          colors: analysis.colors,
-          tags: analysis.tags,
-          description: analysis.description,
-          searchDescription: analysis.searchDescription,
-          occasions: analysis.occasions,
-          formality: analysis.formality,
-          silhouette: analysis.silhouette,
+          ...wardrobeAnalysisUpdateData(analysis),
         },
       });
       steps.analysis = 'done';

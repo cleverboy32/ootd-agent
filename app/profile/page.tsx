@@ -20,6 +20,12 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (loading || !profile) return;
+    if (window.location.hash !== '#visual-analysis') return;
+    document.getElementById('visual-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [loading, profile]);
+
+  useEffect(() => {
     fetchProfile()
       .then((data) => {
         setProfile(data);

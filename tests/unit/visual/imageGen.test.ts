@@ -68,6 +68,26 @@ describe('buildOutfitReferenceInputs', () => {
     );
   });
 
+  it('puts a full-body photo first and drops the last clothing ref at the cap', () => {
+    const urls = Array.from({ length: 14 }, (_, i) => `https://example.com/item-${i}.jpg`);
+    const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
+      outfit,
+      urls,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'https://example.com/full-body.jpg'
+    );
+
+    assert.equal(referenceUrls.length, 14);
+    assert.equal(referenceUrls[0], 'https://example.com/full-body.jpg');
+    assert.match(referenceLabels[0], /^人物参考/);
+    assert.doesNotMatch(referenceLabels[0], /White Linen Shirt/);
+    assert.equal(referenceUrls[1], 'https://example.com/item-0.jpg');
+    assert.equal(referenceUrls.at(-1), 'https://example.com/item-12.jpg');
+  });
+
   it('中间单品无图被上游丢弃时，后续参考图标签不错位', () => {
     const threePiece: StylistOutfit = {
       ...outfit,

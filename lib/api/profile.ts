@@ -1,5 +1,6 @@
 import { getClientId } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
+import { fetchSession } from '@/lib/api/auth';
 import { normalizeVisualFeaturesForZh } from '@/lib/hairColorDisplay';
 
 export interface ProfileData {
@@ -16,6 +17,7 @@ export interface ProfileData {
     detected_features: string;
   };
   visual_profile_verified?: boolean;
+  full_body_verified?: boolean;
   selfie_image_url?: string;
   selfie_analyzed_at?: string;
 }
@@ -54,15 +56,24 @@ function normalizeProfileData(raw: Partial<ProfileData> | undefined): ProfileDat
       detected_features: raw.visual_features?.detected_features ?? 'none',
     }),
     visual_profile_verified: raw.visual_profile_verified,
+    full_body_verified: raw.full_body_verified,
     selfie_image_url: raw.selfie_image_url,
     selfie_analyzed_at: raw.selfie_analyzed_at,
   };
 }
 
+/** 浏览器按完整 URL 缓存。路径里的 owner id 对所有账号相同，用户 id 放在查询参数里分开缓存。服务端不读这个参数，身份仍以 session 为准。 */
+export function profileRequestPath(ownerClientId: string, userId: string | null): string {
+  const base = `/api/clients/${ownerClientId}`;
+  if (!userId) return base;
+  return `${base}?u=${encodeURIComponent(userId)}`;
+}
+
 /** 档案 GET：走 getCached（服务端需 Cache-Control）；写后 bust:true */
 export async function fetchProfile(options?: { bust?: boolean }): Promise<ProfileData> {
-  const clientId = getClientId();
-  const res = (await apiClient.getCached(`/api/clients/${clientId}`, {
+  const session = await fetchSession().catch(() => null);
+  const userId = session?.authenticated && session.user ? session.user.id : null;
+  const res = (await apiClient.getCached(profileRequestPath(getClientId(), userId), {
     bust: options?.bust,
   })) as ClientProfileResponse;
   return normalizeProfileData(res.profileData);

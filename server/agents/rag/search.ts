@@ -8,8 +8,10 @@ import {
 } from '@/server/utils/ragSearchSlots';
 import {
   applySeasonFilter,
+  applyTemperatureFilter,
   buildSeasonFilterContext,
   expandedSearchLimit,
+  parseTemperatureCelsius,
 } from '@/server/utils/ragSeasonFilter';
 import {
   buildSlotMatchAssessments,
@@ -147,7 +149,14 @@ export async function performRagSearch(
           slot: parsedSlot,
           intent: logContext?.intent,
         });
-        const seasonFiltered = applySeasonFilter(rawResults, seasonContext, parsedSlot, resultLimit);
+        const temperature = parseTemperatureCelsius(logContext?.intent?.weather?.trim() ?? '');
+        const temperatureFiltered = applyTemperatureFilter(rawResults, temperature);
+        const seasonFiltered = applySeasonFilter(
+          temperatureFiltered,
+          seasonContext,
+          parsedSlot,
+          resultLimit
+        );
         const searchResults = filterResultsForAthleticContext(seasonFiltered, parsedSlot, athletic);
         return {
           query,
@@ -231,6 +240,8 @@ export async function performRagSearch(
       formality: null,
       silhouette: [],
       embedding: null,
+      tempMin: result.tempMin ?? null,
+      tempMax: result.tempMax ?? null,
       createdAt: new Date(),
       updatedAt: new Date(),
     }));

@@ -25,7 +25,8 @@ const COLD_MAX_CELSIUS = 12;
 
 const STRICT_COLD_ACTIVITY_HINT = /滑雪|滑雪服|雪场|雪地|skiing|snowboard|snow sports/i;
 
-const HEAVY_WINTER_SUBCATEGORY = /puffer|down jacket|down coat|parka|padded boot|quilted.*jacket/i;
+const HEAVY_WINTER_SUBCATEGORY =
+  /puffer|down jacket|down coat|parka|padded boot|quilted.*jacket|羽绒|棉服|派克/i;
 
 function normalizeSeason(value: string): ClothingSeason | null {
   const s = value.trim().toLowerCase();
@@ -379,6 +380,30 @@ export function applySeasonFilter(
   }
 
   return results.slice(0, limit);
+}
+
+/**
+ * 当天温度落在区间外则丢掉。两个边界都空的旧单品保留。
+ * 温度解析不到时不过滤。
+ */
+export function applyTemperatureFilter<T extends { tempMin?: number | null; tempMax?: number | null }>(
+  results: T[],
+  temperatureCelsius: number | null
+): T[] {
+  if (temperatureCelsius === null) return results;
+  return results.filter((item) => itemFitsTemperature(item, temperatureCelsius));
+}
+
+export function itemFitsTemperature(
+  item: { tempMin?: number | null; tempMax?: number | null },
+  temperatureCelsius: number
+): boolean {
+  const tempMin = item.tempMin ?? null;
+  const tempMax = item.tempMax ?? null;
+  if (tempMin === null && tempMax === null) return true;
+  if (tempMin !== null && temperatureCelsius < tempMin) return false;
+  if (tempMax !== null && temperatureCelsius > tempMax) return false;
+  return true;
 }
 
 export function expandedSearchLimit(_context: SeasonFilterContext, defaultLimit: number): number {

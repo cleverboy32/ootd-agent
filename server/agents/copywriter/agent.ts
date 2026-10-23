@@ -97,13 +97,20 @@ export async function callCopywriterAgentStream(
   onData: (text: string) => void,
   auditMeta?: CopywriterAuditMeta,
   intent?: GatekeeperIntent,
-  revisionNoItemChange?: boolean
+  revisionNoItemChange?: boolean,
+  userMessage?: string
 ): Promise<string> {
   console.log('[COPYWRITER_AGENT] Starting streaming copywriting...');
 
   const tagContext = buildCopywriterTagContext(stylistResult);
   const streamSanitizer = createCopywriterStreamSanitizer(tagContext);
-  const { prompt, systemInstruction } = buildCopywriterPrompt(stylistResult, personalStyle, intent, revisionNoItemChange);
+  const { prompt, systemInstruction } = buildCopywriterPrompt(
+    stylistResult,
+    personalStyle,
+    intent,
+    revisionNoItemChange,
+    userMessage
+  );
 
   try {
     const responseStream = await withRetryOn429(

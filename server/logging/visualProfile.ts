@@ -11,6 +11,7 @@ export interface VisualProfileAuditLogEntry {
   result?: {
     skin_tone: string;
     body_shape: string;
+    suited_style?: string;
     hair_color: string;
   };
 }

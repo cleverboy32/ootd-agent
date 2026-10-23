@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import {
   applySeasonFilter,
+  applyTemperatureFilter,
   applyWeatherToDressingClimate,
   buildSeasonFilterContext,
   computeDressingClimate,
@@ -399,5 +400,25 @@ describe('applySeasonFilter', () => {
     ];
     const filtered = applySeasonFilter(results, skiCtx, 'bottom', 5);
     assert.deepEqual(filtered, []);
+  });
+});
+
+describe('applyTemperatureFilter', () => {
+  it('19℃ 丢掉 tempMax ≤ 12 的羽绒服，保留没有区间的旧单品', () => {
+    const results = [
+      item({ id: 'puffer', subCategory: 'Puffer Jacket', tempMin: null, tempMax: 12 }),
+      item({ id: 'legacy', subCategory: 'Puffer Jacket' }),
+      item({ id: 'light', subCategory: 'Windbreaker', tempMin: 13, tempMax: 21 }),
+    ];
+    const filtered = applyTemperatureFilter(results, 19);
+    assert.deepEqual(
+      filtered.map((entry) => entry.id),
+      ['legacy', 'light']
+    );
+  });
+
+  it('解析不到温度时不过滤', () => {
+    const results = [item({ id: 'puffer', subCategory: 'Puffer Jacket', tempMax: 12 })];
+    assert.equal(applyTemperatureFilter(results, null).length, 1);
   });
 });

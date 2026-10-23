@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
         return new Response(JSON.stringify({ error: 'Message not found' }), { status: 404 });
       }
       console.log(`[API_ROUTE] Image retry: message=${messageId} outfit=${retryOutfitId}`);
-      const stream = createImageRetryStream(conversationId, messageId, retryOutfitId);
+      const stream = createImageRetryStream(conversationId, messageId, retryOutfitId, clientId);
       return new Response(stream, { headers: SSE_HEADERS });
     }
 

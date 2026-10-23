@@ -7,7 +7,15 @@ import type { ClothingItem } from '@prisma/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+function formatWearingTemperature(tempMin: number | null, tempMax: number | null): string | null {
+  if (tempMin != null && tempMax != null) return `${tempMin}–${tempMax}℃`;
+  if (tempMin != null) return `${tempMin}℃以上`;
+  if (tempMax != null) return `${tempMax}℃以下`;
+  return null;
+}
 
 interface WardrobeGridProps {
   items: ClothingItem[];
@@ -55,6 +63,7 @@ export function WardrobeGrid({
   }
 
   return (
+    <TooltipProvider>
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 mt-6">
       {items.map((item) => {
         const isSelected = selectedIds.has(item.id);
@@ -99,15 +108,28 @@ export function WardrobeGrid({
                 </Button>
               ) : null}
 
-              <Image
-                src={item.imageUrl}
-                alt={item.description || item.subCategory || 'Clothing item'}
-                fill
-                sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                className="object-cover"
-                priority={false}
-                unoptimized
-              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="absolute inset-0 z-0" aria-label={item.subCategory}>
+                    <Image
+                      src={item.imageUrl}
+                      alt={item.description || item.subCategory || 'Clothing item'}
+                      fill
+                      sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                      className="object-cover"
+                      priority={false}
+                      unoptimized
+                    />
+                  </button>
+                </TooltipTrigger>
+                {item.description || item.tempMin != null || item.tempMax != null ? (
+                  <TooltipContent className="max-w-xs whitespace-normal">
+                    {[item.description, formatWearingTemperature(item.tempMin, item.tempMax)]
+                      .filter(Boolean)
+                      .join(' ')}
+                  </TooltipContent>
+                ) : null}
+              </Tooltip>
 
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 pb-2 pt-6">
                 <p className="truncate text-xs text-white">{item.subCategory}</p>
@@ -117,5 +139,6 @@ export function WardrobeGrid({
         );
       })}
     </div>
+    </TooltipProvider>
   );
 }

@@ -8,6 +8,8 @@ export interface UserProfileResult {
   skin_tone: string;
   body_shape: string;
   personal_style: string;
+  /** 照片判断的适合风格；对话模型不写这个字段 */
+  suited_style?: string;
   visual_features: {
     hair_color: string;
     detected_features: string;

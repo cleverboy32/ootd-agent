@@ -16,6 +16,7 @@ import {
   buildSeedreamImagePrompt,
   listTextOnlyItems,
   outfitNeedsOpenLayering,
+  PERSON_REFERENCE_LABEL,
   SEEDREAM_SYSTEM_INSTRUCTION,
 } from './seedreamPrompt';
 
@@ -55,7 +56,8 @@ export function buildOutfitReferenceInputs(
   anchorImageData: AnchorItemImageData | undefined,
   ragCache?: Map<string, ClothingItem>,
   anchorImageUrl?: string,
-  additionalPurchaseRefs?: Array<{ url: string; label: string }>
+  additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  portraitImageUrl?: string
 ): { referenceUrls: string[]; referenceLabels: string[] } {
   const referenceUrls: string[] = [];
   const referenceLabels: string[] = [];
@@ -111,6 +113,21 @@ export function buildOutfitReferenceInputs(
     referenceLabels.push(parts.join(' | ') || `wardrobe item ${idx + 1}`);
   });
 
+  const portraitUrl = portraitImageUrl?.trim();
+  if (portraitUrl) {
+    const existing = referenceUrls.indexOf(portraitUrl);
+    if (existing >= 0) {
+      referenceUrls.splice(existing, 1);
+      referenceLabels.splice(existing, 1);
+    }
+    referenceUrls.unshift(portraitUrl);
+    referenceLabels.unshift(PERSON_REFERENCE_LABEL);
+    while (referenceUrls.length > SEEDREAM_MAX_REFERENCE_IMAGES) {
+      referenceUrls.pop();
+      referenceLabels.pop();
+    }
+  }
+
   return { referenceUrls, referenceLabels };
 }
 
@@ -125,6 +142,7 @@ export function buildImagePrompt(
     const cached = ragCache?.get(i.id);
     const parts: string[] = [`${i.name} (${i.layer})`];
     if (i.id === 'new_item') parts.push('NEW / purchase item — must be clearly visible');
+    if (i.id === 'new_item' && i.description?.trim()) parts.push(i.description.trim());
     if (cached?.description) parts.push(cached.description);
     if (cached?.tags?.length) parts.push(cached.tags.join(', '));
     return `  - ${parts.join(' | ')}`;
@@ -217,6 +235,7 @@ async function generateWithSeedream(
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
   additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  portraitImageUrl?: string,
   signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
   throwIfAborted(signal);
@@ -226,7 +245,8 @@ async function generateWithSeedream(
     anchorImageData,
     ragCache,
     anchorImageUrl,
-    additionalPurchaseRefs
+    additionalPurchaseRefs,
+    portraitImageUrl
   );
   const prompt = buildSeedreamImagePrompt(outfit, ragCache, referenceLabels, userProfile);
   const fullPrompt = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
@@ -257,6 +277,7 @@ export async function attemptGenerateOutfitImage(
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
   additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  portraitImageUrl?: string,
   signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
   throwIfAborted(signal);
@@ -270,6 +291,7 @@ export async function attemptGenerateOutfitImage(
       userProfile,
       anchorImageUrl,
       additionalPurchaseRefs,
+      portraitImageUrl,
       signal
     );
   }
@@ -278,12 +300,23 @@ export async function attemptGenerateOutfitImage(
   let useFallback = false;
   let mode: 'multimodal' | 'text-only' = 'text-only';
   const extraUrls = (additionalPurchaseRefs ?? []).map((r) => r.url.trim()).filter(Boolean);
-  const hasAnchor = Boolean(anchorImageData?.data || anchorImageUrl?.trim() || extraUrls.length);
+  const portraitUrl = portraitImageUrl?.trim();
+  const hasAnchor = Boolean(
+    anchorImageData?.data || anchorImageUrl?.trim() || extraUrls.length || portraitUrl
+  );
 
   try {
     if (wardrobeImageUrls.length > 0 || hasAnchor) {
       mode = 'multimodal';
       const multiModalParts: Part[] = [];
+      if (portraitUrl) {
+        try {
+          multiModalParts.push(await urlToGenerativePart(portraitUrl));
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(`[VISUAL_DIRECTOR] Failed to convert portrait URL, skipping: ${portraitUrl} (${message})`);
+        }
+      }
       if (anchorImageData?.data) {
         multiModalParts.push({
           inlineData: { data: anchorImageData.data, mimeType: anchorImageData.mimeType },
@@ -368,6 +401,7 @@ export async function generateOutfitImage(
   userProfile?: UserProfileResult | null,
   anchorImageUrl?: string,
   additionalPurchaseRefs?: Array<{ url: string; label: string }>,
+  portraitImageUrl?: string,
   signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string }> {
   return retry(
@@ -383,6 +417,7 @@ export async function generateOutfitImage(
           userProfile,
           anchorImageUrl,
           additionalPurchaseRefs,
+          portraitImageUrl,
           signal
         );
         void logImageGenAudit({

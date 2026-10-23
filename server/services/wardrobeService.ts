@@ -43,6 +43,9 @@ export type WardrobeSearchResult = {
   material: string[];
   tags: string[];
   similarity: number;
+  /** 合适穿着温度下限。两个字段都空表示旧单品，检索时不过滤 */
+  tempMin?: number | null;
+  tempMax?: number | null;
 };
 
 export async function searchWardrobeItemsByText(
@@ -95,6 +98,8 @@ export async function searchWardrobeItemsByText(
             "season",
             "material",
             "tags",
+            "tempMin",
+            "tempMax",
             1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"
@@ -117,6 +122,8 @@ export async function searchWardrobeItemsByText(
             "season",
             "material",
             "tags",
+            "tempMin",
+            "tempMax",
             1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
           FROM
             "ClothingItem"

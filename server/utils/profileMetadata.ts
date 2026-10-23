@@ -1,12 +1,15 @@
 import type { UserProfileResult } from '@/server/agents/user-profile';
+import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
 import { buildCosObjectKey, getCosPublicUrl } from '@/server/services/cos';
 
 export const PROFILE_METADATA_KEYS = [
   'visual_profile_verified',
+  'full_body_verified',
   'selfie_image_url',
   'selfie_analyzed_at',
   'location',
+  'suited_style',
 ] as const;
 
 /**
@@ -68,11 +71,23 @@ export function isClientOwnedUploadUrl(imageUrl: string, clientId: string): bool
   }
 }
 
+/** 仅已通过全身照校验、且 URL 属于该用户时，才把照片交给出图。 */
+export function readFullBodyImageUrl(
+  dbProfile: Record<string, unknown>,
+  clientId: string
+): string | undefined {
+  if (dbProfile.full_body_verified !== true) return undefined;
+  const url = typeof dbProfile.selfie_image_url === 'string' ? dbProfile.selfie_image_url.trim() : '';
+  if (!url || !isClientOwnedUploadUrl(url, clientId)) return undefined;
+  return url;
+}
+
 export function mergeVisualAnalysisIntoProfile(
   existingProfile: Record<string, unknown>,
   visualResult: {
     skin_tone: string;
     body_shape: string;
+    suited_style?: string;
     visual_features: { hair_color: string; detected_features: string };
   },
   imageUrl: string
@@ -81,8 +96,10 @@ export function mergeVisualAnalysisIntoProfile(
     ...existingProfile,
     skin_tone: visualResult.skin_tone,
     body_shape: visualResult.body_shape,
+    suited_style: canonicalSuitedStyle(visualResult.suited_style),
     visual_features: visualResult.visual_features,
     visual_profile_verified: true,
+    full_body_verified: true,
     selfie_image_url: imageUrl,
     selfie_analyzed_at: new Date().toISOString(),
   };

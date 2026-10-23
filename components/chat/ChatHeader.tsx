@@ -5,17 +5,34 @@ import Link from 'next/link';
 import { Heart, LogOut, Shirt, UserCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchSession, logout } from '@/lib/api/auth';
+import { fetchProfile } from '@/lib/api/profile';
+import { useAccess } from '@/components/access/AccessProvider';
 import { withBasePath } from '@/lib/utils';
 
 export function ChatHeader() {
+  const { canInvokeAI } = useAccess();
   const [authenticated, setAuthenticated] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [needsFullBody, setNeedsFullBody] = useState(false);
 
   useEffect(() => {
     fetchSession()
       .then((state) => setAuthenticated(Boolean(state.authenticated && state.user)))
       .catch(() => setAuthenticated(false));
   }, []);
+
+  useEffect(() => {
+    if (!canInvokeAI) return;
+    let active = true;
+    fetchProfile()
+      .then((profile) => {
+        if (active) setNeedsFullBody(profile.full_body_verified !== true);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [canInvokeAI]);
 
   async function onLogout() {
     setLoggingOut(true);
@@ -42,12 +59,18 @@ export function ChatHeader() {
         <div className="relative group">
           <Button
             variant="ghost"
-            className="flex items-center gap-2"
+            className={`relative flex items-center gap-2 ${needsFullBody ? 'pr-4' : ''}`}
             aria-haspopup="menu"
-            aria-label="我的"
+            aria-label={needsFullBody ? '我的，有一条新提示' : '我的'}
           >
             <UserCircle className="h-5 w-5" />
             <span className="hidden sm:inline">我的</span>
+            {needsFullBody && (
+              <span
+                className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-red-500"
+                aria-hidden
+              />
+            )}
           </Button>
 
           <div
@@ -63,14 +86,27 @@ export function ChatHeader() {
                 <Heart className="h-4 w-4 text-muted-foreground" />
                 我的搭配
               </Link>
-              <Link
-                href="/profile"
-                role="menuitem"
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
-              >
-                <UserCircle className="h-4 w-4 text-muted-foreground" />
-                我的档案
-              </Link>
+              <div className="relative">
+                <Link
+                  href="/profile#visual-analysis"
+                  role="menuitem"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+                >
+                  <UserCircle className="h-4 w-4 text-muted-foreground" />
+                  我的档案
+                </Link>
+                {needsFullBody && (
+                  <div className="pointer-events-none absolute right-full top-1/2 z-10 mr-2 w-max max-w-52 -translate-y-1/2">
+                    <div className="relative rounded-2xl rounded-br-sm bg-foreground px-3 py-2 text-xs leading-relaxed text-background shadow-md">
+                      去上传一张站立、至少拍到膝盖的照片，效果图里的人会更像你
+                      <span
+                        className="absolute top-1/2 -right-1 size-2 -translate-y-1/2 rotate-45 bg-foreground"
+                        aria-hidden
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
               <Link
                 href="/settings/security"
                 role="menuitem"
