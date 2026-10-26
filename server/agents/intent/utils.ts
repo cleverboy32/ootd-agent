@@ -1,4 +1,5 @@
 import { Content, Part } from '@google/genai';
+import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import { enrichWeather } from '@/server/services/amapWeatherService';
 import {
   AnchorItemImageData,
@@ -54,18 +55,20 @@ export const ACCESSORY_ANCHOR_PATTERN =
 
 const CASUAL_OCCASION_PATTERN = /平时|日常|百搭|通勤|上班|都可以穿|随便穿/i;
 
+const OUTFIT_4_IN_TEXT =
+  /第四套|方案四|方案\s*4|outfit[_\s-]?4|第\s*4\s*套|^四套$|^4\s*套$|^四$|^4[.、)）]?$/i;
+const OUTFIT_3_IN_TEXT =
+  /第三套|方案三|方案\s*3|outfit[_\s-]?3|第\s*3\s*套|^三套$|^3\s*套$|^三$|^3[.、)）]?$/i;
 const OUTFIT_2_IN_TEXT =
   /第二套|二套|^二$|方案二|方案\s*2|outfit[_\s-]?2|第\s*2\s*套|(?<!\d)2\s*套|^2[.、)）]?$/i;
 const OUTFIT_1_IN_TEXT =
   /第一套|^一$|方案一|方案\s*1|outfit[_\s-]?1|第\s*1\s*套|(?<!\d)1\s*套|^1[.、)）]?$/i;
-const MULTIPLE_OUTFITS_IN_TEXT =
-  /方案二|第二套|二套|outfit_2|第\s*2\s*套|两套方案|两套穿搭|准备了\s*2\s*套|两套/;
 
 const ANCHOR_SLOT_SET = new Set<string>(['top', 'bottom', 'dress', 'shoes', 'outerwear', 'accessory']);
 const DRESSING_CLIMATE_SET = new Set<string>(['cold', 'warm', 'mild']);
 
 const REVISION_TARGET_PATTERN =
-  /第一套|第二套|二套|^[一二]$|这套|那套|上一套|刚才那套|上面那套|方案一|方案二|outfit_[12]|第\s*[12]\s*套|(?<!\d)[12]\s*套|^[12][.、)）]?$/i;
+  /第[一二三四1-4]\s*套|二套|^[一二三四]$|这套|那套|上一套|刚才那套|上面那套|方案[一二三四]|方案\s*[1-4]|outfit_[1-4]|第\s*[1-4]\s*套|(?<!\d)[1-4]\s*套|^[1-4][.、)）]?$/i;
 const REVISION_ACTION_PATTERN =
   /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
 const FULL_REGEN_PATTERN =
@@ -146,14 +149,28 @@ export function collectLatestImageData(
 
 // ─── Outfit selection helpers ──────────────────────────────────────────────────
 
-export function outfitIdToLabel(outfitId?: string): string {
-  return outfitId === 'outfit_2' ? '第二套' : '第一套';
+const OUTFIT_LABELS = ['', '第一套', '第二套', '第三套', '第四套'] as const;
+
+export function outfitIndexFromId(outfitId?: string): number {
+  const match = /^outfit_([1-4])$/.exec(outfitId?.trim() ?? '');
+  return match ? Number(match[1]) : 0;
 }
 
-/** 从单条用户消息中提取明确选套信号 */
-export function extractOutfitIdFromText(text: string): 'outfit_1' | 'outfit_2' | '' {
+export function isOutfitId(outfitId?: string): boolean {
+  return outfitIndexFromId(outfitId) > 0;
+}
+
+export function outfitIdToLabel(outfitId?: string): string {
+  const index = outfitIndexFromId(outfitId);
+  return OUTFIT_LABELS[index] ?? '第一套';
+}
+
+/** 从单条用户消息中提取明确选套信号。数字大的优先，避免「第四套」被更短的模式截走。 */
+export function extractOutfitIdFromText(text: string): string {
   const normalized = text.trim();
   if (!normalized) return '';
+  if (OUTFIT_4_IN_TEXT.test(normalized)) return 'outfit_4';
+  if (OUTFIT_3_IN_TEXT.test(normalized)) return 'outfit_3';
   if (OUTFIT_2_IN_TEXT.test(normalized)) return 'outfit_2';
   if (OUTFIT_1_IN_TEXT.test(normalized)) return 'outfit_1';
   return '';
@@ -163,20 +180,58 @@ export function userMentionedOutfitIdInText(text: string): boolean {
   return extractOutfitIdFromText(text) !== '';
 }
 
-/** 历史助手回复中是否出现过多套方案 */
-export function historyShowsMultipleOutfits(history: Content[]): boolean {
-  return MULTIPLE_OUTFITS_IN_TEXT.test(extractAssistantTextFromHistory(history));
+const SCHEME_INDEX: Record<string, number> = {
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  '1': 1,
+  '2': 2,
+  '3': 3,
+  '4': 4,
+};
+
+/** 从一条助手回复里取出真正展示过的方案 id。追问句里的「第一套还是第二套」不算展示。 */
+export function outfitIdsInAssistantText(text: string): string[] {
+  const ids: string[] = [];
+  const add = (index: number) => {
+    if (index < 1 || index > 4) return;
+    const id = `outfit_${index}`;
+    if (!ids.includes(id)) ids.push(id);
+  };
+
+  for (const match of text.matchAll(/\{\{IMG:outfit_([1-4])\}\}|\[IMAGE=outfit_([1-4])\]/g)) {
+    add(Number(match[1] || match[2]));
+  }
+  for (const match of text.matchAll(/方案\s*([一二三四1-4])/g)) {
+    add(SCHEME_INDEX[match[1]] ?? 0);
+  }
+  return ids;
 }
 
-/** 从用户历史消息（新→旧）推断已选方案 */
-export function inferSelectedOutfitIdFromHistory(history: Content[]): 'outfit_1' | 'outfit_2' | '' {
-  const userMessages = history
-    .filter((msg) => msg.role === 'user')
-    .map((msg) => extractTextFromParts(msg.parts ?? []))
-    .filter(Boolean);
+function latestPresentationIndex(history: Content[]): number {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role !== 'model') continue;
+    const text = extractTextFromParts(history[i].parts ?? []);
+    if (outfitIdsInAssistantText(text).length > 0) return i;
+  }
+  return -1;
+}
 
-  for (let i = userMessages.length - 1; i >= 0; i--) {
-    const id = extractOutfitIdFromText(userMessages[i]);
+/** 上一轮真正展示方案的那条助手回复里的 id。更早轮次里的方案不算。 */
+export function latestPresentedOutfitIds(history: Content[]): string[] {
+  const index = latestPresentationIndex(history);
+  if (index < 0) return [];
+  return outfitIdsInAssistantText(extractTextFromParts(history[index].parts ?? []));
+}
+
+/** 从最近一次展示之后的用户消息（新→旧）推断已选方案 */
+export function inferSelectedOutfitIdFromHistory(history: Content[]): string {
+  const start = latestPresentationIndex(history);
+  if (start < 0) return '';
+  for (let i = history.length - 1; i > start; i--) {
+    if (history[i].role !== 'user') continue;
+    const id = extractOutfitIdFromText(extractTextFromParts(history[i].parts ?? []));
     if (id) return id;
   }
   return '';
@@ -631,7 +686,25 @@ export function normalizeGatekeeperIntent(
   if (!merged.city?.trim()) merged.city_role = '';
   if (typeof merged.session_item_id !== 'string') merged.session_item_id = '';
   if (typeof merged.anchor_image_url !== 'string') merged.anchor_image_url = '';
+  merged.purchase_items = normalizePurchaseItems(merged.purchase_items);
   return merged;
+}
+
+function normalizePurchaseItems(value: unknown): GatekeeperIntent['purchase_items'] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 4)
+    .map((item) => {
+      const record = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+      const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
+      return {
+        session_item_id: typeof record.session_item_id === 'string' ? record.session_item_id.trim() : '',
+        summary,
+        slot: parseAnchorSlot(typeof record.slot === 'string' ? record.slot : ''),
+        imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl.trim() : undefined,
+      };
+    })
+    .filter((item) => item.summary || item.session_item_id || item.imageUrl);
 }
 
 export interface SessionItemBindingInput {
@@ -689,6 +762,70 @@ export function resolveSessionItemBinding(
   return normalized;
 }
 
+/**
+ * 本轮上传了多件时，按图片顺序全部绑成待购锚点。单件仍走 resolveSessionItemBinding。
+ */
+export function bindPurchaseUploads(
+  intent: GatekeeperIntent,
+  sessionItems: SessionItemBindingInput[],
+  imageUrls: string[]
+): GatekeeperIntent {
+  const urls = takePurchaseUploadUrls(imageUrls);
+  if (urls.length < 2) return intent;
+  if (intent.request_type !== 'purchase_pairing') return intent;
+
+  const described = intent.purchase_items ?? [];
+  const purchase_items = urls.map((url, index) => {
+    const item = described[index];
+    const session = sessionItems.find((entry) => entry.imageUrl === url);
+    const summary =
+      item?.summary?.trim() ||
+      (index === 0 ? intent.anchor_item_summary.trim() : '') ||
+      '用户上传的待购单品';
+    const slot =
+      item?.slot ||
+      (index === 0 ? intent.anchor_slot : '') ||
+      inferAnchorSlotFromSummary(summary);
+    return {
+      session_item_id: item?.session_item_id?.trim() || session?.id || '',
+      summary,
+      slot,
+      imageUrl: url,
+    };
+  });
+  const first = purchase_items[0];
+  return {
+    ...intent,
+    request_type: 'purchase_pairing',
+    purchase_items,
+    anchor_item_summary: first.summary,
+    anchor_slot: first.slot,
+    session_item_id: first.session_item_id,
+    anchor_image_url: first.imageUrl ?? intent.anchor_image_url,
+    special_requests:
+      intent.special_requests.trim() ||
+      buildPurchasePairingSpecialRequest(purchase_items.map((item) => item.summary).join('、')),
+  };
+}
+
+/** 待购搭配要带上的全部上传单品。没有多件清单时退回单锚点。 */
+export function listPurchaseAnchors(intent: GatekeeperIntent): AnchorItemInfo[] {
+  const listed = (intent.purchase_items ?? [])
+    .filter((item) => item.summary.trim())
+    .map((item) => {
+      const slot = item.slot || inferAnchorSlotFromSummary(item.summary);
+      return {
+        name: item.summary.split(/[，,]/)[0]?.trim() || item.summary,
+        summary: item.summary,
+        slot: slot || 'top',
+        imageUrl: item.imageUrl,
+      };
+    });
+  if (listed.length > 0) return listed;
+  const single = getAnchorItemFromIntent(intent);
+  return single ? [single] : [];
+}
+
 export function enrichIntentFromContext(
   intent: GatekeeperIntent,
   history: Content[],
@@ -696,10 +833,17 @@ export function enrichIntentFromContext(
   options?: {
     sessionItems?: SessionItemBindingInput[];
     currentImageUrl?: string;
+    currentImageUrls?: string[];
   }
 ): GatekeeperIntent {
   const contextText = `${extractUserTextFromHistory(history)}\n${extractTextFromParts(currentInput)}`.trim();
   let normalized = normalizeGatekeeperIntent(intent);
+  const currentImageUrls = takePurchaseUploadUrls(
+    options?.currentImageUrls ?? (options?.currentImageUrl ? [options.currentImageUrl] : [])
+  );
+  if (currentImageUrls.length > 1 && normalized.request_type === 'wardrobe_outfit') {
+    normalized.request_type = 'purchase_pairing';
+  }
 
   const currentText = extractTextFromParts(currentInput);
   const confirmedWardrobeId = extractConfirmedWardrobeId(currentText);
@@ -737,7 +881,12 @@ export function enrichIntentFromContext(
     normalized = resolveSessionItemBinding(
       normalized,
       options?.sessionItems ?? [],
-      options?.currentImageUrl
+      options?.currentImageUrl ?? currentImageUrls[0]
+    );
+    normalized = bindPurchaseUploads(
+      normalized,
+      options?.sessionItems ?? [],
+      currentImageUrls
     );
     // 本轮仍有 inlineData 时保留，供非 Seedream 路径；URL 优先写在 anchor_image_url
     const latest = collectLatestImageData(history, currentInput);

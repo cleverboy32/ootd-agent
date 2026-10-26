@@ -125,11 +125,22 @@ async function executeParallelAgents(
     IMAGE_GEN_CONCURRENCY,
     (outfit) => {
       throwIfAborted(runtime.abortSignal);
-      const additionalPurchaseRefs = buildAdditionalPurchaseImageRefs(
-        outfit,
-        state.sessionItems ?? [],
-        stylistResult.anchor_image_url
-      );
+      const primaryUrl = stylistResult.anchor_image_url?.trim() || '';
+      const uploadedRefs = (stylistResult.purchase_image_urls ?? [])
+        .map((url) => url.trim())
+        .filter((url) => url && url !== primaryUrl)
+        .map((url, index) => ({
+          url,
+          label: `purchase upload ${index + 2}`,
+        }));
+      const additionalPurchaseRefs = [
+        ...uploadedRefs,
+        ...buildAdditionalPurchaseImageRefs(
+          outfit,
+          state.sessionItems ?? [],
+          stylistResult.anchor_image_url
+        ),
+      ].filter((ref, index, all) => all.findIndex((item) => item.url === ref.url) === index);
       if (additionalPurchaseRefs.length > 0) {
         console.log(
           `[ORCHESTRATOR:LANGGRAPH] ${outfit.id} extra purchase refs:`,
@@ -210,6 +221,7 @@ export async function gatekeeperNode(
     clientId: runtime.clientId,
     sessionItems: state.sessionItems,
     currentImageUrl: runtime.currentImageUrl,
+    currentImageUrls: runtime.currentImageUrls,
   };
 
   const gatekeeperStartedAt = Date.now();

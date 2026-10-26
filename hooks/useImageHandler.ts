@@ -1,88 +1,95 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { uploadFileToCOS } from '@/lib/utils';
+import { MAX_PURCHASE_UPLOADS } from '@/lib/purchaseUploads';
+
+const MAX_FILE_SIZE_MB = 5;
+
+export interface ChatUpload {
+  id: string;
+  previewUrl: string;
+  uploadedUrl: string | null;
+}
 
 export const useImageHandler = () => {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploads, setUploads] = useState<ChatUpload[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null); // 存储上传后的 URL
 
-  // 当用户选择新文件时触发
+  const isUploading = uploads.some((item) => !item.uploadedUrl);
+  const uploadedImageUrls = useMemo(
+    () => uploads.flatMap((item) => (item.uploadedUrl ? [item.uploadedUrl] : [])),
+    [uploads]
+  );
+
+  const removeUpload = useCallback((id: string) => {
+    setUploads((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.id !== id);
+    });
+  }, []);
+
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    // 重置所有旧状态
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
     setUploadError(null);
-    setUploadedImageUrl(null);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-
-    const file = e.target.files?.[0];
-
-    if (file) {
-      // 文件大小验证
-      const MAX_FILE_SIZE_MB = 5;
-      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        setUploadError(`图片大小不能超过 ${MAX_FILE_SIZE_MB}MB。`);
-        setSelectedFile(null);
-        setPreviewUrl(null);
-        return;
+    setUploads((current) => {
+      const room = MAX_PURCHASE_UPLOADS - current.length;
+      if (room <= 0) {
+        setUploadError(`一次最多上传 ${MAX_PURCHASE_UPLOADS} 件单品。`);
+        return current;
       }
-
-      // 设置新文件和预览
-      setSelectedFile(file);
-      const objectUrl = URL.createObjectURL(file);
-      setPreviewUrl(objectUrl);
-    } else {
-      setSelectedFile(null);
-      setPreviewUrl(null);
-    }
-  }, [previewUrl]);
-
-  // [核心逻辑] 使用 useEffect 监听 selectedFile 的变化，自动开始上传
-  useEffect(() => {
-    // 定义一个异步函数来执行上传
-    const performUpload = async () => {
-      if (!selectedFile) return;
-
-      setIsUploading(true);
-      setUploadError(null);
-      
-      try {
-        const imageUrl = await uploadFileToCOS(selectedFile);
-        setUploadedImageUrl(imageUrl);
-      } catch (e) {
-        const error = e as Error;
-        console.error('Upload failed in useEffect:', error);
-        setUploadError(error.message || '上传失败，请重新选择图片。');
-        // 上传失败时，清除选择，让用户可以重试
-        setSelectedFile(null);
-        setPreviewUrl(null);
-      } finally {
-        setIsUploading(false);
+      const accepted = files.slice(0, room);
+      if (files.length > room) {
+        setUploadError(`一次最多上传 ${MAX_PURCHASE_UPLOADS} 件单品。`);
       }
-    };
+      const next = [...current];
+      for (const file of accepted) {
+        if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+          setUploadError(`图片大小不能超过 ${MAX_FILE_SIZE_MB}MB。`);
+          continue;
+        }
+        const id = crypto.randomUUID();
+        const previewUrl = URL.createObjectURL(file);
+        next.push({ id, previewUrl, uploadedUrl: null });
+        void uploadFileToCOS(file)
+          .then((uploadedUrl) => {
+            setUploads((latest) =>
+              latest.map((item) => (item.id === id ? { ...item, uploadedUrl } : item))
+            );
+          })
+          .catch((error: Error) => {
+            console.error('Upload failed:', error);
+            setUploadError(error.message || '上传失败，请重新选择图片。');
+            setUploads((latest) => {
+              const failed = latest.find((item) => item.id === id);
+              if (failed) URL.revokeObjectURL(failed.previewUrl);
+              return latest.filter((item) => item.id !== id);
+            });
+          });
+      }
+      return next;
+    });
+  }, []);
 
-    performUpload();
-
-    // 清理函数，在组件卸载或 selectedFile 变化时运行
-    // 这里我们不需要特别的清理，因为上传是异步的
-  }, [selectedFile]);
-
-  // 重置所有状态的函数
   const resetImageState = useCallback(() => {
-    setSelectedFile(null);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+    setUploads((current) => {
+      for (const item of current) URL.revokeObjectURL(item.previewUrl);
+      return [];
+    });
     setUploadError(null);
-    setIsUploading(false);
-    setUploadedImageUrl(null);
-  }, [previewUrl]);
+  }, []);
 
   return {
-    previewUrl,
+    uploads,
     uploadError,
     isUploading,
-    uploadedImageUrl, // 导出上传后的 URL
+    uploadedImageUrls,
+    previewUrl: uploads[0]?.previewUrl ?? null,
+    uploadedImageUrl: uploadedImageUrls[0] ?? null,
     handleFileSelect,
+    removeUpload,
     resetImageState,
   };
 };

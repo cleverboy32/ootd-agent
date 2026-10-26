@@ -7,7 +7,7 @@ import {
   resolveAnchorUrlFromSessionItems,
   buildAdditionalPurchaseImageRefs,
 } from '@/server/utils/sessionItems';
-import { resolveSessionItemBinding } from '@/server/agents/intent/utils';
+import { bindPurchaseUploads, resolveSessionItemBinding } from '@/server/agents/intent/utils';
 import type { GatekeeperIntent } from '@/server/agents/intent';
 import type { Message } from '@/server/types/message';
 
@@ -48,6 +48,21 @@ describe('extractSessionItemsFromMessages', () => {
     assert.match(items[0].hintText, /裤子/);
     assert.equal(items[1].id, 'si_2');
     assert.equal(items[1].imageUrl, 'https://cdn.example/top.jpg');
+  });
+
+  it('keeps every image on the same user message', () => {
+    const items = extractSessionItemsFromMessages([
+      userMsg('m1', [
+        { type: 'text', content: '这两件一起搭' },
+        { type: 'image', content: 'https://cdn.example/shirt.jpg' },
+        { type: 'image', content: 'https://cdn.example/pants.jpg' },
+      ]),
+    ]);
+    assert.equal(items.length, 2);
+    assert.equal(items[0].id, 'si_1');
+    assert.equal(items[1].id, 'si_2');
+    assert.equal(items[1].imageUrl, 'https://cdn.example/pants.jpg');
+    assert.match(items[1].hintText, /一起搭/);
   });
 
   it('supports legacy imageUrl field', () => {
@@ -174,5 +189,51 @@ describe('resolveSessionItemBinding', () => {
   it('defaults to sole item when only one', () => {
     const bound = resolveSessionItemBinding(baseIntent({}), [items[0]]);
     assert.equal(bound.session_item_id, 'si_1');
+  });
+});
+
+describe('bindPurchaseUploads', () => {
+  it('keeps both uploads from the same turn and leaves a single upload alone', () => {
+    const single = bindPurchaseUploads(
+      {
+        weather: '',
+        occasion: '日常百搭',
+        style_preference: '日常休闲',
+        special_requests: '',
+        request_type: 'purchase_pairing',
+        anchor_item_summary: '白衬衫',
+        anchor_slot: 'top',
+        dressing_climate: '',
+      },
+      [{ id: 'si_1', imageUrl: 'https://cdn.example/shirt.jpg' }],
+      ['https://cdn.example/shirt.jpg']
+    );
+    assert.equal(single.purchase_items, undefined);
+
+    const both = bindPurchaseUploads(
+      {
+        weather: '',
+        occasion: '日常百搭',
+        style_preference: '日常休闲',
+        special_requests: '',
+        request_type: 'purchase_pairing',
+        anchor_item_summary: '白衬衫',
+        anchor_slot: 'top',
+        dressing_climate: '',
+        purchase_items: [
+          { session_item_id: 'si_1', summary: '白衬衫', slot: 'top' },
+          { session_item_id: 'si_2', summary: '黑裤子', slot: 'bottom' },
+        ],
+      },
+      [
+        { id: 'si_1', imageUrl: 'https://cdn.example/shirt.jpg' },
+        { id: 'si_2', imageUrl: 'https://cdn.example/pants.jpg' },
+      ],
+      ['https://cdn.example/shirt.jpg', 'https://cdn.example/pants.jpg']
+    );
+    assert.equal(both.purchase_items?.length, 2);
+    assert.equal(both.anchor_image_url, 'https://cdn.example/shirt.jpg');
+    assert.equal(both.purchase_items?.[1].imageUrl, 'https://cdn.example/pants.jpg');
+    assert.equal(both.purchase_items?.[1].slot, 'bottom');
   });
 });

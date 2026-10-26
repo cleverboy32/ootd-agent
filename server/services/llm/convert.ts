@@ -33,6 +33,8 @@ export function googleSchemaToJsonSchema(schema: Schema): JsonSchema {
   if (jsonType === 'array' && schema.items) {
     result.items = googleSchemaToJsonSchema(schema.items as Schema);
   }
+  if (schema.minItems != null && schema.minItems !== '') result.minItems = Number(schema.minItems);
+  if (schema.maxItems != null && schema.maxItems !== '') result.maxItems = Number(schema.maxItems);
 
   return result;
 }

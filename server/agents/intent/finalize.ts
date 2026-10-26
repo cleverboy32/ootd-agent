@@ -12,7 +12,8 @@ import {
   outfitIdToLabel,
   extractOutfitIdFromText,
   inferSelectedOutfitIdFromHistory,
-  historyShowsMultipleOutfits,
+  isOutfitId,
+  latestPresentedOutfitIds,
   isPurchasePairingAnchorReady,
   isWardrobePairingAnchorReady,
   isWardrobeBrowseIntent,
@@ -28,8 +29,15 @@ export function buildOutfitConfirmedGatekeeperReply(outfitLabel: string): string
   return `太好了！${outfitLabel}就定下来啦～祝您穿出好心情，有需要随时再来找我～`;
 }
 
-export function buildFeedbackRevisionOutfitClarifyReply(): string {
-  return '好的～上一轮给您准备了多套方案，请问您想微调第一套还是第二套？';
+export function buildFeedbackRevisionOutfitClarifyReply(
+  outfitIds: string[] = ['outfit_1', 'outfit_2']
+): string {
+  const labels = (outfitIds.length > 0 ? outfitIds : ['outfit_1', 'outfit_2']).map((id) =>
+    outfitIdToLabel(id)
+  );
+  const head = labels.slice(0, -1).join('、');
+  const tail = labels[labels.length - 1];
+  return `好的～上一轮给您准备了多套方案，请问您想微调${head}还是${tail}？`;
 }
 
 export function buildWardrobeAmbiguousReply(): string {
@@ -152,19 +160,23 @@ const handleOutfitSelection: RequestTypeHandler = ({ intent, modelReply, modelFo
 const handleFeedbackRevision: RequestTypeHandler = (ctx) => {
   let intent = { ...ctx.intent, session_item_id: '' };
   const currentText = ctx.currentMessageText?.trim() ?? '';
-  const llmSelected =
-    intent.selected_outfit_id === 'outfit_1' || intent.selected_outfit_id === 'outfit_2'
-      ? intent.selected_outfit_id
-      : '';
-  // 选套优先级：本轮原文 > 历史用户选套 > LLM（仅当 special_requests 能印证，防幻觉默认 outfit_1）
-  const corroboratedLlmSelected =
-    llmSelected && extractOutfitIdFromText(intent.special_requests) === llmSelected
-      ? llmSelected
-      : '';
-  const resolvedOutfitId =
-    extractOutfitIdFromText(currentText) ||
-    (ctx.history ? inferSelectedOutfitIdFromHistory(ctx.history) : '') ||
-    corroboratedLlmSelected;
+  const presented = ctx.history ? latestPresentedOutfitIds(ctx.history) : [];
+  const shown = (id: string) => presented.length === 0 || presented.includes(id);
+  const fromCurrent = extractOutfitIdFromText(currentText);
+  const fromLaterUser = ctx.history ? inferSelectedOutfitIdFromHistory(ctx.history) : '';
+  const fromModel = isOutfitId(intent.selected_outfit_id) ? intent.selected_outfit_id : '';
+
+  // 上一轮只出了一套时直接改那一套。多套时：本轮原话 > 展示之后用户点过的套 > Gatekeeper 填的 id。
+  let resolvedOutfitId = '';
+  if (presented.length === 1) {
+    resolvedOutfitId = presented[0];
+  } else if (fromCurrent && shown(fromCurrent)) {
+    resolvedOutfitId = fromCurrent;
+  } else if (fromLaterUser && shown(fromLaterUser)) {
+    resolvedOutfitId = fromLaterUser;
+  } else if (fromModel && shown(fromModel)) {
+    resolvedOutfitId = fromModel;
+  }
 
   if (resolvedOutfitId) {
     intent = { ...intent, selected_outfit_id: resolvedOutfitId };
@@ -172,15 +184,13 @@ const handleFeedbackRevision: RequestTypeHandler = (ctx) => {
   }
 
   intent = { ...intent, selected_outfit_id: '' };
-  const multipleOutfits = ctx.history ? historyShowsMultipleOutfits(ctx.history) : false;
-
-  if (multipleOutfits) {
+  if (presented.length > 1) {
     console.log('[GATEKEEPER] feedback_revision — 多套方案且未选套，追问用户');
     return {
       is_complete: false,
       extracted_intent: intent,
       followup_questions: [],
-      gatekeeper_reply: ctx.modelReply || buildFeedbackRevisionOutfitClarifyReply(),
+      gatekeeper_reply: ctx.modelReply || buildFeedbackRevisionOutfitClarifyReply(presented),
     };
   }
 

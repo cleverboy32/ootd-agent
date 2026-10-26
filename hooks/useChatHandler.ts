@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { useChatStore } from '@/store/chat';
 import { streamResponse } from '@/lib/utils';
 import { extractUserMessageMedia } from '@/lib/messageMedia';
+import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import { Message, MessageContentPart } from '@/lib/types';
 import { useAccess } from '@/components/access/AccessProvider';
 
@@ -19,7 +20,7 @@ export const useChatHandler = () => {
 
   const handleSend = useCallback(async (
     promptOrMessage: string | Message,
-    imageUrl?: string | null
+    imageUrl?: string | string[] | null
   ) => {
     if (!canInvokeAI) return;
 
@@ -45,7 +46,8 @@ export const useChatHandler = () => {
     } else {
       // 这是新消息
       const prompt = promptOrMessage;
-      if (!prompt.trim() && !imageUrl) {
+      const imageUrls = takePurchaseUploadUrls(Array.isArray(imageUrl) ? imageUrl : [imageUrl]);
+      if (!prompt.trim() && imageUrls.length === 0) {
           setWaitReply(false);
           return;
       };
@@ -54,8 +56,8 @@ export const useChatHandler = () => {
       if (prompt.trim()) {
         userMessageContent.push({ type: 'text', content: prompt });
       }
-      if (imageUrl) {
-        userMessageContent.push({ type: 'image', content: imageUrl });
+      for (const url of imageUrls) {
+        userMessageContent.push({ type: 'image', content: url });
       }
 
       // 注意：现在创建用户消息也需要 id 和 status
@@ -65,7 +67,7 @@ export const useChatHandler = () => {
         role: 'user',
         content: userMessageContent,
         timestamp: Date.now(),
-        imageUrl: imageUrl || undefined,
+        imageUrl: imageUrls[0],
       };
 
       if (!conversationId) {
@@ -245,41 +247,43 @@ export const useChatHandler = () => {
     const payload: {
       conversationId: string;
       messageId?: string;
-      content?: { text: string; imageUrl?: string; };
+      content?: { text: string; imageUrl?: string; imageUrls?: string[] };
     } = { conversationId };
     
-    // 我们需要用户的原始输入，无论是新消息还是重试
     let textPrompt = '';
-    let imageForPayload = imageUrl;
+    let imageUrlsForPayload = takePurchaseUploadUrls(
+      Array.isArray(imageUrl) ? imageUrl : [imageUrl]
+    );
 
     if (messageToRetry) {
       payload.messageId = messageToRetry.id;
-      // 对于重试，我们需要找到触发这次AI回应的原始用户消息
       const messages = useChatStore.getState().messages;
       const retryMsgIndex = messages.findIndex(m => m.id === messageToRetry?.id);
-      // 假设用户消息就在AI消息之前
       const originalUserMessage = messages[retryMsgIndex - 1]; 
 
       if (originalUserMessage && originalUserMessage.role === 'user') {
           const media = extractUserMessageMedia(originalUserMessage);
           textPrompt = media.text;
-          imageForPayload = media.imageUrl;
+          imageUrlsForPayload = media.imageUrls;
       } else {
         console.warn("Could not reliably find original user prompt for retry.");
       }
     } else {
-      // 对于新消息，用户消息就是最后一条
       const lastMessage = useChatStore.getState().messages.at(-1);
       if (lastMessage && lastMessage.role === 'user') {
         const media = extractUserMessageMedia(lastMessage);
         textPrompt = media.text;
-        if (!imageForPayload && media.imageUrl) {
-          imageForPayload = media.imageUrl;
+        if (imageUrlsForPayload.length === 0) {
+          imageUrlsForPayload = media.imageUrls;
         }
       }
     }
 
-    payload.content = { text: textPrompt, imageUrl: imageForPayload || undefined }  ;
+    payload.content = {
+      text: textPrompt,
+      imageUrl: imageUrlsForPayload[0],
+      imageUrls: imageUrlsForPayload,
+    };
     await streamResponse(payload as Parameters<typeof streamResponse>[0], handlers);
 
   }, [
@@ -303,7 +307,7 @@ export const useChatHandler = () => {
       messages.map(m => m.id === failedUserMsg.id ? { ...m, sendFailed: false } : m)
     );
 
-    const { text: textPrompt, imageUrl } = extractUserMessageMedia(failedUserMsg);
+    const { text: textPrompt, imageUrl, imageUrls } = extractUserMessageMedia(failedUserMsg);
 
     setWaitReply(true);
 
@@ -382,7 +386,7 @@ export const useChatHandler = () => {
     };
 
     await streamResponse(
-      { conversationId, content: { text: textPrompt, imageUrl } } as Parameters<typeof streamResponse>[0],
+      { conversationId, content: { text: textPrompt, imageUrl, imageUrls } } as Parameters<typeof streamResponse>[0],
       handlers,
     );
   }, [activeConversationId, canInvokeAI, persistNewConversation, updateMessages, setWaitReply]);

@@ -73,7 +73,7 @@ export const gatekeeperSchema: Schema = {
         selected_outfit_id: {
           type: Type.STRING,
           description:
-            'outfit_selection / outfit_confirmed 时填用户选中的 outfit_1 或 outfit_2。feedback_revision 时【仅当用户本轮或历史中明确说了第一套/第二套/outfit_1/outfit_2】才填写；若用户只说修改内容（如「去掉外套」）而未选套，必须填空字符串，由系统追问。其他类型填空字符串。',
+            '用户选中的方案 id，只能是 outfit_1 到 outfit_4，且必须是上一轮实际展示过的。上一轮只有一套，或用户在改「这套」时，填那一套的 id。上一轮有多套且用户说了第几套，填对应 id。多套又没指明哪一套时，填空字符串。其他类型填空字符串。',
         },
         anchor_wardrobe_id: {
           type: Type.STRING,
@@ -83,7 +83,31 @@ export const gatekeeperSchema: Schema = {
         session_item_id: {
           type: Type.STRING,
           description:
-            'purchase_pairing：填写【会话待购单品】清单中的 id（如 si_1）。用户指代历史某张上传图时选对应 id；本轮新上传且未指代旧图时选清单最后一项。feedback_revision 必须填空字符串。其他类型填空字符串。',
+            'purchase_pairing：单件上传时填写【会话待购单品】清单中的 id。多件上传时填写 purchase_items 第一件的 id。feedback_revision 必须填空字符串。其他类型填空字符串。',
+        },
+        purchase_items: {
+          type: Type.ARRAY,
+          description:
+            '本轮要一起搭配的上传单品，按图片顺序，最多 4 件。每张图一条。没有多张图时填空数组。',
+          maxItems: '4',
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              session_item_id: {
+                type: Type.STRING,
+                description: '该图在会话待购清单中的 id。对不上时填空字符串。',
+              },
+              summary: {
+                type: Type.STRING,
+                description: '这张图里的单品：颜色、品类和能看见的结构。',
+              },
+              slot: {
+                type: Type.STRING,
+                description: 'top | bottom | dress | shoes | outerwear | accessory。配饰必须是 accessory。',
+              },
+            },
+            required: ['session_item_id', 'summary', 'slot'],
+          },
         },
         anchor_item_summary: {
           type: Type.STRING,
@@ -120,6 +144,7 @@ export const gatekeeperSchema: Schema = {
         'selected_outfit_id',
         'anchor_wardrobe_id',
         'session_item_id',
+        'purchase_items',
         'dressing_climate',
       ],
     },

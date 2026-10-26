@@ -1,6 +1,31 @@
 import { Type, Schema } from '@google/genai';
 import type { AnchorItemImageData } from '../intent';
 
+export const MAX_OUTFIT_COUNT = 4;
+
+/** 最多保留 4 套。已是 outfit_1 到 outfit_4 的 id 保持不变，其余按空位补号。 */
+export function clampStylistOutfits<T extends { id: string }>(outfits: T[]): T[] {
+  const kept = outfits.slice(0, MAX_OUTFIT_COUNT);
+  const used = new Set<string>();
+  const nextFree = (): string => {
+    for (let n = 1; n <= MAX_OUTFIT_COUNT; n += 1) {
+      const id = `outfit_${n}`;
+      if (!used.has(id)) return id;
+    }
+    return `outfit_${MAX_OUTFIT_COUNT}`;
+  };
+  return kept.map((outfit) => {
+    const id = outfit.id?.trim() ?? '';
+    if (/^outfit_[1-4]$/.test(id) && !used.has(id)) {
+      used.add(id);
+      return outfit;
+    }
+    const assigned = nextFree();
+    used.add(assigned);
+    return { ...outfit, id: assigned };
+  });
+}
+
 export interface StylistOutfit {
   id: string;
   overall_concept: string;
@@ -24,6 +49,8 @@ export interface StylistResult {
   anchor_item_image_data?: AnchorItemImageData;
   /** 待购锚点 COS URL；跨轮微调优先继承此字段 */
   anchor_image_url?: string;
+  /** 本轮一起搭配的上传图，第一张与 anchor_image_url 相同 */
+  purchase_image_urls?: string[];
 }
 
 export interface StyleAdviceResult {
@@ -47,11 +74,14 @@ export const stylistSchema: Schema = {
   properties: {
     outfits: {
       type: Type.ARRAY,
-      description: '推荐的穿搭方案列表（包含 1 到 2 套方案）',
+      description:
+        '推荐的穿搭方案。用户要一套时只出 1 套。只有用户明确要多个选择时才出 2 到 4 套。不得超过 4 套。',
+      minItems: '1',
+      maxItems: '4',
       items: {
         type: Type.OBJECT,
         properties: {
-          id: { type: Type.STRING, description: '方案唯一标识，如 outfit_1, outfit_2' },
+          id: { type: Type.STRING, description: '方案 id，从 outfit_1 起连续编号，最多到 outfit_4。' },
           overall_concept: { type: Type.STRING, description: '整套穿搭的设计核心概念（如：粉色活力运动风，兼顾防风与排汗）' },
           selected_items: {
             type: Type.ARRAY,

@@ -1,6 +1,7 @@
 import { GoogleGenAI, Modality, type Part, type Schema } from '@google/genai';
 import { throwIfAborted } from '@/server/utils/abort';
 import { normalizeContents } from './convert';
+import { recordChatUsage, recordEmbeddingUsage, recordImageUsage } from '@/server/logging/modelUsage';
 import type { LlmGenerateOptions, LlmGenerateResult } from './types';
 
 let cached: GoogleGenAI | null = null;
@@ -34,6 +35,7 @@ export async function vertexGenerate(options: LlmGenerateOptions): Promise<LlmGe
     },
   });
   const text = response.text ?? '';
+  await recordChatUsage(options.model, response.usageMetadata);
   return { text };
 }
 
@@ -52,10 +54,16 @@ export async function vertexStream(
   });
 
   async function* iterate() {
-    for await (const chunk of stream) {
-      throwIfAborted(options.signal);
-      const text = chunk.text;
-      if (text) yield { text };
+    let usage: unknown;
+    try {
+      for await (const chunk of stream) {
+        throwIfAborted(options.signal);
+        if (chunk.usageMetadata) usage = chunk.usageMetadata;
+        const text = chunk.text;
+        if (text) yield { text };
+      }
+    } finally {
+      await recordChatUsage(options.model, usage);
     }
   }
 
@@ -84,6 +92,7 @@ export async function vertexGenerateImage(
   if (!data || !mimeType) {
     throw new Error('Image generation API did not return image data.');
   }
+  await recordImageUsage(model, response.usageMetadata, 1);
   return { data, mimeType };
 }
 
@@ -106,5 +115,7 @@ export async function vertexEmbed(
   if (!values?.length) {
     throw new Error('The AI service returned an empty embedding response.');
   }
+  const usage = (result as { usageMetadata?: unknown }).usageMetadata;
+  await recordEmbeddingUsage(model, usage);
   return values;
 }

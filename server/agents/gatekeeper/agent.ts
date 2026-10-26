@@ -34,6 +34,7 @@ export interface GatekeeperContext {
   clientId?: string;
   sessionItems?: SessionPurchaseItem[];
   currentImageUrl?: string;
+  currentImageUrls?: string[];
 }
 
 export interface GatekeeperAuditMeta {
@@ -75,6 +76,7 @@ async function finalizeGatekeeperIntent(
   let enriched = enrichIntentFromContext(intent, history, currentInput, {
     sessionItems: ctx.sessionItems,
     currentImageUrl: ctx.currentImageUrl,
+    currentImageUrls: ctx.currentImageUrls,
   });
 
   // 天气由 Gatekeeper LLM 决策（weather_lookup.needed）；服务端在此串行查询补全

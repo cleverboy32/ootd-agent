@@ -13,17 +13,22 @@ describe('googleSchemaToJsonSchema', () => {
       type: Type.OBJECT,
       properties: {
         approved: { type: Type.BOOLEAN, description: 'ok?' },
-        tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+        tags: { type: Type.ARRAY, items: { type: Type.STRING }, minItems: '1', maxItems: '4' },
       },
       required: ['approved'],
     });
 
     assert.equal(json.type, 'object');
     assert.deepEqual(json.required, ['approved']);
-    const properties = json.properties as Record<string, { type: string; items?: { type: string } }>;
+    const properties = json.properties as Record<
+      string,
+      { type: string; items?: { type: string }; minItems?: number; maxItems?: number }
+    >;
     assert.equal(properties.approved.type, 'boolean');
     assert.equal(properties.tags.type, 'array');
     assert.equal(properties.tags.items?.type, 'string');
+    assert.equal(properties.tags.minItems, 1);
+    assert.equal(properties.tags.maxItems, 4);
   });
 });
 

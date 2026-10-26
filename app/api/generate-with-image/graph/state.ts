@@ -21,6 +21,7 @@ export interface OutfitRuntime {
   clientIp?: string;
   /** 本轮请求的待购图 COS URL（与 initialParts inlineData 对应） */
   currentImageUrl?: string;
+  currentImageUrls?: string[];
   profileLocationPromise: Promise<string | undefined>;
   /** 请求级 audit 追踪（与 ReadableStream.cancel 共享同一实例） */
   trace: RequestTrace;

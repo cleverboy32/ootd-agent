@@ -11,6 +11,7 @@ import {
   RequestAuditRoute,
   RequestTrace,
 } from '@/server/logging/request';
+import { runWithRequestTrace } from '@/server/logging/usageContext';
 import { buildContext } from './context/buildContext';
 import {
   applyImageResultsToText,
@@ -37,6 +38,7 @@ export { createImageRetryStream } from './imageRetry';
 export interface MultiAgentStreamOptions {
   clientIp?: string;
   currentImageUrl?: string;
+  currentImageUrls?: string[];
 }
 
 function createRuntime(params: {
@@ -47,6 +49,7 @@ function createRuntime(params: {
   messageId?: string;
   clientIp?: string;
   currentImageUrl?: string;
+  currentImageUrls?: string[];
   profileLocationPromise: Promise<string | undefined>;
   trace: RequestTrace;
   abortSignal: AbortSignal;
@@ -81,6 +84,7 @@ function createRuntime(params: {
     conversationId: params.conversationId,
     clientIp: params.clientIp,
     currentImageUrl: params.currentImageUrl,
+    currentImageUrls: params.currentImageUrls,
     profileLocationPromise: params.profileLocationPromise,
     trace: params.trace,
     abortSignal: params.abortSignal,
@@ -147,6 +151,7 @@ export function createMultiAgentStream(
 
   return new ReadableStream({
     async start(controller) {
+      await runWithRequestTrace(trace, async () => {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
       logLangSmithStatusOnce();
 
@@ -159,6 +164,7 @@ export function createMultiAgentStream(
         messageId,
         clientIp: options.clientIp,
         currentImageUrl: options.currentImageUrl,
+        currentImageUrls: options.currentImageUrls,
         profileLocationPromise,
         trace,
         abortSignal: abortController.signal,
@@ -170,7 +176,7 @@ export function createMultiAgentStream(
         const { historyForAI, failedMessage, sessionItems } = await buildContext(
           conversationId,
           runtime.getMessageId(),
-          options.currentImageUrl
+          options.currentImageUrls ?? options.currentImageUrl
         );
 
         let cachedStylistResult: StylistResult | null = null;
@@ -330,6 +336,7 @@ export function createMultiAgentStream(
         resolveDone();
         unregisterInFlight(inFlightId);
       }
+      });
     },
     cancel(reason) {
       console.warn('[ORCHESTRATOR:LANGGRAPH] 流被客户端取消，原因:', reason);

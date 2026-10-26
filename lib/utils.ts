@@ -81,6 +81,7 @@ export const streamResponse = async (
     content?: {
       text?: string,
       imageUrl?: string,
+      imageUrls?: string[],
     },
     conversationId?: string | null;
     messageId?: string;

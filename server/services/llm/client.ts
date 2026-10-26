@@ -12,6 +12,7 @@ import { minimaxGenerateImage } from './minimax';
 import { bytedanceMultimodalEmbed, usesByteDanceMultimodalEmbedding } from './bytedance';
 import { isSeedreamImageVendor, seedreamGenerateImage } from './seedream';
 import { throwIfAborted } from '@/server/utils/abort';
+import { recordChatUsage, recordEmbeddingUsage, recordImageUsage } from '@/server/logging/modelUsage';
 import {
   vertexEmbed,
   vertexGenerate,
@@ -95,12 +96,14 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
       requestOptions
     );
     const text = completion.choices[0]?.message?.content ?? '';
+    await recordChatUsage(options.model, completion.usage);
     return { text: options.jsonSchema ? extractJsonText(text) : text };
   } catch (error) {
     if (!options.jsonSchema || !isResponseFormatCompatibilityError(error)) throw error;
     console.warn('[LLM] json_object response_format not supported, retrying without it');
     const completion = await client.chat.completions.create(base, requestOptions);
     const text = completion.choices[0]?.message?.content ?? '';
+    await recordChatUsage(options.model, completion.usage);
     return { text: extractJsonText(text) };
   }
 }
@@ -120,15 +123,22 @@ export async function llmStream(
       temperature: resolveChatTemperature(options.model, options.temperature),
       messages: buildMessages(options),
       stream: true,
+      stream_options: { include_usage: true },
     },
     options.signal ? { signal: options.signal } : undefined
   );
 
   async function* iterate() {
-    for await (const chunk of stream) {
-      throwIfAborted(options.signal);
-      const text = chunk.choices[0]?.delta?.content;
-      if (text) yield { text };
+    let usage: unknown;
+    try {
+      for await (const chunk of stream) {
+        throwIfAborted(options.signal);
+        if (chunk.usage) usage = chunk.usage;
+        const text = chunk.choices[0]?.delta?.content;
+        if (text) yield { text };
+      }
+    } finally {
+      await recordChatUsage(options.model, usage);
     }
   }
 
@@ -169,7 +179,10 @@ export async function llmGenerateImage(
       signal ? { signal } : undefined
     );
     const data = result.data?.[0]?.b64_json;
-    if (data) return { data, mimeType: 'image/png' };
+    if (data) {
+      await recordImageUsage(model, result.usage, 1);
+      return { data, mimeType: 'image/png' };
+    }
   } catch (error) {
     console.warn('[LLM] images.generate with b64_json failed, retrying without response_format', error);
   }
@@ -179,7 +192,10 @@ export async function llmGenerateImage(
     signal ? { signal } : undefined
   );
   const data = result.data?.[0]?.b64_json;
-  if (data) return { data, mimeType: 'image/png' };
+  if (data) {
+    await recordImageUsage(model, result.usage, 1);
+    return { data, mimeType: 'image/png' };
+  }
   throw new Error('Image generation API did not return image data.');
 }
 
@@ -206,7 +222,10 @@ export async function llmEmbed(
       dimensions,
     });
     const values = result.data[0]?.embedding;
-    if (values?.length) return values;
+    if (values?.length) {
+      await recordEmbeddingUsage(model, result.usage);
+      return values;
+    }
   } catch (error) {
     console.warn('[LLM] embeddings with dimensions failed, retrying without dimensions', error);
   }
@@ -216,5 +235,6 @@ export async function llmEmbed(
   if (!values?.length) {
     throw new Error('The AI service returned an empty embedding response.');
   }
+  await recordEmbeddingUsage(model, result.usage);
   return values;
 }

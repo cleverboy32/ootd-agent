@@ -3,7 +3,8 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
-import { useImageHandler } from '@/hooks/useImageHandler'; // 1. 导入我们重构好的 hook
+import { useImageHandler } from '@/hooks/useImageHandler';
+import { MAX_PURCHASE_UPLOADS } from '@/lib/purchaseUploads';
 import { useAccess } from '@/components/access/AccessProvider';
 
 // 2. 大大简化 props，父组件不再需要管理任何图片状态
@@ -11,7 +12,7 @@ interface ChatInputAreaProps {
   input: string;
   setInput: (value: string) => void;
   isLoading: boolean; // 这个 isLoading 是指消息发送中
-  handleSend: (message: string, imageUrl?: string) => void; // 3. 更新 handleSend 的函数签名
+  handleSend: (message: string, imageUrl?: string | string[]) => void;
 }
 
 export function ChatInputArea({ 
@@ -25,11 +26,12 @@ export function ChatInputArea({
   
   // 4. 在组件内部直接使用 useImageHandler 来管理所有图片相关的状态和逻辑
   const {
-    previewUrl,
-    isUploading, // 新增：获取上传状态
+    uploads,
+    isUploading,
     uploadError,
-    uploadedImageUrl, // 新增：获取上传成功后的最终 URL
+    uploadedImageUrls,
     handleFileSelect,
+    removeUpload,
     resetImageState,
   } = useImageHandler();
 
@@ -37,13 +39,12 @@ export function ChatInputArea({
   const onSend = () => {
     if (!canInvokeAI) return;
     // 如果图片正在上传但还没上传完 (uploadedImageUrl 还不存在)，则阻止发送
-    if (previewUrl && !uploadedImageUrl) {
+    if (uploads.length > 0 && uploadedImageUrls.length < uploads.length) {
         console.log("图片正在上传，请稍候...");
         return;
     };
 
-    // 调用从父组件传入的 handleSend，并传递最终的图片 URL
-    handleSend(input, uploadedImageUrl || undefined);
+    handleSend(input, uploadedImageUrls.length > 0 ? uploadedImageUrls : undefined);
 
     // 发送后清空输入框和图片状态
     setInput('');
@@ -65,7 +66,7 @@ export function ChatInputArea({
 
   // 6. 决定“发送”按钮是否应该被禁用
   // 正在发送消息(isLoading) 或 正在上传图片(isUploading) 或 (没有文字且没有上传成功的图片) 时，禁用按钮
-  const isSendDisabled = !canInvokeAI || isLoading || isUploading || (!input.trim() && !uploadedImageUrl);
+  const isSendDisabled = !canInvokeAI || isLoading || isUploading || (!input.trim() && uploadedImageUrls.length === 0);
 
   return (
     <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-20">
@@ -79,30 +80,28 @@ export function ChatInputArea({
         )}
 
         {/* 7. 根据 isUploading 状态显示加载动画 */}
-        {previewUrl && (
-          <div className="mb-3 relative inline-block">
-            <div className="relative p-1 bg-background border border-border rounded-xl shadow-sm">
-              <Image src={previewUrl} alt="Preview" width={80} height={80} className="h-20 w-20 object-cover rounded-lg" />
-              {isUploading && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
-                  <Loader2 className="h-6 w-6 text-white animate-spin" />
+        {uploads.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {uploads.map((item) => (
+              <div key={item.id} className="relative inline-block">
+                <div className="relative p-1 bg-background border border-border rounded-xl shadow-sm">
+                  <Image src={item.previewUrl} alt="待搭配单品" width={80} height={80} className="h-20 w-20 object-cover rounded-lg" />
+                  {!item.uploadedUrl && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
+                      <Loader2 className="h-6 w-6 text-white animate-spin" />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            {/* 只有在非上传状态下才显示移除按钮 */}
-            {!isUploading && (
-              <button
-                onClick={() => {
-                  resetImageState();
-                   if(fileInputRef.current) {
-                    fileInputRef.current.value = '';
-                  }
-                }}
-                className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm hover:scale-105 transition-transform"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+                <button
+                  type="button"
+                  aria-label="移除这张图片"
+                  onClick={() => removeUpload(item.id)}
+                  className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm hover:scale-105 transition-transform"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -111,10 +110,11 @@ export function ChatInputArea({
             <input 
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
               ref={fileInputRef}
-              onChange={handleFileSelect} // 直接连接到 hook 的处理器
-              disabled={!canInvokeAI || isUploading} // 上传时禁用文件选择
+              onChange={handleFileSelect}
+              disabled={!canInvokeAI || uploads.length >= MAX_PURCHASE_UPLOADS}
             />
             <Button
               variant="ghost"
@@ -122,7 +122,7 @@ export function ChatInputArea({
               aria-label="上传图片"
               className="h-10 w-10 text-muted-foreground hover:text-foreground rounded-full shrink-0"
               onClick={() => fileInputRef.current?.click()}
-              disabled={!canInvokeAI || isUploading} // 上传时禁用
+              disabled={!canInvokeAI || uploads.length >= MAX_PURCHASE_UPLOADS}
             >
               <Upload className="h-5 w-5" />
             </Button>

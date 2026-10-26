@@ -1,3 +1,4 @@
+import { recordEmbeddingUsage } from '@/server/logging/modelUsage';
 import { readCredential } from './credentials';
 
 type MultimodalInput =
@@ -7,6 +8,10 @@ type MultimodalInput =
 interface ByteDanceMultimodalEmbedResponse {
   data?: {
     embedding?: number[];
+  };
+  usage?: {
+    prompt_tokens?: number;
+    total_tokens?: number;
   };
   error?: {
     message?: string;
@@ -58,5 +63,6 @@ export async function bytedanceMultimodalEmbed(options: {
   if (!values?.length) {
     throw new Error('ByteDance multimodal embedding returned an empty vector.');
   }
+  await recordEmbeddingUsage(options.model, payload.usage);
   return values;
 }

@@ -14,11 +14,14 @@ import {
   AnchorSlot,
   GatekeeperIntent,
   getResolvedAnchorFromIntent,
+  inferAnchorSlotFromSummary,
   isPurchasePairingIntent,
   isWardrobePairingIntent,
+  listPurchaseAnchors,
   outfitIdToLabel,
 } from '../intent';
 import {
+  clampStylistOutfits,
   stylistSchema,
   wardrobeSearchSchema,
   styleAdviceSchema,
@@ -103,12 +106,13 @@ function extractUserMessage(initialParts: Part[]): string {
   return textPart?.text?.trim() || '';
 }
 
-function filterQueriesExcludingAnchorSlot(
+function filterQueriesExcludingAnchorSlots(
   queries: WardrobeSearchQuery[],
-  anchorSlot?: WardrobeSearchSlot | AnchorSlot
+  slots: Array<WardrobeSearchSlot | AnchorSlot | ''>
 ): WardrobeSearchQuery[] {
-  if (!anchorSlot) return queries;
-  return queries.filter((item) => item.slot !== anchorSlot);
+  const excluded = new Set<string>(slots.filter((slot): slot is WardrobeSearchSlot | AnchorSlot => Boolean(slot)));
+  if (excluded.size === 0) return queries;
+  return queries.filter((item) => !item.slot || !excluded.has(item.slot));
 }
 
 function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
@@ -131,20 +135,27 @@ export async function planWardrobeSearchQueries(
   profile: UserProfileResult,
   userMessage: string,
   anchorItem: AnchorItemInfo | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  purchaseAnchors: AnchorItemInfo[] = []
 ): Promise<WardrobeSearchQuery[]> {
   console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
 
-  const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchorItem;
+  const anchors = purchaseAnchors.length > 0 ? purchaseAnchors : anchorItem ? [anchorItem] : [];
+  const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchors.length > 0;
   const isRevision = intent.request_type === 'feedback_revision';
   const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage, profile));
   const pairingBlock = isPairing
     ? `
 【锚定单品】
-- 名称: ${anchorItem.name}
-- 描述: ${anchorItem.summary}
-- 槽位: ${anchorItem.slot}（请勿为此槽位生成检索 query）
-${isWardrobePairingIntent(intent) ? '- 来源: 用户衣橱已有单品（真实 id）' : '- 来源: 待购单品（new_item）'}
+${anchors
+  .map(
+    (item, index) =>
+      `- ${index + 1}. 名称: ${item.name}；描述: ${item.summary}；槽位: ${
+        intent.purchase_items?.[index]?.slot || inferAnchorSlotFromSummary(item.summary) || '按外观判断，先不要为它占一个检索槽位'
+      }`
+  )
+  .join('\n')}
+${isWardrobePairingIntent(intent) ? '- 来源: 用户衣橱已有单品（真实 id）' : '- 来源: 待购单品（new_item），以上每一件都要留在最终方案里'}
 
 ${isWardrobePairingIntent(intent) ? WARDROBE_PAIRING_SEARCH_ADDENDUM : PURCHASE_PAIRING_SEARCH_ADDENDUM}
 `
@@ -161,8 +172,8 @@ ${REVISION_SEARCH_ADDENDUM}
   const strategyHint = isRevision
     ? `- 当前为【反馈微调】：只为 special_requests 要改的槽位出 query，未改槽位不要搜。`
     : isPairing
-      ? `- 当前为【待购单品搭配】：只为互补槽位检索衣橱单品，围绕锚定单品「${anchorItem.name}」找搭配。${
-          anchorItem.slot === 'accessory'
+      ? `- 当前为【待购单品搭配】：只为互补槽位检索衣橱单品，围绕已上传的 ${anchors.length} 件锚定单品找搭配。已占用的槽位不要再搜。${
+          anchors.length === 1 && anchors[0].slot === 'accessory'
             ? '锚定为配饰：必须输出 top、bottom、shoes 三条 query。'
             : ''
         }`
@@ -235,8 +246,14 @@ ${strategyHint}
     }))
     .filter((item) => item.query.length > 0);
 
-  if (isPairing && anchorItem) {
-    queries = filterQueriesExcludingAnchorSlot(queries, anchorItem.slot);
+  if (isPairing) {
+    const slots =
+      purchaseAnchors.length > 1
+        ? (intent.purchase_items ?? []).map(
+            (item) => item.slot || inferAnchorSlotFromSummary(item.summary)
+          )
+        : anchors.map((item) => item.slot);
+    queries = filterQueriesExcludingAnchorSlots(queries, slots);
   }
   if (isRevision) {
     queries = filterQueriesForRevisionSlots(queries, intent.special_requests || userMessage);
@@ -304,6 +321,7 @@ export async function callStylistAgent(
     console.log('[STYLIST_AGENT] Anchor item (from Gatekeeper):', anchorItem);
   }
 
+  const purchaseAnchors = isPurchasePairingIntent(intent) ? listPurchaseAnchors(intent) : [];
   const previousCache = options.previousStylistCache;
   const revisionOutfitId = intent.selected_outfit_id?.trim() || 'outfit_1';
   const previousOutfit =
@@ -328,7 +346,8 @@ export async function callStylistAgent(
         profile,
         userMessage,
         anchorItem,
-        options.signal
+        options.signal,
+        purchaseAnchors
       );
       const searchResults = await performRagSearch(searchQueries, clientId, ragCache, {
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
@@ -347,8 +366,23 @@ export async function callStylistAgent(
 
   const hasVisualProfile = profileHasVisualData(profile);
   const wardrobeAnchorId = isWardrobePairingIntent(intent) ? intent.anchor_wardrobe_id : undefined;
+  const purchaseAnchorBlock =
+    purchaseAnchors.length > 0
+      ? `
+【待购锚定单品 — 每套方案必须全部包含，每件 id 都是 "new_item"】
+${purchaseAnchors
+  .map((item, index) => {
+    const known = intent.purchase_items?.[index]?.slot || inferAnchorSlotFromSummary(item.summary);
+    return `- ${index + 1}. name: ${item.name}；layer: ${anchorSlotToLayer(known || item.slot)}；描述: ${item.summary}${
+      known ? '' : '；槽位按外观判断'
+    }`;
+  })
+  .join('\n')}
+`
+      : '';
   const anchorBlock =
-    anchorItem != null
+    purchaseAnchorBlock ||
+    (anchorItem != null
       ? isWardrobePairingIntent(intent) && wardrobeAnchorId
         ? `
 【衣橱锚定单品 — 每套方案必须包含】
@@ -364,7 +398,7 @@ export async function callStylistAgent(
 - layer: ${anchorSlotToLayer(anchorItem.slot)}
 - 描述: ${anchorItem.summary}
 `
-      : '';
+      : '');
 
   const revisionBlock =
     isRevision && previousOutfit
@@ -438,6 +472,7 @@ ${
 
     console.log('[STYLIST_AGENT] Raw response:', responseText);
     const parsed = JSON.parse(responseText) as StylistResult;
+    parsed.outfits = clampStylistOutfits(parsed.outfits ?? []);
     resolveRagRefs(parsed, ragIndexMap);
     if (ragCache && ragCache.size > 0) {
       alignStylistItemsWithWardrobe(parsed, ragCache);
@@ -467,6 +502,13 @@ ${
       parsed.anchor_image_url = anchorUrl;
       console.log('[STYLIST_AGENT] anchor_image_url bound:', anchorUrl.slice(0, 80));
     }
+    const purchaseUrls = purchaseAnchors
+      .map((item) => item.imageUrl?.trim() || '')
+      .filter(Boolean);
+    parsed.purchase_image_urls =
+      purchaseUrls.length > 0
+        ? purchaseUrls
+        : previousCache?.stylist_result.purchase_image_urls;
     return parsed;
   } catch (error) {
     console.error('[STYLIST_AGENT] Error calling Stylist Agent:', error);

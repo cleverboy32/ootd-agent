@@ -236,13 +236,13 @@ describe('evaluateGatekeeperOutput', () => {
     assert.ok(evalResult.issues.some((i) => i.code === 'PURCHASE_PAIRING_WEATHER_LOOKUP'));
   });
 
-  it('warns when feedback_revision completes with unstated outfit id among multiple outfits', () => {
+  it('warns when feedback_revision selects an outfit the latest reply did not show', () => {
     const result = {
       is_complete: true,
       extracted_intent: normalizeGatekeeperIntent({
         request_type: 'feedback_revision',
         special_requests: '去掉外套',
-        selected_outfit_id: 'outfit_1',
+        selected_outfit_id: 'outfit_3',
       }),
       followup_questions: [],
     };
@@ -252,6 +252,6 @@ describe('evaluateGatekeeperOutput', () => {
       currentMessageText: '去掉外套',
     });
 
-    assert.ok(evalResult.issues.some((i) => i.code === 'REVISION_OUTFIT_ID_NOT_STATED'));
+    assert.ok(evalResult.issues.some((i) => i.code === 'REVISION_OUTFIT_ID_NOT_SHOWN'));
   });
 });

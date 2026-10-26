@@ -1,9 +1,15 @@
+import { recordImageUsage } from '@/server/logging/modelUsage';
 import { readCredential } from './credentials';
 
 export const SEEDREAM_MAX_REFERENCE_IMAGES = 14;
 
 interface SeedreamImageResponse {
   data?: Array<{ url?: string; b64_json?: string }>;
+  usage?: {
+    generated_images?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
   error?: { message?: string; code?: string };
 }
 
@@ -81,10 +87,13 @@ export async function seedreamGenerateImage(options: {
 
   const first = payload.data?.[0];
   if (first?.b64_json) {
+    await recordImageUsage(options.model, payload.usage, 1);
     return { data: first.b64_json, mimeType: 'image/jpeg' };
   }
   if (first?.url) {
-    return fetchImageAsBase64(first.url);
+    const image = await fetchImageAsBase64(first.url);
+    await recordImageUsage(options.model, payload.usage, 1);
+    return image;
   }
 
   throw new Error('Seedream image generation did not return image data.');

@@ -1,3 +1,5 @@
+import { recordImageUsage } from '@/server/logging/modelUsage';
+
 interface MiniMaxImageResponse {
   data?: {
     image_base64?: string[];
@@ -50,5 +52,6 @@ export async function minimaxGenerateImage(
     throw new Error('MiniMax image generation did not return image data.');
   }
 
+  await recordImageUsage(model, null, 1);
   return { data, mimeType: 'image/jpeg' };
 }

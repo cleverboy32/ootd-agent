@@ -2,6 +2,7 @@ import { Part } from "@google/genai";
 import { NextRequest } from "next/server";
 import { createImageRetryStream, createMultiAgentStream } from "./orchestrator";
 import { urlToGenerativePart } from '@/server/utils/image';
+import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import { resolveClientIp } from '@/server/utils/resolveClientIp';
 import { isShuttingDown } from '@/server/lifecycle/shutdown';
 import prismadb from '@/server/db';
@@ -25,7 +26,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { content, conversationId, messageId, retryOutfitId } = body;
     const text = content?.text;
-    const imageUrl = content?.imageUrl;
+    const imageUrls = takePurchaseUploadUrls(
+      Array.isArray(content?.imageUrls)
+        ? content.imageUrls
+        : content?.imageUrl
+          ? [content.imageUrl]
+          : []
+    );
+    const imageUrl = imageUrls[0];
 
     const clientId = req.headers.get('X-Client-ID');
     if (!clientId) {
@@ -73,9 +81,8 @@ export async function POST(req: NextRequest) {
 
     const initialParts: Part[] = [];
 
-    if (imageUrl) {
-      const imagePart = await urlToGenerativePart(imageUrl);
-      initialParts.push(imagePart);
+    for (const url of imageUrls) {
+      initialParts.push(await urlToGenerativePart(url));
     }
 
     if (text) {
@@ -85,6 +92,7 @@ export async function POST(req: NextRequest) {
     const readableStream = createMultiAgentStream(initialParts, clientId, conversationId, messageId, {
       clientIp: resolveClientIp(req),
       currentImageUrl: imageUrl || undefined,
+      currentImageUrls: imageUrls,
     });
     return new Response(readableStream, { headers: SSE_HEADERS });
   } catch (e) {

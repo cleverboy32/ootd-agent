@@ -9,7 +9,7 @@ import {
   isWardrobePairingIntent,
   parseDressingClimate,
   inferDressingClimateFromAnchor,
-  userMentionedOutfitIdInText,
+  outfitIdsInAssistantText,
 } from '@/server/agents/intent';
 
 export type GatekeeperEvalSeverity = 'error' | 'warn';
@@ -47,8 +47,6 @@ export interface GatekeeperEvalContext {
   currentMessageText?: string;
   weatherLookup?: { needed: boolean; city: string };
 }
-
-const MULTIPLE_OUTFITS_IN_CONTEXT = /方案二|第二套|outfit_2|第\s*2\s*套|两套方案|两套穿搭|准备了\s*2\s*套|两套/;
 
 const SHORT_CIRCUIT_TYPES = new Set<OutfitRequestType>([
   'clarify',
@@ -136,6 +134,20 @@ function appendDressingClimateWarnings(
   }
 }
 
+/** 上下文里最近一条真正展示了方案的助手回复。 */
+function latestAssistantOutfitIds(contextText: string): string[] {
+  if (!contextText.trim()) return [];
+  const chunks = contextText.split(/\n(?=助手[:：]|用户[:：])/);
+  const labeled = chunks.some((chunk) => /^(助手|用户)[:：]/.test(chunk));
+  if (!labeled) return outfitIdsInAssistantText(contextText);
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    if (!/^助手[:：]/.test(chunks[i])) continue;
+    const ids = outfitIdsInAssistantText(chunks[i].replace(/^助手[:：]\s*/, ''));
+    if (ids.length > 0) return ids;
+  }
+  return [];
+}
+
 /**
  * L1 deterministic evaluation of finalized Gatekeeper output.
  */
@@ -207,20 +219,19 @@ export function evaluateGatekeeperOutput(
     });
   }
 
-  const currentMessageText = ctx.currentMessageText?.trim() ?? '';
+  const presentedIds = latestAssistantOutfitIds(contextText);
+  const selectedId = intent.selected_outfit_id?.trim() ?? '';
   if (
     requestType === 'feedback_revision' &&
     result.is_complete &&
-    intent.selected_outfit_id?.trim() &&
-    currentMessageText &&
-    !userMentionedOutfitIdInText(currentMessageText) &&
-    MULTIPLE_OUTFITS_IN_CONTEXT.test(contextText)
+    selectedId &&
+    presentedIds.length > 0 &&
+    !presentedIds.includes(selectedId)
   ) {
     issues.push({
-      code: 'REVISION_OUTFIT_ID_NOT_STATED',
+      code: 'REVISION_OUTFIT_ID_NOT_SHOWN',
       severity: 'warn',
-      message:
-        'feedback_revision marked complete with selected_outfit_id but user did not state which outfit',
+      message: 'feedback_revision selected an outfit that the latest reply did not show',
     });
   }
 

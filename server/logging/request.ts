@@ -1,3 +1,4 @@
+import { roundCny } from '@/server/config/modelPricing';
 import { auditLogPath } from './paths';
 import { appendJsonlEntry } from './jsonl';
 
@@ -71,12 +72,24 @@ export interface RequestAuditStages {
   imageGenMs?: number;
 }
 
+export interface RequestUsageSummary {
+  calls: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  completionTokens: number;
+  embeddingTokens: number;
+  generatedImages: number;
+  pricedCostCny: number;
+  unpricedCalls: number;
+}
+
 export interface RequestAuditSummary {
   outfitCount?: number;
   imageSuccessCount?: number;
   imageFailedCount?: number;
   ragItemCount?: number;
   wardrobeCandidateCount?: number;
+  usage?: RequestUsageSummary;
 }
 
 export interface RequestAuditLogEntry {
@@ -168,6 +181,16 @@ export class RequestTrace {
   private clientCancelled = false;
   private cancelReason?: string;
   private readonly stages: RequestAuditStages = {};
+  private readonly usage: RequestUsageSummary = {
+    calls: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    completionTokens: 0,
+    embeddingTokens: 0,
+    generatedImages: 0,
+    pricedCostCny: 0,
+    unpricedCalls: 0,
+  };
 
   constructor(init: RequestTraceInit) {
     this.startedAt = Date.now();
@@ -206,6 +229,35 @@ export class RequestTrace {
     this.stages[STAGE_FIELD[name]] = Math.max(0, Math.round(ms));
   }
 
+  auditIdentity(): { conversationId?: string; messageId?: string; clientId?: string } {
+    return {
+      conversationId: this.conversationId,
+      messageId: this.messageId,
+      clientId: this.clientId,
+    };
+  }
+
+  addUsage(usage: {
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    completionTokens: number;
+    embeddingTokens: number;
+    generatedImages: number;
+    costCny: number | null;
+  }): void {
+    this.usage.calls += 1;
+    this.usage.cacheHitTokens += usage.cacheHitTokens;
+    this.usage.cacheMissTokens += usage.cacheMissTokens;
+    this.usage.completionTokens += usage.completionTokens;
+    this.usage.embeddingTokens += usage.embeddingTokens;
+    this.usage.generatedImages += usage.generatedImages;
+    if (usage.costCny == null) {
+      this.usage.unpricedCalls += 1;
+      return;
+    }
+    this.usage.pricedCostCny = roundCny(this.usage.pricedCostCny + usage.costCny);
+  }
+
   finalize(params: {
     outcome: RequestAuditOutcome;
     errorMessage?: string;
@@ -228,7 +280,7 @@ export class RequestTrace {
       errorMessage: params.errorMessage,
       durationMs: Math.max(0, Date.now() - this.startedAt),
       stages: { ...this.stages },
-      summary: { ...(params.summary ?? {}) },
+      summary: { ...(params.summary ?? {}), usage: { ...this.usage } },
     };
 
     return entry;
@@ -238,7 +290,8 @@ export class RequestTrace {
 export async function logRequestAudit(entry: RequestAuditLogEntry): Promise<void> {
   console.log(
     `[REQUEST_AUDIT] kind=${entry.kind} route=${entry.route} type=${entry.requestType ?? '-'} ` +
-      `outcome=${entry.outcome} cancelled=${entry.clientCancelled} durationMs=${entry.durationMs}`
+      `outcome=${entry.outcome} cancelled=${entry.clientCancelled} durationMs=${entry.durationMs} ` +
+      `costCny=${entry.summary.usage?.pricedCostCny ?? 0} unpricedCalls=${entry.summary.usage?.unpricedCalls ?? 0}`
   );
   await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'REQUEST_AUDIT');
 }

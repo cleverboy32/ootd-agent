@@ -29,6 +29,13 @@ export interface AnchorItemImageData {
   mimeType: string;
 }
 
+export interface PurchaseUploadItem {
+  session_item_id: string;
+  summary: string;
+  slot: AnchorSlot | '';
+  imageUrl?: string;
+}
+
 export interface AnchorItemInfo {
   name: string;
   summary: string;
@@ -61,6 +68,11 @@ export interface GatekeeperIntent {
    * feedback_revision 必须为空（绑定方案上的锚点，不绑「最新上传」）
    */
   session_item_id?: string;
+  /**
+   * 本轮一起搭配的上传单品，按图片顺序，最多 4 件。
+   * 单件上传仍只使用上面的 summary / slot / session_item_id。
+   */
+  purchase_items?: PurchaseUploadItem[];
   /** outfit_selection 时用户选中的方案 id，如 outfit_1 */
   selected_outfit_id?: string;
   /** wardrobe_pairing 时已确认的衣橱单品 id */

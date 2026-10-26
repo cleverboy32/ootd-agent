@@ -22,7 +22,7 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
           你好，我是你的专属时尚搭配助手
         </h1>
         <p className="text-muted-foreground text-lg leading-relaxed max-w-2xl">
-          上传一件衣服照片，我会为你推荐多套搭配方案和穿搭建议
+          上传衣服照片，一次最多四件，我会把它们搭在一起并补上缺的单品
         </p>
       </div>
 

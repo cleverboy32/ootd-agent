@@ -12,6 +12,7 @@ import {
   RequestAuditRoute,
   RequestTrace,
 } from '@/server/logging/request';
+import { runWithRequestTrace } from '@/server/logging/usageContext';
 import {
   registerInFlight,
   unregisterInFlight,
@@ -91,6 +92,7 @@ export function createImageRetryStream(
     kind: RequestAuditKind.ImageRetry,
     conversationId,
     messageId,
+    clientId,
     route: RequestAuditRoute.ImageRetry,
   });
 
@@ -104,6 +106,7 @@ export function createImageRetryStream(
 
   return new ReadableStream({
     async start(controller) {
+      await runWithRequestTrace(trace, async () => {
       console.log(`[ORCHESTRATOR] --- 单图重试: message=${messageId} outfit=${retryOutfitId} ---`);
 
       let mainError: Error | null = null;
@@ -214,6 +217,7 @@ export function createImageRetryStream(
         resolveDone();
         unregisterInFlight(inFlightId);
       }
+      });
     },
     cancel(reason) {
       console.warn('[ORCHESTRATOR] 单图重试流被客户端取消，原因:', reason);

@@ -44,7 +44,8 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 
 【purchase_pairing 放行标准（重要）】
 - 你具备多模态能力，必须亲自从【本轮服装图片】【会话待购单品清单】或【用户文字】识别锚定单品，填入 anchor_item_summary 和 anchor_slot。
-- 若上下文出现【会话待购单品】清单：必须填写 session_item_id 为清单中的某一项；用户说「还是那条/刚才那件」时按文字与 hint 匹配对应 id，禁止无脑填最新一项除非本轮新传了图且未指代旧图。
+- 若上下文出现【会话待购单品】清单：单件上传时填写 session_item_id；用户说「还是那条/刚才那件」时按文字与 hint 匹配对应 id，禁止无脑填最新一项除非本轮新传了图且未指代旧图。
+- 本轮有多张待购图时，最多认 4 张，按图片顺序每张写一条 purchase_items（session_item_id、summary、slot）。这些图都要一起穿，不要追问先搭哪一件。第一件同时写入 session_item_id、anchor_item_summary、anchor_slot。没有多张图时 purchase_items 为空数组。
 - feedback_revision 时 session_item_id 必须留空（微调绑定上一套方案上的锚点，不是最新上传）。
 - anchor_item_summary 示例：「蓝白细条纹棉质衬衫，宽松版型」→ anchor_slot=top；「金色圆环耳环，铆钉细节」→ anchor_slot=accessory。
 - anchor_slot 必须是 top | bottom | dress | shoes | outerwear | accessory 之一。
@@ -70,8 +71,8 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 【feedback_revision】
 - is_complete=true，request_type=feedback_revision；session_item_id 必须留空（锚点跟方案不跟最新上传）；从上下文继承场合，special_requests 写入用户的修改要求。
 - 【边界原则】：feedback_revision 必须满足「用户明确要修改上一轮某套方案或某个单品」。若用户本轮提出的是新的场合/活动/目标（例如「我还想去…」「明天去…」「应该穿啥/穿什么」），即使上一轮刚生成过方案，也必须归为 wardrobe_outfit，occasion 填新场景，special_requests 写新场景需求；禁止写「在上一轮基础上调整」。
-- 【整轮重做】：用户说「重新搭配」「重新生成」「都不好」「搭配太烂了」等表达对整套方案不满意、要求全新方案时，必须归为 wardrobe_outfit，【禁止】归为 feedback_revision，【禁止】追问选第一套还是第二套。
-- selected_outfit_id【禁止臆测】：仅当用户本轮或历史中明确说了「第一套/第二套/outfit_1/outfit_2」时填写；若用户只说修改指令（如「去掉外套」「鞋换成高跟鞋」）而未指明哪套，selected_outfit_id 必须留空，系统会追问选套。
+- 【整轮重做】：用户说「重新搭配」「重新生成」「都不好」「搭配太烂了」等表达对整套方案不满意、要求全新方案时，必须归为 wardrobe_outfit，【禁止】归为 feedback_revision，【禁止】追问选第几套。
+- selected_outfit_id：只填上一轮实际展示过的方案，取值 outfit_1 到 outfit_4。上一轮只有一套，或用户在改「这套」而没报第几套时，填那一套的 id。上一轮有多套且用户说了第几套，填对应 id。多套又没指明哪一套时，必须留空，由系统追问。禁止填上一轮没有出现过的 id。
 - 【new_item 风格追问（关键）】：若上一轮 AI 方案中推荐了某件新品（non-wardrobe item，如「短裤」「白衬衫」），用户本轮追问该新品的风格多样性（如「短裤能多几种风格吗」「能给我看更多款式吗」「想对比一下再买」），【必须归为 feedback_revision】，special_requests 写入"请在原搭配基础上生成多套不同风格的 [单品] 方案供用户对比"。【禁止】因为用户提到"买/购买/对比购买"就改为 purchase_pairing——purchase_pairing 仅限于用户上传了待购单品图片的场景。
 
 【天气与城市（不参与放行，但由你决策是否查询）】

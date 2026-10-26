@@ -3,16 +3,21 @@ import prismadb from 'server/db';
 import { generateSummary } from '@/server/services/summarization';
 import { CONTEXT_TOKEN_LIMIT, estimateTokenCount, formatHistoryAsync } from '@/server/utils/estimate-token';
 import { Message } from '@/server/types/message';
+import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import {
   extractSessionItemsFromMessages,
-  mergeCurrentImageIntoSessionItems,
+  mergeCurrentImagesIntoSessionItems,
   type SessionPurchaseItem,
 } from '@/server/utils/sessionItems';
+
+function asUrlList(urls?: string | string[]): string[] {
+  return takePurchaseUploadUrls(Array.isArray(urls) ? urls : urls ? [urls] : []);
+}
 
 export async function buildContext(
   conversationId?: string,
   finalMessageId?: string,
-  currentImageUrl?: string
+  currentImageUrls?: string | string[]
 ): Promise<{
   historyForAI: Content[];
   failedMessage: Message | null;
@@ -22,7 +27,7 @@ export async function buildContext(
     return {
       historyForAI: [],
       failedMessage: null,
-      sessionItems: mergeCurrentImageIntoSessionItems([], currentImageUrl),
+      sessionItems: mergeCurrentImagesIntoSessionItems([], asUrlList(currentImageUrls)),
     };
   }
 
@@ -92,9 +97,9 @@ export async function buildContext(
       historyForAI.push(...unsummarizedHistory);
     }
 
-    const sessionItems = mergeCurrentImageIntoSessionItems(
+    const sessionItems = mergeCurrentImagesIntoSessionItems(
       extractSessionItemsFromMessages(newMessages as Message[]),
-      currentImageUrl
+      asUrlList(currentImageUrls)
     );
     console.log(`[CONTEXT] sessionItems: ${sessionItems.length} (${sessionItems.map((i) => i.id).join(',') || 'none'})`);
 
@@ -109,7 +114,7 @@ export async function buildContext(
     return {
       historyForAI: [],
       failedMessage: null,
-      sessionItems: mergeCurrentImageIntoSessionItems([], currentImageUrl),
+      sessionItems: mergeCurrentImagesIntoSessionItems([], asUrlList(currentImageUrls)),
     };
   }
 }

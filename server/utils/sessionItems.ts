@@ -1,4 +1,5 @@
 import type { Message } from '@/server/types/message';
+import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 
 /** 本会话从用户消息提取的待购上传图（conversation 维，派生自历史） */
 export interface SessionPurchaseItem {
@@ -10,21 +11,16 @@ export interface SessionPurchaseItem {
   hintText: string;
 }
 
-function extractImageUrlFromMessage(message: Message): string | undefined {
-  if (!Array.isArray(message.content)) {
-    return typeof message.imageUrl === 'string' && message.imageUrl.trim()
-      ? message.imageUrl.trim()
-      : undefined;
-  }
-  for (const part of message.content) {
-    if (part?.type === 'image' && typeof part.content === 'string' && part.content.trim()) {
-      return part.content.trim();
-    }
-  }
-  if (typeof message.imageUrl === 'string' && message.imageUrl.trim()) {
-    return message.imageUrl.trim();
-  }
-  return undefined;
+function extractImageUrlsFromMessage(message: Message): string[] {
+  const fromParts = Array.isArray(message.content)
+    ? message.content.flatMap((part) =>
+        part?.type === 'image' && typeof part.content === 'string' && part.content.trim()
+          ? [part.content.trim()]
+          : []
+      )
+    : [];
+  if (fromParts.length > 0) return takePurchaseUploadUrls(fromParts);
+  return takePurchaseUploadUrls([message.imageUrl]);
 }
 
 function extractHintTextFromMessage(message: Message): string {
@@ -44,14 +40,15 @@ export function extractSessionItemsFromMessages(messages: Message[]): SessionPur
   const items: SessionPurchaseItem[] = [];
   for (const message of messages) {
     if (message.role !== 'user') continue;
-    const imageUrl = extractImageUrlFromMessage(message);
-    if (!imageUrl) continue;
-    items.push({
-      id: `si_${items.length + 1}`,
-      messageId: message.id,
-      imageUrl,
-      hintText: extractHintTextFromMessage(message),
-    });
+    const hintText = extractHintTextFromMessage(message);
+    for (const imageUrl of extractImageUrlsFromMessage(message)) {
+      items.push({
+        id: `si_${items.length + 1}`,
+        messageId: message.id,
+        imageUrl,
+        hintText,
+      });
+    }
   }
   return items;
 }
@@ -61,18 +58,27 @@ export function mergeCurrentImageIntoSessionItems(
   items: SessionPurchaseItem[],
   currentImageUrl?: string
 ): SessionPurchaseItem[] {
-  const url = currentImageUrl?.trim();
-  if (!url) return items;
-  if (items.some((item) => item.imageUrl === url)) return items;
-  return [
-    ...items,
-    {
-      id: `si_${items.length + 1}`,
-      messageId: 'current',
-      imageUrl: url,
-      hintText: '',
-    },
-  ];
+  return mergeCurrentImagesIntoSessionItems(items, currentImageUrl ? [currentImageUrl] : []);
+}
+
+export function mergeCurrentImagesIntoSessionItems(
+  items: SessionPurchaseItem[],
+  currentImageUrls: string[] = []
+): SessionPurchaseItem[] {
+  let next = items;
+  for (const url of takePurchaseUploadUrls(currentImageUrls)) {
+    if (next.some((item) => item.imageUrl === url)) continue;
+    next = [
+      ...next,
+      {
+        id: `si_${next.length + 1}`,
+        messageId: 'current',
+        imageUrl: url,
+        hintText: '',
+      },
+    ];
+  }
+  return next;
 }
 
 /** 注入 Gate 的文本块（原则描述，不含死举例清单外逻辑） */
