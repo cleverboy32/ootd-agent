@@ -41,6 +41,7 @@ const CRITIC_SYSTEM_INSTRUCTION = `
 2. 色彩一致性：衣服的颜色是否画错或画反？（例如：搭配师要粉色上衣+灰色短裤，图里是否画成了粉色短裤？）
 3. 场景契合度：背景（如乒乓球馆、雨天街头）是否符合设定？
 4. 配饰比例：项链、耳环、choker 等小配饰是否被画成夸张巨物（明显大于真人佩戴尺寸、占满胸口/半边脸）？若过大则不通过，并在 revised_prompt_enhancement 中要求按真人佩戴比例缩小。
+5. 有原图的单品：后面附上的原单品图是用户上传的实物。版型、分割线、图案、衣长裤长必须和对应原图一致。颜色接近但款式被改掉，也算不通过。没有原图的单品只按搭配师文字核对。
 
 【输出规则】
 - 如果完全符合，approved 设为 true。
@@ -94,29 +95,71 @@ async function resolveAuditImagePart(
   return urlToGenerativePart(url);
 }
 
+export interface GarmentReference {
+  url: string;
+  label: string;
+}
+
+/** 审核只带公网单品原图，人物照和 data URL 不进 critic。 */
+export function garmentReferencesForAudit(
+  refs: Array<{ url: string; label: string }> | undefined
+): GarmentReference[] {
+  const seen = new Set<string>();
+  const result: GarmentReference[] = [];
+  for (const ref of refs ?? []) {
+    const url = ref.url?.trim() ?? '';
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    result.push({ url, label: ref.label?.trim() || 'purchase garment' });
+  }
+  return result;
+}
+
+async function loadGarmentReferenceParts(refs: GarmentReference[]): Promise<Part[]> {
+  const parts: Part[] = [];
+  for (const [index, ref] of refs.entries()) {
+    try {
+      parts.push({ text: `原单品参考 ${index + 1}：${ref.label}` });
+      parts.push(await urlToGenerativePart(ref.url));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[VISUAL_DIRECTOR] Critic skipped garment ref ${ref.label}: ${message}`);
+    }
+  }
+  return parts;
+}
+
 async function auditImage(
   outfit: StylistOutfit,
   imageUrl: string,
   imageBase64: string,
-  mimeType: string
+  mimeType: string,
+  garmentRefs: GarmentReference[]
 ): Promise<CriticResult> {
   console.log(`[VISUAL_DIRECTOR] Auditing generated image for outfit ${outfit.id}...`);
 
   const imagePart = await resolveAuditImagePart(imageUrl, imageBase64, mimeType);
+  const referenceNote =
+    garmentRefs.length > 0
+      ? `\n【原单品参考】共 ${garmentRefs.length} 张，紧跟效果图之后。有原图的单品按原图核对版型，不要只看文字。\n${garmentRefs
+          .map((ref, index) => `${index + 1}. ${ref.label}`)
+          .join('\n')}\n`
+      : '';
   const prompt = `
 【搭配师指定方案】
 - 核心概念: ${outfit.overall_concept}
 - 选用单品: ${outfit.selected_items.map((i) => `${i.name} (${i.layer})`).join(', ')}
 - 视觉构想: ${outfit.visual_composition.outfit_details} paired with ${outfit.visual_composition.background}
-
+${referenceNote}
 请仔细审核上方效果图，判断是否 100% 契合上述方案。
 `;
 
+  const referenceParts = await loadGarmentReferenceParts(garmentRefs);
   const response = await withRetryOn429(
     () =>
       llmGenerate({
         model: AGENT_MODELS.visualCritic,
-        contents: [imagePart, { text: prompt }],
+        contents: [imagePart, ...referenceParts, { text: prompt }],
         systemInstruction: CRITIC_SYSTEM_INSTRUCTION,
         temperature: 0.1,
         jsonSchema: criticSchema,
@@ -137,7 +180,8 @@ export function scheduleVisualAudit(
   imageId: string,
   imageUrl: string,
   imageBase64: string,
-  mimeType: string
+  mimeType: string,
+  garmentRefs?: Array<{ url: string; label: string }>
 ): void {
   void (async () => {
     const baseEntry = {
@@ -149,7 +193,13 @@ export function scheduleVisualAudit(
     };
 
     try {
-      const auditResult = await auditImage(outfit, imageUrl, imageBase64, mimeType);
+      const auditResult = await auditImage(
+        outfit,
+        imageUrl,
+        imageBase64,
+        mimeType,
+        garmentReferencesForAudit(garmentRefs)
+      );
       console.log(`[VISUAL_DIRECTOR] Audit completed for outfit ${outfit.id}:`, auditResult);
 
       if (isImageUnreadableCritique(auditResult.critique_reason)) {

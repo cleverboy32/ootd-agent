@@ -9,14 +9,25 @@ import {
   profileFromDbRecord,
 } from '@/server/agents/user-profile';
 import { readFullBodyImageUrl } from '@/server/utils/profileMetadata';
-import { callStylistAgent, callStylistAdvice } from '@/server/agents/stylist';
+import { callStylistAdvice, callStylistTurn } from '@/server/agents/stylist';
+import { resolveStylistUploadUrls } from '@/server/agents/stylist/uploadVision';
 import { callCopywriterAgentStream, callCopywriterAdviceStream } from '@/server/agents/copywriter';
 import { IMAGE_GEN_CONCURRENCY } from '@/server/config/models';
 import { mapWithConcurrency } from '@/server/utils/concurrency';
 import { buildPersistedMessageContent, type StylistCacheNode } from '@/server/utils/messageContent';
 import { runOutfitImageGeneration, extractSelectedItemUrls } from '../imageRetry';
-import { getPreviousStylistCache, findPreviousAnchorImageUrl, persistProfileLocation } from '../helpers';
-import { resolveAnchorUrlFromSessionItems, buildAdditionalPurchaseImageRefs } from '@/server/utils/sessionItems';
+import {
+  getPreviousStylistCache,
+  getPriorStylistResults,
+  findPreviousAnchorImageUrl,
+  persistProfileLocation,
+} from '../helpers';
+import {
+  resolveAnchorUrlFromSessionItems,
+  buildAdditionalPurchaseImageRefs,
+  labelPurchaseUploads,
+  mergePurchaseImageRefs,
+} from '@/server/utils/sessionItems';
 import {
   shouldApplyGateProfileUpdate,
   scheduleProfileUpdatePersist,
@@ -71,6 +82,7 @@ async function executeParallelAgents(
     | 'fullBodyImageUrl'
     | 'messageId'
     | 'sessionItems'
+    | 'ignoredUploadNote'
   >,
   runtime: OutfitRuntime
 ): Promise<void> {
@@ -85,6 +97,12 @@ async function executeParallelAgents(
     '';
 
   console.log('[ORCHESTRATOR:LANGGRAPH] 启动并行双轨执行链 (文案流 + 视觉导演并行画图)...');
+
+  const ignoredUploadNote = state.ignoredUploadNote?.trim();
+  if (ignoredUploadNote) {
+    sendEvent(runtime.controller, 'text_chunk', { text: `${ignoredUploadNote}\n\n` });
+    runtime.appendText(`${ignoredUploadNote}\n\n`);
+  }
 
   let portraitImageUrl = state.fullBodyImageUrl;
   if (portraitImageUrl === undefined && runtime.clientId) {
@@ -125,22 +143,21 @@ async function executeParallelAgents(
     IMAGE_GEN_CONCURRENCY,
     (outfit) => {
       throwIfAborted(runtime.abortSignal);
-      const primaryUrl = stylistResult.anchor_image_url?.trim() || '';
-      const uploadedRefs = (stylistResult.purchase_image_urls ?? [])
-        .map((url) => url.trim())
-        .filter((url) => url && url !== primaryUrl)
-        .map((url, index) => ({
-          url,
-          label: `purchase upload ${index + 2}`,
-        }));
-      const additionalPurchaseRefs = [
-        ...uploadedRefs,
-        ...buildAdditionalPurchaseImageRefs(
-          outfit,
-          state.sessionItems ?? [],
-          stylistResult.anchor_image_url
-        ),
-      ].filter((ref, index, all) => all.findIndex((item) => item.url === ref.url) === index);
+      const labeledUploads = labelPurchaseUploads(
+        outfit,
+        state.intent?.purchase_items ?? [],
+        stylistResult.purchase_image_urls ?? []
+      );
+      const sessionRefs = buildAdditionalPurchaseImageRefs(
+        outfit,
+        state.sessionItems ?? [],
+        stylistResult.anchor_image_url
+      );
+      const additionalPurchaseRefs = mergePurchaseImageRefs(
+        labeledUploads,
+        sessionRefs,
+        outfit.selected_items.filter((item) => item.id === 'new_item').map((item) => item.name)
+      );
       if (additionalPurchaseRefs.length > 0) {
         console.log(
           `[ORCHESTRATOR:LANGGRAPH] ${outfit.id} extra purchase refs:`,
@@ -427,7 +444,7 @@ export async function stylistNode(
   config: LangGraphRunnableConfig
 ): Promise<OutfitPipelineUpdate> {
   const runtime = getRuntime(config);
-  const intent = state.intent ?? state.gatekeeperResult?.extracted_intent;
+  let intent = state.intent ?? state.gatekeeperResult?.extracted_intent;
   const userProfile = state.userProfile;
   if (!intent || !userProfile) {
     throw new Error('intent/userProfile missing in stylistNode');
@@ -440,6 +457,7 @@ export async function stylistNode(
   });
 
   let stylistResult;
+  let ignoredUploadNote = '';
   const stylistStartedAt = Date.now();
   try {
     let previousAnchorImageUrl: string | undefined;
@@ -462,7 +480,11 @@ export async function stylistNode(
         }
       }
     }
-    stylistResult = await callStylistAgent(
+    const priorStylistResults =
+      intent.request_type === 'outfit_redo' && runtime.conversationId
+        ? await getPriorStylistResults(runtime.conversationId, messageId)
+        : [];
+    const turn = await callStylistTurn(
       state.history,
       intent,
       userProfile,
@@ -475,8 +497,34 @@ export async function stylistNode(
         previousAnchorImageUrl,
         messageId,
         signal: runtime.abortSignal,
+        currentImageUrls: resolveStylistUploadUrls(
+          runtime.currentImageUrls,
+          intent,
+          state.sessionItems ?? []
+        ),
+        priorStylistResults,
       }
     );
+    if (turn.type === 'text') {
+      runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
+      runtime.trace.setRoute('incomplete');
+      const gatekeeperResult = state.gatekeeperResult
+        ? {
+            ...state.gatekeeperResult,
+            is_complete: false,
+            gatekeeper_reply: turn.reply,
+            followup_questions: [],
+          }
+        : null;
+      return {
+        route: 'incomplete',
+        gatekeeperResult,
+      };
+    }
+    stylistResult = turn.result;
+    intent = turn.intent;
+    runtime.setActiveIntent(turn.intent);
+    ignoredUploadNote = turn.ignoredUploadNote;
   } catch (e) {
     runtime.trace.markStage('stylist', Date.now() - stylistStartedAt);
     console.error('[ORCHESTRATOR:LANGGRAPH] Stylist 灾难性失败:', e);
@@ -530,7 +578,9 @@ export async function stylistNode(
 
   return {
     stylistResult,
+    intent,
     revisionNoItemChange,
+    ignoredUploadNote,
   };
 }
 
@@ -557,4 +607,9 @@ export function routeAfterGatekeeper(state: OutfitPipelineState): string {
   if (state.route === 'style_advice') return 'styleAdvicePath';
   if (state.route === 'incomplete') return 'followupPath';
   return 'loadProfile';
+}
+
+export function routeAfterStylist(state: OutfitPipelineState): string {
+  if (state.route === 'incomplete') return 'followupPath';
+  return 'parallelOutfits';
 }

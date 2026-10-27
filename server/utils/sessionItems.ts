@@ -227,3 +227,86 @@ function layerHintOverlap(layer: string, hint: string, name: string): boolean {
   const hintHit = keywords.some((k) => hint.includes(k));
   return nameHit && hintHit;
 }
+
+const SLOT_LAYERS: Record<string, string[]> = {
+  top: ['inner_top', 'top'],
+  bottom: ['bottom'],
+  dress: ['dress'],
+  shoes: ['shoes'],
+  outerwear: ['outerwear'],
+  accessory: ['accessory'],
+};
+
+function layerMatchesSlot(layer: string, slot: string): boolean {
+  const expected = SLOT_LAYERS[slot];
+  if (!expected) return false;
+  return expected.some((value) => layer === value || layer.includes(value));
+}
+
+function defaultLayerForSlot(slot: string): string {
+  return SLOT_LAYERS[slot]?.[0] ?? 'garment';
+}
+
+function summaryHead(summary: string): string {
+  return summary.split(/[，,]/)[0]?.trim() || summary.trim();
+}
+
+/**
+ * 把每张待购图绑到方案里的 new_item，标签使用方案单品的原名。
+ * 出图提示词靠标签里的名字判断「这件有参考图」；泛化标签会把有图的裤子写成无参考图。
+ */
+export function labelPurchaseUploads(
+  outfit: { selected_items: Array<{ id: string; name: string; layer: string }> },
+  purchaseItems: Array<{ summary?: string; slot?: string; imageUrl?: string }>,
+  purchaseImageUrls: string[]
+): PurchaseImageRef[] {
+  const urls = [...new Set(purchaseImageUrls.map((url) => url.trim()).filter(Boolean))];
+  const newItems = outfit.selected_items
+    .map((item, index) => ({ item, index }))
+    .filter((entry) => entry.item.id === 'new_item' && entry.item.name.trim());
+  const used = new Set<number>();
+
+  return urls.map((url, index) => {
+    const source =
+      purchaseItems.find((item) => item.imageUrl?.trim() === url) ?? purchaseItems[index];
+    const summary = source?.summary?.trim() ?? '';
+    const slot = source?.slot?.trim() ?? '';
+    const unused = newItems.filter((entry) => !used.has(entry.index));
+    const byName = summary
+      ? unused.filter((entry) => namesOverlap(entry.item.name, summary))
+      : [];
+    const byNameAndSlot = slot ? byName.filter((entry) => layerMatchesSlot(entry.item.layer, slot)) : [];
+    const bySlot = slot ? unused.filter((entry) => layerMatchesSlot(entry.item.layer, slot)) : [];
+    const picked =
+      (byNameAndSlot.length === 1 ? byNameAndSlot[0] : undefined) ??
+      (byName.length === 1 ? byName[0] : undefined) ??
+      (bySlot.length === 1 ? bySlot[0] : undefined);
+    if (picked) used.add(picked.index);
+    const itemName = picked?.item.name ?? (summaryHead(summary) || 'purchase garment');
+    const layer = picked?.item.layer ?? defaultLayerForSlot(slot);
+    return {
+      url,
+      label: `${itemName} (${layer}) — purchase ref`,
+    };
+  });
+}
+
+/** 同一张图保留含方案单品名的标签，避免泛化标签盖住正确绑定。 */
+export function mergePurchaseImageRefs(
+  labeled: PurchaseImageRef[],
+  fallback: PurchaseImageRef[],
+  itemNames: string[]
+): PurchaseImageRef[] {
+  const score = (label: string): number =>
+    (itemNames.some((name) => name.trim() && label.includes(name.trim())) ? 2 : 0) +
+    (label.startsWith('purchase upload') ? 0 : 1);
+  const byUrl = new Map<string, PurchaseImageRef>();
+  for (const ref of [...labeled, ...fallback]) {
+    const url = ref.url.trim();
+    if (!url) continue;
+    const next = { url, label: ref.label };
+    const prev = byUrl.get(url);
+    if (!prev || score(next.label) > score(prev.label)) byUrl.set(url, next);
+  }
+  return [...byUrl.values()];
+}

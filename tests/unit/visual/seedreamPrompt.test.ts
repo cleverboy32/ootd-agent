@@ -74,16 +74,12 @@ describe('buildSeedreamImagePrompt', () => {
       ],
       null
     );
-    assert.match(prompt, /五官、脸型、眼睛、鼻子、嘴唇、发型和身体比例都跟图1/);
-    assert.match(prompt, /禁止换脸/);
-    assert.match(prompt, /轻度整理皮肤/);
-    assert.match(prompt, /保留毛孔/);
-    assert.match(prompt, /禁止拉腿/);
-    assert.match(prompt, /脸是图1本人/);
-    assert.match(prompt, /禁止复制图1里的服装/);
-    assert.match(prompt, /穿齐图2至图2/);
+    assert.match(prompt, /图1只取脸和身材，不取这张照片里的衣服/);
+    assert.match(prompt, /图2Mini Dress原样穿上，不改裤型、袖型、领和长短/);
+    assert.doesNotMatch(prompt, /斜向|五官、脸型|禁止拉腿|脸是图1本人/);
     assert.doesNotMatch(prompt, /中国年轻女性/);
     assert.doesNotMatch(prompt, /穿齐图1/);
+    assert.ok(prompt.length <= 300);
   });
 
   it('uses Chinese realism keywords and 图N references', () => {
@@ -95,14 +91,12 @@ describe('buildSeedreamImagePrompt', () => {
     );
     assert.match(prompt, /真实街拍/);
     assert.match(prompt, /东亚|中国/);
-    assert.match(prompt, /图1/);
+    assert.match(prompt, /图1Mini Dress原样穿上/);
     assert.match(prompt, /中国年轻女性/);
     assert.doesNotMatch(prompt, /Fashion editorial/i);
-    assert.match(prompt, /磨皮|塑料/);
     assert.doesNotMatch(prompt, /85mm/);
-    assert.match(prompt, /禁止浅景深/);
-    assert.match(prompt, /起毛与罗纹/);
-    assert.match(prompt, /禁止自行加渐变水洗/);
+    assert.doesNotMatch(prompt, /mint mini dress/);
+    assert.ok(prompt.length <= 300);
   });
 
   it('emphasizes full-outfit look when accessories are present', () => {
@@ -119,8 +113,8 @@ describe('buildSeedreamImagePrompt', () => {
       ['Mini Dress (dress)'],
       null
     );
-    assert.match(prompt, /整套穿搭为主|完整造型/);
-    assert.match(prompt, /点缀|融入整体/);
+    assert.match(prompt, /图1Mini Dress原样穿上/);
+    assert.match(prompt, /没有照片的单品：Choker/);
     assert.doesNotMatch(prompt, /配饰特写|配饰比例【强制】|耳垂大小/);
   });
 
@@ -150,13 +144,46 @@ describe('buildSeedreamImagePrompt', () => {
       ['黑色机车皮衣 (outerwear) — anchor garment'],
       null
     );
-    assert.match(prompt, /整套穿着/);
-    assert.match(prompt, /leather jacket worn open/);
-    assert.match(prompt, /穿搭构成/);
-    assert.match(prompt, /无参考图单品/);
-    assert.match(prompt, /修身奶油色短袖T恤\(inner_top\)：奶油色棉质短袖T恤，圆领，短袖到上臂，衣身修身。/);
-    assert.match(prompt, /叠穿层次/);
-    assert.match(prompt, /敞开或半敞/);
+    assert.match(prompt, /图1黑色机车皮衣原样穿上/);
+    assert.match(prompt, /没有照片的单品：修身奶油色短袖T恤，奶油色棉质短袖T恤，圆领，短袖到上臂，衣身修身。；格纹半裙/);
+    assert.doesNotMatch(prompt, /整套穿着|leather jacket worn open|叠穿层次|敞开或半敞/);
+  });
+
+  it('does not treat a named second purchase photo as text-only', () => {
+    const uploads: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '浅粉白细条纹宽松长袖衬衫', layer: 'inner_top', reason: '上衣' },
+        {
+          id: 'new_item',
+          name: '米白/浅米色解构阔腿长裤',
+          layer: 'bottom',
+          reason: '裤子',
+          description: '米白解构阔腿裤，高腰，斜向分割线。',
+        },
+        { id: 'new_item', name: '深棕方头乐福鞋', layer: 'shoes', reason: '鞋' },
+      ],
+      visual_composition: {
+        model_pose: 'standing',
+        outfit_details: 'striped shirt with deconstructed wide-leg pants',
+        background: 'grey wall',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      uploads,
+      undefined,
+      [
+        '人物参考（只取脸、发型、肤色和身体比例，禁止穿这张照片里的衣服）',
+        '浅粉白细条纹宽松长袖衬衫 (inner_top) — purchase ref',
+        '米白/浅米色解构阔腿长裤 (bottom) — purchase ref',
+      ],
+      null
+    );
+    assert.match(prompt, /图2浅粉白细条纹宽松长袖衬衫、图3米白\/浅米色解构阔腿长裤原样穿上/);
+    assert.match(prompt, /没有照片的单品：深棕方头乐福鞋/);
+    assert.doesNotMatch(prompt, /斜向分割线|striped shirt/);
+    assert.doesNotMatch(prompt, /没有照片的单品[\s\S]*解构阔腿长裤/);
+    assert.ok(prompt.length <= 300);
   });
 
   it('injects full wardrobe descriptions so front pleats are not lost to label truncation', () => {
@@ -190,11 +217,9 @@ describe('buildSeedreamImagePrompt', () => {
       ],
       null
     );
-    assert.match(prompt, /衣橱单品原文/);
-    assert.match(prompt, /front pleats/);
-    assert.match(prompt, /以衣橱原文|结构细节以此为准/);
+    assert.match(prompt, /图1Wide-Leg Trousers原样穿上/);
+    assert.doesNotMatch(prompt, /衣橱单品原文|front pleats|pleated trousers/);
     assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /没有参考图的单品以穿着描述为准/);
-    // 参考图短标签不应把整段 description 硬塞进 48 字窗口后静默丢失语义来源
     assert.doesNotMatch(prompt, /图1Wide-Leg Trousers \| bottom \| BOTTOM/);
   });
 
@@ -203,10 +228,28 @@ describe('buildSeedreamImagePrompt', () => {
       ...outfit,
       selected_items: [
         { id: 'fleece', name: 'Fleece Pullover', layer: 'inner_top', reason: '中间层' },
-        { id: 'new_item', name: 'Insulated Waterproof Ski Jacket', layer: 'outerwear', reason: '新品' },
-        { id: 'new_item', name: 'Insulated Waterproof Ski Pants', layer: 'bottom', reason: '新品' },
+        {
+          id: 'new_item',
+          name: 'Insulated Waterproof Ski Jacket',
+          layer: 'outerwear',
+          reason: '新品',
+          description: 'navy hip-length ski jacket with a snow skirt at the hem',
+        },
+        {
+          id: 'new_item',
+          name: 'Insulated Waterproof Ski Pants',
+          layer: 'bottom',
+          reason: '新品',
+          description: 'black high-waisted ski pants',
+        },
         { id: 'new_item', name: 'Ski Boots', layer: 'shoes', reason: '新品' },
-        { id: 'new_item', name: 'Ski Gloves, Beanie & Goggles', layer: 'accessory', reason: '新品' },
+        {
+          id: 'new_item',
+          name: 'Ski Gloves, Beanie & Goggles',
+          layer: 'accessory',
+          reason: '新品',
+          description: 'gray ribbed knit beanie, black ski gloves, and clear anti-fog ski goggles',
+        },
       ],
       visual_composition: {
         model_pose: 'A fashion model standing confidently on a snowy ski slope, holding ski poles, smiling warmly',
@@ -225,9 +268,9 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /防雪裙，属于外套下摆，不是半身裙/);
     assert.match(prompt, /gray ribbed knit beanie/);
     assert.match(prompt, /clear anti-fog ski goggles/);
-    assert.match(prompt, /Ski Gloves, Beanie & Goggles\(accessory\)/);
+    assert.match(prompt, /没有照片的单品：[\s\S]*Ski Gloves, Beanie & Goggles/);
     assert.match(prompt, /下装必须是长滑雪裤/);
-    assert.match(prompt, /禁止用参考图的品类或颜色替代/);
+    assert.doesNotMatch(prompt, /Fleece Pullover as a mid-layer/);
   });
 
   it('专用款式写成禁令，斗篷和系带外层不强制敞开', () => {

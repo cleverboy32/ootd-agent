@@ -9,6 +9,26 @@ import {
 } from '@/server/utils/messageContent';
 import { mergeLocationIntoProfileData } from '@/server/utils/profileMetadata';
 
+/** 当前消息之前的搭配结果，从旧到新。 */
+export async function getPriorStylistResults(
+  conversationId: string,
+  excludeMessageId?: string
+): Promise<StylistCacheNode['stylist_result'][]> {
+  const messages = await prismadb.message.findMany({
+    where: { conversationId, role: 'assistant' },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+    select: { id: true, content: true },
+  });
+  const results: StylistCacheNode['stylist_result'][] = [];
+  for (const msg of messages.reverse()) {
+    if (excludeMessageId && msg.id === excludeMessageId) continue;
+    const cache = extractStylistCache(msg.content);
+    if (cache) results.push(cache.stylist_result);
+  }
+  return results;
+}
+
 export async function getPreviousStylistCache(
   conversationId: string,
   excludeMessageId?: string

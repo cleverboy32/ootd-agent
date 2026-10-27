@@ -93,6 +93,11 @@ export const OutfitPipelineAnnotation = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => false,
   }),
+  /** 文字已能独立搭配、上传图不是衣服时，在方案前补的一句说明 */
+  ignoredUploadNote: Annotation<string>({
+    reducer: (_left, right) => right,
+    default: () => '',
+  }),
   cachedPersonalStyle: Annotation<string>({
     reducer: (_left, right) => right,
     default: () => '',

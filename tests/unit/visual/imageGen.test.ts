@@ -196,6 +196,31 @@ describe('buildOutfitReferenceInputs', () => {
     assert.match(referenceLabels[1], /si_1/);
   });
 
+  it('uses the bound purchase label for the anchor instead of the first new_item', () => {
+    const dualNew: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '深棕方头乐福鞋', layer: 'shoes', reason: 'a' },
+        { id: 'new_item', name: '浅粉白细条纹宽松长袖衬衫', layer: 'inner_top', reason: 'b' },
+      ],
+    };
+    const { referenceLabels } = buildOutfitReferenceInputs(
+      dualNew,
+      [],
+      undefined,
+      undefined,
+      'https://cdn.example/shirt.jpg',
+      [
+        {
+          url: 'https://cdn.example/shirt.jpg',
+          label: '浅粉白细条纹宽松长袖衬衫 (inner_top) — purchase ref',
+        },
+      ]
+    );
+    assert.match(referenceLabels[0], /浅粉白细条纹宽松长袖衬衫/);
+    assert.doesNotMatch(referenceLabels[0], /乐福鞋/);
+  });
+
   it('includes accessory reference images for style fidelity', () => {
     const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
       outfitWithAccessory,

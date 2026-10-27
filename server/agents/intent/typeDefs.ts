@@ -7,6 +7,7 @@ export type OutfitRequestType =
   | 'wardrobe_pairing'
   | 'purchase_pairing'
   | 'feedback_revision'
+  | 'outfit_redo'
   | 'outfit_selection'
   | 'outfit_confirmed'
   | 'clarify'
@@ -73,6 +74,11 @@ export interface GatekeeperIntent {
    * 单件上传仍只使用上面的 summary / slot / session_item_id。
    */
   purchase_items?: PurchaseUploadItem[];
+  /**
+   * 本轮有上传图，但 Gatekeeper 不看画面，锚定描述留给搭配师。
+   * 为 true 时 purchase_pairing 可以先放行。
+   */
+  purchase_vision_pending?: boolean;
   /** outfit_selection 时用户选中的方案 id，如 outfit_1 */
   selected_outfit_id?: string;
   /** wardrobe_pairing 时已确认的衣橱单品 id */

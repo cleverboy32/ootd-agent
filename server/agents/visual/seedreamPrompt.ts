@@ -190,9 +190,86 @@ export function outfitHasAccessoryItem(
 export const OVERALL_OUTFIT_LOOK_CONSTRAINT =
   '构图以整套穿搭为主：上装/下装/鞋履与配饰组成一套完整造型；参考图用于还原各单品的款式与颜色，最终画面必须是全身协调的街拍穿搭，配饰自然佩戴融入整体，不得做成单品特写拼贴或抢戏焦点。';
 
+function referenceDisplayName(label: string): string {
+  const head = label.split(/\s*[|—]\s*/)[0]?.trim() ?? label.trim();
+  return head.replace(/\s*\([^)]*\)\s*$/, '').trim() || label.trim();
+}
+
+function oneClause(text: string, maxLen = 36): string {
+  const cleaned = simplifyVisualText(text, maxLen);
+  const cut = cleaned.split(/[。；;]/)[0]?.trim() ?? cleaned;
+  return cut.length > maxLen ? cut.slice(0, maxLen) : cut;
+}
+
 /**
- * Seedream 专用紧凑中文 prompt（官方建议中文不超过约 300 字，避免信息分散）。
- * 强调：亚洲面孔、真实街拍、反 AI 塑料感；有参考图时仍保留文字穿搭描述。
+ * 有单品参考图时只留短句。版型交给照片，文字再写结构会被画成另一件衣服。
+ * 官方建议中文提示词约 300 字以内。
+ */
+function buildShortReferencePrompt(
+  outfit: StylistOutfit,
+  referenceLabels: string[],
+  garmentLabels: string[],
+  hasPersonReference: boolean,
+  subject: string
+): string {
+  const lines: string[] = [];
+  if (hasPersonReference) {
+    lines.push('图1只取脸和身材，不取这张照片里的衣服。');
+  } else if (subject) {
+    lines.push(`真实街拍，${subject}。`);
+  } else {
+    lines.push('真实街拍。');
+  }
+
+  const firstGarmentIndex = hasPersonReference ? 2 : 1;
+  const worn = garmentLabels
+    .map((label, index) => `图${firstGarmentIndex + index}${referenceDisplayName(label)}`)
+    .join('、');
+  lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。`);
+
+  const textOnly = listTextOnlyItems(outfit, referenceLabels);
+  if (textOnly.length > 0) {
+    const bits = textOnly.map((item) => {
+      const name = item.name.trim();
+      const desc = disambiguateImageGarmentTerms(item.description?.trim() ?? '');
+      if (!desc || desc === name) return name;
+      return desc.startsWith(name) ? desc : `${name}，${desc}`;
+    });
+    lines.push(`没有照片的单品：${bits.join('；')}。`);
+  }
+
+  const textOnlyOutfit: StylistOutfit = {
+    ...outfit,
+    selected_items: textOnly.map((item) => ({
+      id: item.id,
+      name: item.name,
+      layer: item.layer,
+      reason: '',
+      description: item.description,
+    })),
+    visual_composition: {
+      ...outfit.visual_composition,
+      outfit_details: textOnly.map((item) => `${item.name} ${item.description ?? ''}`).join(' '),
+    },
+  };
+  const drawRules = garmentDrawConstraints(textOnlyOutfit);
+  if (drawRules.length > 0) lines.push(drawRules.join(''));
+
+  const textBlob = textOnly.map((item) => `${item.name} ${item.description ?? ''}`).join(' ');
+  if (/ski pants|滑雪裤|powder gaiter|防雪裙/i.test(textBlob)) {
+    lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
+  }
+
+  const scene = oneClause(outfit.visual_composition.background);
+  const pose = oneClause(outfit.visual_composition.model_pose);
+  if (scene) lines.push(`场景：${scene}。`);
+  if (pose) lines.push(`姿态：${pose}。`);
+  return lines.join('\n');
+}
+
+/**
+ * Seedream 专用中文 prompt。
+ * 有单品参考图时走短句（照片锁版型）；没有单品图时才展开穿着描述和款式限制。
  */
 export function buildSeedreamImagePrompt(
   outfit: StylistOutfit,
@@ -203,6 +280,15 @@ export function buildSeedreamImagePrompt(
   const hasPersonReference = isPersonReferenceLabel(referenceLabels[0] ?? '');
   const garmentLabels = hasPersonReference ? referenceLabels.slice(1) : referenceLabels;
   const subject = buildModelSubjectDescription(userProfile, { hasPersonReference });
+  if (garmentLabels.length > 0) {
+    return buildShortReferencePrompt(
+      outfit,
+      referenceLabels,
+      garmentLabels,
+      hasPersonReference,
+      subject
+    );
+  }
   const scene = simplifyVisualText(outfit.visual_composition.background);
   // 穿着描述含配饰颜色，截断会把句尾的帽子、雪镜切掉
   const outfitDesc = disambiguateImageGarmentTerms(

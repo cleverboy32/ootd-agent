@@ -11,11 +11,12 @@ import {
 } from '@/server/logging/request';
 
 describe('toRequestAuditRequestType', () => {
-  it('maps all 8 OutfitRequestType values', () => {
+  it('maps all OutfitRequestType values', () => {
     assert.equal(toRequestAuditRequestType('wardrobe_outfit'), RequestAuditRequestType.WardrobeOutfit);
     assert.equal(toRequestAuditRequestType('wardrobe_pairing'), RequestAuditRequestType.WardrobePairing);
     assert.equal(toRequestAuditRequestType('purchase_pairing'), RequestAuditRequestType.PurchasePairing);
     assert.equal(toRequestAuditRequestType('feedback_revision'), RequestAuditRequestType.FeedbackRevision);
+    assert.equal(toRequestAuditRequestType('outfit_redo'), RequestAuditRequestType.OutfitRedo);
     assert.equal(toRequestAuditRequestType('outfit_selection'), RequestAuditRequestType.OutfitSelection);
     assert.equal(toRequestAuditRequestType('outfit_confirmed'), RequestAuditRequestType.OutfitConfirmed);
     assert.equal(toRequestAuditRequestType('clarify'), RequestAuditRequestType.Clarify);

@@ -72,7 +72,11 @@ const REVISION_TARGET_PATTERN =
 const REVISION_ACTION_PATTERN =
   /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
 const FULL_REGEN_PATTERN =
-  /都不好|都不满意|都不喜欢|全都不|全部重(?:做|来|新)|换一批|重新生成|再来一套|再来几套|重新(?:搭配|推荐|出方案)|搭配得?太烂|搭配太烂|太丑|太差|不喜欢这套|这套不行/;
+  /重新生成|再来(?:一|几)套|换一批|全部重(?:做|来|新)|重新(?:搭配|推荐|出方案|做)|重做/;
+const BARE_DISSATISFACTION_PATTERN =
+  /不满意|不喜欢|不太行|都不行|都不好|这套不行|太烂|太丑|太差|不太好|一般般/;
+const CONCRETE_EDIT_PATTERN =
+  /换成|改成|换一下|改一下|去掉|换掉|加一件|加上|保留/;
 const NEW_OUTFIT_REQUEST_PATTERN =
   /穿啥|穿什么|怎么穿|怎么搭|搭配一套|配一套|来一套|出一套|穿搭方案|应该穿|适合穿/;
 const OCCASION_KEYWORDS =
@@ -401,7 +405,8 @@ export function isOutfitGeneratingIntent(intent: GatekeeperIntent): boolean {
     intent.request_type === 'wardrobe_outfit' ||
     intent.request_type === 'wardrobe_pairing' ||
     intent.request_type === 'purchase_pairing' ||
-    intent.request_type === 'feedback_revision'
+    intent.request_type === 'feedback_revision' ||
+    intent.request_type === 'outfit_redo'
   );
 }
 
@@ -526,11 +531,9 @@ export function getResolvedAnchorFromIntent(
 }
 
 export function isPurchasePairingAnchorReady(intent: GatekeeperIntent): boolean {
-  return (
-    isPurchasePairingIntent(intent) &&
-    Boolean(intent.anchor_item_summary.trim()) &&
-    Boolean(intent.anchor_slot)
-  );
+  if (!isPurchasePairingIntent(intent)) return false;
+  if (intent.purchase_vision_pending) return true;
+  return Boolean(intent.anchor_item_summary.trim()) && Boolean(intent.anchor_slot);
 }
 
 export function isWardrobePairingAnchorReady(intent: GatekeeperIntent): boolean {
@@ -609,16 +612,18 @@ export function coerceWardrobeBrowseIntent(
 
 export function looksLikeFullRegenRequest(text: string): boolean {
   const normalized = text.trim();
-  if (!normalized) return false;
+  if (!normalized || !FULL_REGEN_PATTERN.test(normalized)) return false;
+  // 点名了某一套再重做，是微调那一套，不是整套重做
+  return !REVISION_TARGET_PATTERN.test(normalized);
+}
 
-  if (FULL_REGEN_PATTERN.test(normalized)) return true;
-
-  // 「重新搭配/重做」且未指定要改哪一套 → 整轮重做，不是微调
-  if (/重新(?:搭配|做|来|推荐)/.test(normalized) && !REVISION_TARGET_PATTERN.test(normalized)) {
-    return true;
-  }
-
-  return false;
+/** 只表达不满意，没有要求重做，也没有点名改哪一件。 */
+export function looksLikeBareDissatisfaction(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized || looksLikeFullRegenRequest(normalized)) return false;
+  if (CONCRETE_EDIT_PATTERN.test(normalized)) return false;
+  if (REVISION_TARGET_PATTERN.test(normalized) && REVISION_ACTION_PATTERN.test(normalized)) return false;
+  return BARE_DISSATISFACTION_PATTERN.test(normalized);
 }
 
 export function hasExplicitRevisionSignal(text: string): boolean {
@@ -687,6 +692,7 @@ export function normalizeGatekeeperIntent(
   if (typeof merged.session_item_id !== 'string') merged.session_item_id = '';
   if (typeof merged.anchor_image_url !== 'string') merged.anchor_image_url = '';
   merged.purchase_items = normalizePurchaseItems(merged.purchase_items);
+  merged.purchase_vision_pending = Boolean(intent?.purchase_vision_pending);
   return merged;
 }
 
@@ -841,9 +847,6 @@ export function enrichIntentFromContext(
   const currentImageUrls = takePurchaseUploadUrls(
     options?.currentImageUrls ?? (options?.currentImageUrl ? [options.currentImageUrl] : [])
   );
-  if (currentImageUrls.length > 1 && normalized.request_type === 'wardrobe_outfit') {
-    normalized.request_type = 'purchase_pairing';
-  }
 
   const currentText = extractTextFromParts(currentInput);
   const confirmedWardrobeId = extractConfirmedWardrobeId(currentText);
@@ -888,6 +891,9 @@ export function enrichIntentFromContext(
       options?.sessionItems ?? [],
       currentImageUrls
     );
+    const summary = normalized.anchor_item_summary.trim();
+    const unresolved = !summary || summary === '用户上传的待购单品' || !normalized.anchor_slot;
+    normalized.purchase_vision_pending = currentImageUrls.length > 0 && unresolved;
     // 本轮仍有 inlineData 时保留，供非 Seedream 路径；URL 优先写在 anchor_image_url
     const latest = collectLatestImageData(history, currentInput);
     if (latest) normalized.anchor_item_image_data = latest;
@@ -897,5 +903,82 @@ export function enrichIntentFromContext(
     normalized.session_item_id = '';
   }
 
-  return normalized;
+  return holdBareDissatisfaction(
+    repairFullRegenIntent(normalized, currentText, {
+      sessionItemCount: options?.sessionItems?.length ?? 0,
+      hasCurrentUpload: currentImageUrls.length > 0,
+    }),
+    currentText
+  );
+}
+
+const FULL_REGEN_REPAIR_TYPES = new Set([
+  'purchase_pairing',
+  'wardrobe_outfit',
+  'feedback_revision',
+  'clarify',
+  'outfit_redo',
+]);
+
+/**
+ * 用户明确要求重做（重新生成、再来一套、换一批）。
+ * 会话里有待购图时交给搭配师看最近一次上传；没有图则按衣橱重做。
+ * 不保留单个 session_item_id，同一次上传的多张图不能只留一件。
+ */
+export function repairFullRegenIntent(
+  intent: GatekeeperIntent,
+  currentText: string,
+  options: { sessionItemCount: number; hasCurrentUpload: boolean }
+): GatekeeperIntent {
+  const redo = intent.request_type === 'outfit_redo';
+  if (options.hasCurrentUpload || (!redo && !looksLikeFullRegenRequest(currentText))) return intent;
+  if (!looksLikeFullRegenRequest(currentText)) return intent;
+  if (!FULL_REGEN_REPAIR_TYPES.has(intent.request_type)) return intent;
+
+  const base = {
+    ...intent,
+    selected_outfit_id: '',
+    anchor_item_summary: '',
+    anchor_slot: '' as const,
+    purchase_items: [] as GatekeeperIntent['purchase_items'],
+    session_item_id: '',
+    anchor_image_url: '',
+    occasion: intent.occasion.trim() || '日常百搭',
+    special_requests: intent.special_requests.trim() || currentText.trim(),
+  };
+
+  if (options.sessionItemCount > 0) {
+    return {
+      ...base,
+      request_type: 'outfit_redo',
+      purchase_vision_pending: true,
+    };
+  }
+
+  return {
+    ...base,
+    request_type: 'wardrobe_outfit',
+    purchase_vision_pending: false,
+  };
+}
+
+/** 只说不满意、没让重做：停下来问要改哪里，不出新方案。 */
+export function holdBareDissatisfaction(
+  intent: GatekeeperIntent,
+  currentText: string
+): GatekeeperIntent {
+  if (!looksLikeBareDissatisfaction(currentText)) return intent;
+  if (
+    intent.request_type === 'style_advice' ||
+    intent.request_type === 'outfit_selection' ||
+    intent.request_type === 'outfit_confirmed'
+  ) {
+    return intent;
+  }
+  return {
+    ...intent,
+    request_type: 'clarify',
+    selected_outfit_id: '',
+    purchase_vision_pending: false,
+  };
 }

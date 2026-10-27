@@ -23,6 +23,8 @@ import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
 import { resolveDressingClimateForIntent } from '@/server/utils/ragSeasonFilter';
 import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
 import { formatSessionItemsForGate } from '@/server/utils/sessionItems';
+import { imageCountFact, stripHistoryImages, stripImageParts } from './textInput';
+import { releaseDeicticUpload } from '../stylist/uploadVision';
 import type { SessionPurchaseItem } from '@/server/utils/sessionItems';
 import { normalizeProfileUpdate } from '@/server/utils/profileUpdatePatch';
 
@@ -115,10 +117,15 @@ export async function callGatekeeperAgent(
   console.log('[GATEKEEPER_AGENT] Evaluating user request...');
 
   const sessionBlock = formatSessionItemsForGate(ctx.sessionItems ?? []);
-  const gatedInput: Part[] = sessionBlock
-    ? [{ text: sessionBlock }, ...currentInput]
-    : currentInput;
-  const contents: Content[] = [...history, { role: 'user', parts: gatedInput }];
+  const imageCount = ctx.currentImageUrls?.length || (ctx.currentImageUrl ? 1 : 0);
+  const fact = imageCountFact(imageCount);
+  const textInput = stripImageParts(currentInput);
+  const gatedInput: Part[] = [
+    ...(sessionBlock ? [{ text: sessionBlock }] : []),
+    ...(fact ? [{ text: fact }] : []),
+    ...textInput,
+  ];
+  const contents: Content[] = [...stripHistoryImages(history), { role: 'user', parts: gatedInput }];
 
   try {
     const response = await withRetryOn429(
@@ -151,13 +158,21 @@ export async function callGatekeeperAgent(
     const wasCoercedBrowse =
       intentBeforeCoerce === 'clarify' && coercedIntent.request_type === 'wardrobe_pairing';
 
-    const { intent, suggestCityForWeather, fetchedWeather } = await finalizeGatekeeperIntent(
+    const finalized = await finalizeGatekeeperIntent(
       coercedIntent,
       history,
       currentInput,
       ctx,
       parsed.weather_lookup
     );
+
+    const imageCount = ctx.currentImageUrls?.length || (ctx.currentImageUrl ? 1 : 0);
+    const intent = releaseDeicticUpload(
+      finalized.intent,
+      imageCount,
+      extractTextFromParts(currentInput)
+    );
+    const { suggestCityForWeather, fetchedWeather } = finalized;
 
     let wardrobeResolver;
     if (

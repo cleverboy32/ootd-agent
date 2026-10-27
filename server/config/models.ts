@@ -50,6 +50,10 @@ export const AGENT_MODELS = {
     process.env.LLM_MODEL_IMAGE?.trim() ||
     (useVertexImage ? VERTEX_DEFAULTS.imageGen : 'doubao-seedream-4-0-250828'),
   stylist: chatModel('LLM_MODEL_STYLIST', VERTEX_DEFAULTS.stylist),
+  /** 搭配师看上传图。文本模型不识图，走视觉变体。 */
+  stylistVision: useVertexChat
+    ? chatModel('LLM_MODEL_STYLIST', VERTEX_DEFAULTS.stylist)
+    : openaiVisionChat,
   userProfile: chatModel('LLM_MODEL_USER_PROFILE', VERTEX_DEFAULTS.userProfile),
   summarization: chatModel('LLM_MODEL_SUMMARIZATION', VERTEX_DEFAULTS.summarization),
   reasoning: chatModel('LLM_MODEL_REASONING', VERTEX_DEFAULTS.reasoning),

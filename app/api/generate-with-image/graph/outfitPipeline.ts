@@ -8,6 +8,7 @@ import {
   parallelFromCacheNode,
   parallelOutfitsNode,
   routeAfterGatekeeper,
+  routeAfterStylist,
   styleAdvicePathNode,
   stylistNode,
 } from './nodes';
@@ -35,7 +36,10 @@ function buildFreshPathGraph() {
     .addEdge('styleAdvicePath', END)
     .addEdge('followupPath', END)
     .addEdge('loadProfile', 'stylist')
-    .addEdge('stylist', 'parallelOutfits')
+    .addConditionalEdges('stylist', routeAfterStylist, {
+      followupPath: 'followupPath',
+      parallelOutfits: 'parallelOutfits',
+    })
     .addEdge('parallelOutfits', END);
 }
 

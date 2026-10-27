@@ -8,6 +8,7 @@ import {
   correctDressingClimate,
   extractConfirmedWardrobeId,
   extractOutfitIdFromText,
+  enrichIntentFromContext,
   finalizeGatekeeperResult,
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
@@ -782,5 +783,105 @@ describe('finalizeGatekeeperResult — wardrobe_pairing', () => {
     assert.equal(result.wardrobe_candidates?.length, 1);
     assert.match(result.gatekeeper_reply ?? '', /没有找到符合「白色裙子」/);
     assert.match(result.gatekeeper_reply ?? '', /light green|浅绿/i);
+  });
+});
+
+describe('repairFullRegenIntent', () => {
+  it('reuses session uploads instead of asking which garment to pair', () => {
+    const enriched = enrichIntentFromContext(
+      normalizeGatekeeperIntent({
+        request_type: 'purchase_pairing',
+        occasion: '日常百搭',
+        anchor_item_summary: '',
+        anchor_slot: '',
+        session_item_id: 'si_3',
+        special_requests: '重新生成',
+      }),
+      [],
+      [{ text: '都不太行，重新生成吧' }],
+      {
+        sessionItems: [
+          { id: 'si_1', imageUrl: 'https://example.com/shirt.jpg' },
+          { id: 'si_2', imageUrl: 'https://example.com/pants.jpg' },
+        ],
+      }
+    );
+    const result = finalizeGatekeeperResult({
+      extracted_intent: enriched,
+      modelIsComplete: true,
+      currentMessageText: '都不太行，重新生成吧',
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.request_type, 'outfit_redo');
+    assert.equal(result.extracted_intent.purchase_vision_pending, true);
+    assert.equal(result.extracted_intent.session_item_id, '');
+    assert.equal(result.extracted_intent.selected_outfit_id, '');
+    assert.deepEqual(result.followup_questions, []);
+  });
+
+  it('uses a wardrobe outfit when regen has no uploaded garment to reuse', () => {
+    const enriched = enrichIntentFromContext(
+      normalizeGatekeeperIntent({
+        request_type: 'purchase_pairing',
+        occasion: '日常百搭',
+        anchor_item_summary: '',
+        anchor_slot: '',
+      }),
+      [],
+      [{ text: '都不太行，重新生成吧' }]
+    );
+    const result = finalizeGatekeeperResult({
+      extracted_intent: enriched,
+      currentMessageText: '都不太行，重新生成吧',
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.request_type, 'wardrobe_outfit');
+    assert.equal(result.gatekeeper_reply ?? '', '');
+  });
+
+  it('asks what to change when the user is unhappy but did not ask to redo', () => {
+    const enriched = enrichIntentFromContext(
+      normalizeGatekeeperIntent({
+        request_type: 'outfit_redo',
+        occasion: '日常百搭',
+        special_requests: '用户不满意',
+      }),
+      [],
+      [{ text: '都不太行' }],
+      {
+        sessionItems: [
+          { id: 'si_3', imageUrl: 'https://example.com/shirt.jpg' },
+          { id: 'si_4', imageUrl: 'https://example.com/pants.jpg' },
+        ],
+      }
+    );
+    const result = finalizeGatekeeperResult({
+      extracted_intent: enriched,
+      modelIsComplete: true,
+      currentMessageText: '都不太行',
+    });
+
+    assert.equal(result.is_complete, false);
+    assert.equal(result.extracted_intent.request_type, 'clarify');
+    assert.match(result.gatekeeper_reply ?? '', /要改的地方/);
+  });
+});
+
+describe('purchase_vision_pending', () => {
+  it('lets purchase_pairing through before the stylist has seen the photo', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'purchase_pairing',
+        occasion: '日常百搭',
+        anchor_item_summary: '',
+        anchor_slot: '',
+        purchase_vision_pending: true,
+      }),
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.purchase_vision_pending, true);
   });
 });

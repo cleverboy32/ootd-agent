@@ -31,6 +31,8 @@ export enum RequestAuditRequestType {
   PurchasePairing = 'purchase_pairing',
   /** 对上一轮方案的明确修改（微调，非整轮重做） */
   FeedbackRevision = 'feedback_revision',
+  /** 用户明确要求整套重做 */
+  OutfitRedo = 'outfit_redo',
   /** 只表示更喜欢第几套，未说满意或微调 */
   OutfitSelection = 'outfit_selection',
   /** 已选定且明确满意、可直接穿 */

@@ -40,8 +40,21 @@ import {
 import { buildAndLogStylistSelection } from '@/server/logging/stylist';
 import type { StylistSelectionSlotSnapshot } from '@/server/logging/stylist';
 import { buildSkillBlocks } from '@/server/skills/loadSkill';
+import { urlToGenerativePart } from '@/server/utils/image';
+import { stripHistoryImages } from '../gatekeeper/textInput';
+import {
+  UPLOAD_GARMENT_OUTFIT_ADDENDUM,
+  decideUploadVision,
+  identifyUploadGarments,
+  rememberedUploadGarments,
+  shouldInspectUploads,
+} from './uploadVision';
 
 export type { StylistOutfit, StylistResult, StyleAdviceResult, StylistAgentOptions } from './schema';
+
+export type StylistTurn =
+  | { type: 'outfits'; result: StylistResult; intent: GatekeeperIntent; ignoredUploadNote: string }
+  | { type: 'text'; reply: string };
 
 /**
  * 调用 Stylist Agent 生成结构化风格建议（advice 模式，不走 RAG）
@@ -77,7 +90,7 @@ ${userMessage || '（请根据历史对话推断咨询主题）'}
 请针对用户的咨询主题，给出专业、实用的风格建议。
 `;
 
-  const contents: Content[] = [...history, { role: 'user', parts: [{ text: prompt }] }];
+  const contents: Content[] = [...stripHistoryImages(history), { role: 'user', parts: [{ text: prompt }] }];
 
   const response = await withRetryOn429(
     () =>
@@ -205,7 +218,7 @@ ${strategyHint}
 请输出衣橱检索 query 列表：
 `;
 
-  const contents: Content[] = [...history, { role: 'user', parts: [{ text: prompt }] }];
+  const contents: Content[] = [...stripHistoryImages(history), { role: 'user', parts: [{ text: prompt }] }];
 
   let systemInstruction = WARDROBE_SEARCH_INSTRUCTION;
   if (isRevision) {
@@ -282,6 +295,91 @@ function resolveRagRefs(result: StylistResult, indexMap: Map<string, string>): v
       }
     }
   }
+}
+
+async function garmentPartsForIntent(
+  intent: GatekeeperIntent,
+  initialParts: Part[],
+  imageUrls: string[]
+): Promise<Part[]> {
+  if (!isPurchasePairingIntent(intent)) return [];
+  const cached = initialParts.filter((part) => part.inlineData?.data);
+  const parts: Part[] = [];
+  for (const item of listPurchaseAnchors(intent)) {
+    const url = item.imageUrl?.trim();
+    if (!url) continue;
+    const index = imageUrls.indexOf(url);
+    parts.push({ text: `上传单品参考，外观以这张图为准：${item.summary}` });
+    const cachedPart = index >= 0 ? cached[index] : undefined;
+    if (cachedPart) {
+      parts.push(cachedPart);
+      continue;
+    }
+    try {
+      parts.push(await urlToGenerativePart(url));
+    } catch (error) {
+      console.warn('[STYLIST_AGENT] garment photo unavailable:', url.slice(0, 80), error);
+    }
+  }
+  return parts;
+}
+
+/**
+ * 搭配师先看本轮上传图，再检索、再选品。不是衣服且这句话离不开图时，只回文字。
+ */
+export async function callStylistTurn(
+  history: Content[],
+  intent: GatekeeperIntent,
+  profile: UserProfileResult,
+  initialParts: Part[],
+  clientId?: string,
+  ragCache?: Map<string, ClothingItem>,
+  conversationId?: string,
+  options: StylistAgentOptions = {}
+): Promise<StylistTurn> {
+  let activeIntent = intent;
+  let ignoredUploadNote = '';
+  const imageUrls = (options.currentImageUrls ?? []).map((url) => url.trim()).filter(Boolean).slice(0, 4);
+  const userMessage = extractUserMessage(initialParts);
+
+  if (shouldInspectUploads(activeIntent.request_type, imageUrls.length)) {
+    const remembered =
+      activeIntent.request_type === 'outfit_redo'
+        ? rememberedUploadGarments(options.priorStylistResults ?? [], imageUrls)
+        : null;
+    if (remembered) {
+      console.log(
+        '[STYLIST_AGENT] Reusing prior upload identities:',
+        remembered.map((item) => item.identity).join(' | ')
+      );
+    }
+    const seen = remembered
+      ? { garments: remembered, textDependsOnImage: false }
+      : await identifyUploadGarments(imageUrls, userMessage, options.signal, initialParts);
+    const decision = decideUploadVision({
+      intent: activeIntent,
+      imageUrls,
+      garments: seen.garments,
+      textDependsOnImage: seen.textDependsOnImage,
+      userMessage,
+    });
+    if (decision.type === 'reply') return { type: 'text', reply: decision.reply };
+    activeIntent = decision.intent;
+    ignoredUploadNote = decision.ignoredUploadNote;
+  }
+
+  const uploadGarmentParts = await garmentPartsForIntent(activeIntent, initialParts, imageUrls);
+  const result = await callStylistAgent(
+    history,
+    activeIntent,
+    profile,
+    initialParts,
+    clientId,
+    ragCache,
+    conversationId,
+    { ...options, uploadGarmentParts }
+  );
+  return { type: 'outfits', result, intent: activeIntent, ignoredUploadNote };
 }
 
 /**
@@ -449,15 +547,22 @@ ${
 }
 `;
 
-  const contents: Content[] = [...history, { role: 'user', parts: [{ text: contextPrompt }] }];
+  const uploadGarmentParts = options.uploadGarmentParts ?? [];
+  const seesGarments = uploadGarmentParts.some((part) => part.inlineData?.data);
+  const contents: Content[] = [
+    ...stripHistoryImages(history),
+    { role: 'user', parts: [...uploadGarmentParts, { text: contextPrompt }] },
+  ];
 
   try {
     const response = await withRetryOn429(
       () =>
         llmGenerate({
-          model: AGENT_MODELS.stylist,
+          model: seesGarments ? AGENT_MODELS.stylistVision : AGENT_MODELS.stylist,
           contents,
-          systemInstruction: `${STYLIST_SYSTEM_INSTRUCTION}${buildSkillBlocks(selectStylistOutfitSkillNames(intent))}`,
+          systemInstruction: `${STYLIST_SYSTEM_INSTRUCTION}${
+            seesGarments ? UPLOAD_GARMENT_OUTFIT_ADDENDUM : ''
+          }${buildSkillBlocks(selectStylistOutfitSkillNames(intent))}`,
           temperature: 0.4,
           jsonSchema: stylistSchema,
           signal: options.signal,
@@ -509,6 +614,14 @@ ${
       purchaseUrls.length > 0
         ? purchaseUrls
         : previousCache?.stylist_result.purchase_image_urls;
+    const rememberedGarments = (intent.purchase_items ?? [])
+      .map((item) => ({
+        imageUrl: item.imageUrl?.trim() ?? '',
+        slot: item.slot,
+        identity: item.summary.trim(),
+      }))
+      .filter((item) => item.imageUrl && item.slot && item.identity);
+    if (rememberedGarments.length > 0) parsed.upload_garments = rememberedGarments;
     return parsed;
   } catch (error) {
     console.error('[STYLIST_AGENT] Error calling Stylist Agent:', error);

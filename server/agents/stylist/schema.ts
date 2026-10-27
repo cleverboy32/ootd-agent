@@ -51,6 +51,8 @@ export interface StylistResult {
   anchor_image_url?: string;
   /** 本轮一起搭配的上传图，第一张与 anchor_image_url 相同 */
   purchase_image_urls?: string[];
+  /** 上传图已经确认过的身份。重做时按 imageUrl 复用，不再重猜。 */
+  upload_garments?: Array<{ imageUrl: string; slot: string; identity: string }>;
 }
 
 export interface StyleAdviceResult {
@@ -67,6 +69,12 @@ export interface StylistAgentOptions {
   /** 写入 stylist-selection.jsonl */
   messageId?: string;
   signal?: AbortSignal;
+  /** 本轮上传图 URL。搭配师在检索前看这些图。 */
+  currentImageUrls?: string[];
+  /** 更早的搭配结果，从旧到新。重做时用来找回上传图身份。 */
+  priorStylistResults?: StylistResult[];
+  /** 已识别的上传单品图，附在选品调用里。 */
+  uploadGarmentParts?: import('@google/genai').Part[];
 }
 
 export const stylistSchema: Schema = {

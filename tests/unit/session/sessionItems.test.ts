@@ -6,6 +6,8 @@ import {
   formatSessionItemsForGate,
   resolveAnchorUrlFromSessionItems,
   buildAdditionalPurchaseImageRefs,
+  labelPurchaseUploads,
+  mergePurchaseImageRefs,
 } from '@/server/utils/sessionItems';
 import { bindPurchaseUploads, resolveSessionItemBinding } from '@/server/agents/intent/utils';
 import type { GatekeeperIntent } from '@/server/agents/intent';
@@ -143,6 +145,56 @@ describe('buildAdditionalPurchaseImageRefs', () => {
       'https://cdn.example/jacket.jpg'
     );
     assert.equal(refs.length, 0);
+  });
+});
+
+describe('labelPurchaseUploads', () => {
+  const outfit = {
+    selected_items: [
+      { id: 'new_item', name: '浅粉白细条纹宽松长袖衬衫', layer: 'inner_top' },
+      { id: 'new_item', name: '米白/浅米色解构阔腿长裤', layer: 'bottom' },
+      { id: 'new_item', name: '深棕方头乐福鞋', layer: 'shoes' },
+      { id: 'new_item', name: '极细金链项链', layer: 'accessory' },
+    ],
+  };
+
+  it('binds each upload to the matching new_item name, including the second photo', () => {
+    const refs = labelPurchaseUploads(
+      outfit,
+      [
+        {
+          summary: '浅粉白细条纹宽松长袖衬衫，翻领、左胸口袋、落肩版型',
+          slot: 'top',
+          imageUrl: 'https://cdn.example/shirt.jpg',
+        },
+        {
+          summary: '米白/浅米色解构阔腿长裤，高腰、斜向分割线、宽松直筒阔腿版型',
+          slot: 'bottom',
+          imageUrl: 'https://cdn.example/pants.jpg',
+        },
+      ],
+      ['https://cdn.example/shirt.jpg', 'https://cdn.example/pants.jpg']
+    );
+    assert.equal(refs.length, 2);
+    assert.match(refs[1].label, /米白\/浅米色解构阔腿长裤/);
+    assert.match(refs[1].label, /bottom/);
+    assert.doesNotMatch(refs[1].label, /purchase upload/);
+    assert.match(refs[0].label, /衬衫/);
+  });
+
+  it('keeps the named label when a generic label is merged in', () => {
+    const merged = mergePurchaseImageRefs(
+      [
+        {
+          url: 'https://cdn.example/pants.jpg',
+          label: '米白/浅米色解构阔腿长裤 (bottom) — purchase ref',
+        },
+      ],
+      [{ url: 'https://cdn.example/pants.jpg', label: 'purchase upload 2' }],
+      ['米白/浅米色解构阔腿长裤']
+    );
+    assert.equal(merged.length, 1);
+    assert.match(merged[0].label, /解构阔腿长裤/);
   });
 });
 

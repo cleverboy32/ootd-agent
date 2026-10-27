@@ -63,5 +63,12 @@ export async function callVisualDirectorAgent(
   });
 
   onImageGenerated?.(imageId, publicUrl);
-  scheduleVisualAudit(outfit, imageId, publicUrl, imageBase64, mimeType);
+  scheduleVisualAudit(
+    outfit,
+    imageId,
+    publicUrl,
+    imageBase64,
+    mimeType,
+    options?.additionalPurchaseRefs
+  );
 }

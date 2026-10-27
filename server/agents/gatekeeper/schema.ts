@@ -33,7 +33,7 @@ export const gatekeeperSchema: Schema = {
     is_complete: {
       type: Type.BOOLEAN,
       description:
-        '是否可进入搭配生成流程。wardrobe_outfit 需场合明确；purchase_pairing 需锚定单品；feedback_revision 有明确修改指令时为 true；style_advice 有可回答主题（如咨询风格、色彩、穿搭方法等）时填 true，由 Stylist 以建议模式回答；主题完全不明确时才填 false；outfit_selection / outfit_confirmed / clarify 意图不明或已定稿，填 false，由 gatekeeper_reply 直接回复用户。',
+        '是否可进入搭配生成流程。wardrobe_outfit 需场合明确；purchase_pairing 需锚定单品；feedback_revision 有明确修改指令时为 true；outfit_redo（用户明确要求整套重做）为 true；style_advice 有可回答主题（如咨询风格、色彩、穿搭方法等）时填 true，由 Stylist 以建议模式回答；主题完全不明确时才填 false；outfit_selection / outfit_confirmed / clarify 意图不明或已定稿，填 false，由 gatekeeper_reply 直接回复用户。',
     },
     extracted_intent: {
       type: Type.OBJECT,
@@ -68,7 +68,7 @@ export const gatekeeperSchema: Schema = {
         request_type: {
           type: Type.STRING,
           description:
-            '请求类型：wardrobe_outfit（要看到一套造型，含推荐穿搭、想买衣服、想看新品）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| style_advice（只咨询穿搭知识：方法、公式、颜色怎么配、某风格怎么穿）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
+            '请求类型：wardrobe_outfit（要看到一套造型，含推荐穿搭、想买衣服、想看新品）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| outfit_redo（用户明确要求整套重做，不是只说不满意）| style_advice（只咨询穿搭知识：方法、公式、颜色怎么配、某风格怎么穿）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
         },
         selected_outfit_id: {
           type: Type.STRING,
@@ -83,12 +83,12 @@ export const gatekeeperSchema: Schema = {
         session_item_id: {
           type: Type.STRING,
           description:
-            'purchase_pairing：单件上传时填写【会话待购单品】清单中的 id。多件上传时填写 purchase_items 第一件的 id。feedback_revision 必须填空字符串。其他类型填空字符串。',
+            'purchase_pairing：单件上传时填写【会话待购单品】清单中的 id。多件上传时填写 purchase_items 第一件的 id。feedback_revision 和 outfit_redo 必须填空字符串。其他类型填空字符串。',
         },
         purchase_items: {
           type: Type.ARRAY,
           description:
-            '本轮要一起搭配的上传单品，按图片顺序，最多 4 件。每张图一条。没有多张图时填空数组。',
+            '留空数组。上传图的外观由搭配师看图填写，禁止臆造。',
           maxItems: '4',
           items: {
             type: Type.OBJECT,
@@ -99,7 +99,7 @@ export const gatekeeperSchema: Schema = {
               },
               summary: {
                 type: Type.STRING,
-                description: '这张图里的单品：颜色、品类和能看见的结构。',
+                description: '留空字符串。禁止描述没看见的画面。',
               },
               slot: {
                 type: Type.STRING,
@@ -112,7 +112,7 @@ export const gatekeeperSchema: Schema = {
         anchor_item_summary: {
           type: Type.STRING,
           description:
-            'purchase_pairing / wardrobe_pairing 时：锚定单品描述（颜色+品类+关键特征）。其他类型填空字符串。',
+            'wardrobe_pairing 时填用户说的衣橱单品。purchase_pairing 的上传图留空字符串，禁止臆造颜色和版型。其他类型填空字符串。',
         },
         wardrobe_search_query: {
           type: Type.STRING,
@@ -122,7 +122,7 @@ export const gatekeeperSchema: Schema = {
         anchor_slot: {
           type: Type.STRING,
           description:
-            'purchase_pairing / wardrobe_pairing 时锚定单品的穿搭槽位：top | bottom | dress | shoes | outerwear | accessory。耳环、项链、手链、戒指、包、腰带、围巾、帽子等必须填 accessory，禁止填 top。',
+            'wardrobe_pairing，或用户用文字说清的待购单品：top | bottom | dress | shoes | outerwear | accessory。配饰必须是 accessory。本轮上传图留空字符串。',
         },
         dressing_climate: {
           type: Type.STRING,

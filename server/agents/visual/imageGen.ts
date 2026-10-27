@@ -14,6 +14,7 @@ import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import type { ClothingItem } from '@prisma/client';
 import {
   buildSeedreamImagePrompt,
+  isPersonReferenceLabel,
   listTextOnlyItems,
   outfitNeedsOpenLayering,
   PERSON_REFERENCE_LABEL,
@@ -69,14 +70,22 @@ export function buildOutfitReferenceInputs(
       ? `data:${anchorImageData.mimeType};base64,${anchorImageData.data}`
       : undefined);
 
+  const purchaseLabelByUrl = new Map(
+    (additionalPurchaseRefs ?? [])
+      .filter((ref) => ref.url?.trim() && ref.label?.trim())
+      .map((ref) => [ref.url.trim(), ref.label.trim()])
+  );
+
   if (resolvedAnchorUrl) {
     referenceUrls.push(resolvedAnchorUrl);
+    const providedLabel = purchaseLabelByUrl.get(resolvedAnchorUrl);
     const anchorItem =
       outfit.selected_items.find((i) => i.id === 'new_item') ?? wardrobeItems[0];
     referenceLabels.push(
-      anchorItem
-        ? `${anchorItem.name} (${anchorItem.layer}) — anchor garment`
-        : 'anchor garment'
+      providedLabel ||
+        (anchorItem
+          ? `${anchorItem.name} (${anchorItem.layer}) — anchor garment`
+          : 'anchor garment')
     );
   }
 
@@ -249,7 +258,11 @@ async function generateWithSeedream(
     portraitImageUrl
   );
   const prompt = buildSeedreamImagePrompt(outfit, ragCache, referenceLabels, userProfile);
-  const fullPrompt = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
+  const hasGarmentReference = referenceLabels.some(
+    (label, index) => label.trim().length > 0 && !(index === 0 && isPersonReferenceLabel(label))
+  );
+  // 有单品图时短句本身就是整段提示词。再拼上长系统指令会把参考图挤掉。
+  const fullPrompt = hasGarmentReference ? prompt : `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
 
   const imageResponse = await withRetryOn429(
     () => callImageGen(fullPrompt, undefined, referenceUrls, signal),
