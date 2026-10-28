@@ -4,7 +4,8 @@ import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
-import { selectStylistOutfitSkillNames, selectStylistSkillNames } from './skillSelection';
+import { filterSkillsForWardrobeSearch, selectStylistOutfitSkillNames } from './skillSelection';
+import { selectStylistSkills } from './selectSkills';
 import { WardrobeSearchQuery, parseWardrobeSearchSlot, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
 import { alignStylistItemsWithWardrobe } from '@/server/utils/stylistItemAlign';
@@ -39,7 +40,15 @@ import {
 } from './prompts';
 import { buildAndLogStylistSelection } from '@/server/logging/stylist';
 import type { StylistSelectionSlotSnapshot } from '@/server/logging/stylist';
+import { logWardrobeQueryAudit } from '@/server/logging/wardrobeQuery';
 import { buildSkillBlocks } from '@/server/skills/loadSkill';
+import { scheduleWardrobeQueryCritic } from './queryCritic';
+import { scheduleStylistOutfitCritic } from './outfitCritic';
+import { applyWeatherQueryGuard } from './weatherQueryGuard';
+import {
+  buildNewItemDiversityBlock,
+  collectRecentNewItemLabels,
+} from './newItemDiversity';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { stripHistoryImages } from '../gatekeeper/textInput';
 import {
@@ -140,7 +149,10 @@ function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
   return map[slot] ?? 'inner_top';
 }
 
-export { selectStylistSkillNames };
+export type WardrobeSearchAuditContext = {
+  conversationId?: string;
+  messageId?: string;
+};
 
 export async function planWardrobeSearchQueries(
   history: Content[],
@@ -149,14 +161,17 @@ export async function planWardrobeSearchQueries(
   userMessage: string,
   anchorItem: AnchorItemInfo | null,
   signal?: AbortSignal,
-  purchaseAnchors: AnchorItemInfo[] = []
+  purchaseAnchors: AnchorItemInfo[] = [],
+  skillNames: string[] = [],
+  audit?: WardrobeSearchAuditContext
 ): Promise<WardrobeSearchQuery[]> {
   console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
 
   const anchors = purchaseAnchors.length > 0 ? purchaseAnchors : anchorItem ? [anchorItem] : [];
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchors.length > 0;
   const isRevision = intent.request_type === 'feedback_revision';
-  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage, profile));
+  const searchSkillNames = filterSkillsForWardrobeSearch(skillNames);
+  const skillBlock = buildSkillBlocks(searchSkillNames);
   const pairingBlock = isPairing
     ? `
 【锚定单品】
@@ -182,6 +197,7 @@ ${REVISION_SEARCH_ADDENDUM}
 `
     : '';
 
+  const hasStyleSkill = searchSkillNames.some((name) => name.startsWith('style-'));
   const strategyHint = isRevision
     ? `- 当前为【反馈微调】：只为 special_requests 要改的槽位出 query，未改槽位不要搜。`
     : isPairing
@@ -189,8 +205,13 @@ ${REVISION_SEARCH_ADDENDUM}
           anchors.length === 1 && anchors[0].slot === 'accessory'
             ? '锚定为配饰：必须输出 top、bottom、shoes 三条 query。'
             : ''
-        }`
+        }${hasStyleSkill ? '\n- 已注入风格技能：互补槽位的 query 必须遵循该技能「检索」节。' : ''}`
       : `- 若用户要「一套」穿搭：按槽位检索（上装 + 下装 + 鞋，视天气加外套），不要混搭裤装与连衣裙路线。
+${
+  hasStyleSkill
+    ? '- 已注入风格技能：有天气细则时先跟层次与厚薄（外套开不开、薄或厚）；各槽 query 必须带风格词（如甜美）并写清形态；禁止万能词（针织衫/薄外套/平底鞋）。'
+    : '- 无风格技能时：仍写清品类轮廓；场合正式或特殊则按场合需要的品类特制，不要用纯休闲默认词，鞋也不要无理由默认运动鞋。'
+}
 - 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。
 - 特殊要求是为某个季节买衣服或准备衣橱、且没有今天的天气时：用户点名冬季外套，才检索厚外套、大衣、棉服、羽绒服，不要搜薄外套或防晒。已有风格技能时，品类按技能，不要改成厚外套。`;
 
@@ -272,7 +293,59 @@ ${strategyHint}
     queries = filterQueriesForRevisionSlots(queries, intent.special_requests || userMessage);
   }
 
+  const guarded = applyWeatherQueryGuard(queries, {
+    weather: intent.weather || '',
+    skillNames: searchSkillNames,
+    userMessage,
+    specialRequests: intent.special_requests,
+  });
+  queries = guarded.queries;
+
   console.log('[STYLIST_AGENT] Wardrobe search queries:', queries);
+
+  void logWardrobeQueryAudit({
+    timestamp: new Date().toISOString(),
+    kind: 'queries',
+    conversationId: audit?.conversationId,
+    messageId: audit?.messageId,
+    userMessage,
+    occasion: intent.occasion,
+    specialRequests: intent.special_requests,
+    stylePreference: intent.style_preference,
+    skillNames: searchSkillNames,
+    queries: queries.map((item) => ({ slot: item.slot, query: item.query })),
+  }).catch((error) => {
+    console.warn('[WARDROBE_QUERY] log failed:', error);
+  });
+
+  if (guarded.changes.length > 0) {
+    void logWardrobeQueryAudit({
+      timestamp: new Date().toISOString(),
+      kind: 'weather_query_guard',
+      conversationId: audit?.conversationId,
+      messageId: audit?.messageId,
+      userMessage,
+      occasion: intent.occasion,
+      specialRequests: intent.special_requests,
+      stylePreference: intent.style_preference,
+      skillNames: searchSkillNames,
+      queries: queries.map((item) => ({ slot: item.slot, query: item.query })),
+      changes: guarded.changes,
+    }).catch((error) => {
+      console.warn('[WARDROBE_QUERY_GUARD] log failed:', error);
+    });
+  }
+
+  scheduleWardrobeQueryCritic({
+    intent,
+    userMessage,
+    searchSkillNames,
+    queries,
+    conversationId: audit?.conversationId,
+    messageId: audit?.messageId,
+    signal,
+  });
+
   return queries;
 }
 
@@ -427,12 +500,31 @@ export async function callStylistAgent(
       ? previousCache.stylist_result.outfits.find((o) => o.id === revisionOutfitId) ??
         previousCache.stylist_result.outfits[0]
       : undefined;
+  const recentNewItemLabels = collectRecentNewItemLabels(
+    previousCache?.stylist_result.outfits,
+    options.priorStylistResults
+  );
+  const newItemDiversityBlock = buildNewItemDiversityBlock(
+    intent.request_type,
+    recentNewItemLabels
+  );
+  if (newItemDiversityBlock) {
+    console.log(
+      `[STYLIST_AGENT] new_item diversity blacklist (${recentNewItemLabels.length}):`,
+      recentNewItemLabels.join(' | ')
+    );
+  }
 
   let wardrobeXml = '';
   let ragIndexMap = new Map<string, string>();
   let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
   const userMessage = extractUserMessage(initialParts);
-  const skillBlock = buildSkillBlocks(selectStylistSkillNames(intent, userMessage, profile));
+  const skillNames = await selectStylistSkills(intent, userMessage, profile, {
+    signal: options.signal,
+    conversationId,
+    messageId: options.messageId,
+  });
+  const skillBlock = buildSkillBlocks(skillNames);
   if (clientId && ragCache) {
     try {
       console.log(
@@ -445,7 +537,9 @@ export async function callStylistAgent(
         userMessage,
         anchorItem,
         options.signal,
-        purchaseAnchors
+        purchaseAnchors,
+        skillNames,
+        { conversationId, messageId: options.messageId }
       );
       const searchResults = await performRagSearch(searchQueries, clientId, ragCache, {
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
@@ -453,6 +547,7 @@ export async function callStylistAgent(
         userMessage,
         intent,
         anchorItem: anchorItem ?? undefined,
+        skillNames,
       });
       wardrobeXml = searchResults.xmlString;
       ragIndexMap = searchResults.indexMap;
@@ -537,7 +632,7 @@ ${JSON.stringify(previousOutfit, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${anchorBlock}${revisionBlock}
+${skillBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '互补单品'})】
 ${
   wardrobeXml ||
@@ -590,6 +685,27 @@ ${
       messageId: options.messageId,
       userMessage,
     });
+
+    const anchorSummaryParts = [
+      ...(anchorItem
+        ? [`单锚点: ${anchorItem.name} (${anchorItem.slot || 'unknown'}) ${anchorItem.summary}`]
+        : []),
+      ...purchaseAnchors.map(
+        (item, index) =>
+          `待购${index + 1}: ${item.name} (${item.slot || 'unknown'}) ${item.summary}`
+      ),
+    ];
+    scheduleStylistOutfitCritic({
+      intent,
+      userMessage,
+      skillNames,
+      result: parsed,
+      anchorSummary: anchorSummaryParts.join('；') || undefined,
+      conversationId,
+      messageId: options.messageId,
+      signal: options.signal,
+    });
+
     if (anchorItem?.imageData) {
       parsed.anchor_item_image_data = anchorItem.imageData;
     } else if (previousCache?.stylist_result.anchor_item_image_data?.data) {

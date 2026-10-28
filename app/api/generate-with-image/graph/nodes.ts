@@ -33,6 +33,7 @@ import {
   scheduleProfileUpdatePersist,
 } from '@/server/utils/profileUpdatePatch';
 import { throwIfAborted } from '@/server/utils/abort';
+import { outfitsHaveSameItemFingerprints } from '@/server/utils/stylistRevisionCompare';
 import type { OutfitPipelineState, OutfitPipelineUpdate, OutfitRuntime, PipelineRoute } from './state';
 
 function getRuntime(config: LangGraphRunnableConfig): OutfitRuntime {
@@ -560,13 +561,14 @@ export async function stylistNode(
       state.previousStylistCache.stylist_result.outfits[0];
     const newOutfit = stylistResult.outfits[0];
     if (prevOutfit && newOutfit) {
-      const prevIds = new Set(prevOutfit.selected_items.map((i) => i.id));
-      const newIds = new Set(newOutfit.selected_items.map((i) => i.id));
-      revisionNoItemChange =
-        prevIds.size === newIds.size && [...prevIds].every((id) => newIds.has(id));
+      revisionNoItemChange = outfitsHaveSameItemFingerprints(prevOutfit, newOutfit);
       if (revisionNoItemChange) {
         console.log(
           '[ORCHESTRATOR:LANGGRAPH] feedback_revision: 单品未变，Copywriter 将如实说明原方案已适合'
+        );
+      } else {
+        console.log(
+          '[ORCHESTRATOR:LANGGRAPH] feedback_revision: 单品有变化（含 new_item 改名/改描述）'
         );
       }
     }

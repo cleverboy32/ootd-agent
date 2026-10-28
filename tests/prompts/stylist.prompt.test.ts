@@ -327,7 +327,7 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
       request_type: 'wardrobe_outfit',
       occasion: '日常出门、约会聚会',
       weather: '',
-      style_preference: '日常休闲',
+      style_preference: '',
       special_requests: '冬季新品，想买适合自己的冬季外套',
       dressing_climate: '',
     });
@@ -343,6 +343,62 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     const queryText = outerwear.map((entry) => entry.query).join(' ');
     assert.match(queryText, /大衣|棉服|羽绒/);
     assert.doesNotMatch(queryText, /防晒|薄外套|开衫/);
+  });
+
+  it('注入 style-korean → query 跟韩系检索节，不上及踝大衣或汉服', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常出门',
+      weather: '',
+      style_preference: '韩系',
+      special_requests: '',
+    });
+    const queries = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '今天想穿韩系一点',
+      null,
+      undefined,
+      [],
+      ['style-korean']
+    );
+    const all = queries.map((entry) => entry.query).join(' ');
+    assert.match(all, /短|高腰|阔腿|长裙|外套|鞋|上衣|裤/);
+    assert.doesNotMatch(all, /汉服|及踝大衣|厚底雪地靴|马面裙/);
+    const tops = queries.filter((entry) => entry.slot === 'top').map((entry) => entry.query).join(' ');
+    if (tops) {
+      assert.match(tops, /短|上衣|针织|衬衫/);
+    }
+  });
+
+  it('正式录制场合 → query 按场合品类特制，鞋不默认运动鞋', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '古典舞蹈课录制视频',
+      weather: '重庆城区，阴，17℃',
+      style_preference: '',
+      special_requests: '想穿正式点，适合录制视频',
+      dressing_climate: 'mild',
+    });
+    const queries = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '明天古典舞蹈课要录制视频了，想穿正式点，应该穿啥呢',
+      null,
+      undefined,
+      [],
+      ['weather-dressing']
+    );
+    assert.ok(queries.length >= 3, `应有多槽位检索，实际: ${JSON.stringify(queries)}`);
+    const all = queries.map((entry) => entry.query).join(' ');
+    assert.match(all, /衬衫|上衣|裙|裤|鞋/);
+    assert.match(all, /正式|单鞋|皮鞋|乐福|玛丽珍|半身裙|衬衫|正装/);
+    const shoes = queries.filter((entry) => entry.slot === 'shoes').map((entry) => entry.query).join(' ');
+    if (shoes) {
+      assert.doesNotMatch(shoes, /^(运动鞋|休闲运动鞋)$/);
+    }
   });
 
   it('想买冬季穿搭时，衣橱里已有单品也整套都用新品', async () => {

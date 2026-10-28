@@ -1,7 +1,7 @@
 import type { GatekeeperIntent } from '../intent';
-import { isAthleticOccasion } from '@/server/utils/ragMatchQuality';
+import { loadSkillDescription } from '@/server/skills/loadSkill';
 
-/** 先匹配更具体的形制，再匹配风格名。只注入一个。 */
+/** 先匹配更具体的形制，再匹配风格名。只用于档案 suited_style 归一，不再负责出方案注入。 */
 const STYLE_SKILLS: { name: string; pattern: RegExp }[] = [
   { name: 'style-guofeng', pattern: /汉服|马面裙|明制|唐制|宋制/ },
   { name: 'style-new-chinese', pattern: /新中式/ },
@@ -40,35 +40,6 @@ export function canonicalSuitedStyle(text: string | undefined): string {
   return skill ? (SUITED_STYLE_LABELS[skill] ?? '') : '';
 }
 
-function statedPersonalStyle(text: string | undefined): string {
-  const value = text?.trim() ?? '';
-  if (!value || value === '日常休闲') return '';
-  return value;
-}
-
-/**
- * 风格只取一个。这轮原话优先，其次是用户自己定过的风格，最后才用照片判断的适合风格。
- * 场合词和没填时的「日常休闲」都不算。
- */
-export function selectStyleSkillName(
-  intent: GatekeeperIntent,
-  userMessage: string,
-  profile?: StylistSkillProfile
-): string | undefined {
-  return (
-    styleSkillFromText(userMessage) ||
-    styleSkillFromText(intent.style_preference ?? '') ||
-    styleSkillFromText(intent.special_requests ?? '') ||
-    styleSkillFromText(statedPersonalStyle(profile?.personal_style)) ||
-    styleSkillFromText(profile?.suited_style ?? '')
-  );
-}
-
-function wantsNewClothes(intent: GatekeeperIntent, userMessage: string): boolean {
-  const text = `${userMessage}\n${intent.special_requests ?? ''}`;
-  return /买|新品|入手/.test(text);
-}
-
 export type StylistSkillProfile = {
   body_shape?: string;
   height?: string;
@@ -79,89 +50,108 @@ export type StylistSkillProfile = {
   suited_style?: string;
 };
 
-const BODY_SKILLS: { name: string; pattern: RegExp }[] = [
-  { name: 'body-pear', pattern: /梨形|梨型/ },
-  { name: 'body-apple', pattern: /苹果形|苹果型/ },
-  { name: 'body-petite', pattern: /小个子|显高|娇小/ },
-  { name: 'body-even', pattern: /五五分/ },
-  { name: 'body-broad-shoulder', pattern: /宽肩|肩膀宽|肩偏宽/ },
-];
+/** Stylist 可选的搭配 skill（不含模式 skill）。 */
+export const STYLIST_SELECTABLE_SKILL_NAMES = [
+  'style-guofeng',
+  'style-new-chinese',
+  'style-old-money',
+  'style-cool',
+  'style-sweet',
+  'style-french',
+  'style-korean',
+  'style-minimal',
+  'style-literary',
+  'style-commute',
+  'weather-dressing',
+  'athletic-outfit',
+  'outfit-design',
+  'body-pear',
+  'body-apple',
+  'body-petite',
+  'body-even',
+  'body-broad-shoulder',
+  'color-aesthetics',
+  'color-warm',
+  'color-cool',
+  'color-neutral',
+] as const;
 
-const PETITE_HEIGHT_CM = 160;
+export type StylistSelectableSkillName = (typeof STYLIST_SELECTABLE_SKILL_NAMES)[number];
 
-function heightCm(height: string | undefined): number | undefined {
-  const match = height?.match(/(\d{2,3})/);
-  if (!match) return undefined;
-  const value = Number(match[1]);
-  if (value < 140 || value > 220) return undefined;
-  return value;
+const SELECTABLE_SET = new Set<string>(STYLIST_SELECTABLE_SKILL_NAMES);
+
+const STYLE_SKILL_SET = new Set<string>(
+  STYLIST_SELECTABLE_SKILL_NAMES.filter((name) => name.startsWith('style-'))
+);
+
+const COLOR_UNDERTONE_SET = new Set(['color-warm', 'color-cool', 'color-neutral']);
+
+/** 衣橱检索只注入会影响 query 品类的 skill；身形/色彩全文留给出方案。 */
+const WARDROBE_SEARCH_SKILL_PREFIXES = ['style-', 'weather-', 'athletic-', 'outfit-'] as const;
+
+export function filterSkillsForWardrobeSearch(names: string[]): string[] {
+  return names.filter((name) =>
+    WARDROBE_SEARCH_SKILL_PREFIXES.some((prefix) => name.startsWith(prefix))
+  );
 }
 
-/** 档案和用户原话里点名的身形。梨形与苹果形冲突时只留先出现的一个。可以和五五分、宽肩、小个子同时成立。 */
-export function selectBodySkillNames(
-  intent: GatekeeperIntent,
-  userMessage: string,
-  profile?: StylistSkillProfile
-): string[] {
-  const text = [profile?.body_shape, userMessage, intent.special_requests].filter(Boolean).join('\n');
-  const names = BODY_SKILLS.filter((entry) => entry.pattern.test(text)).map((entry) => entry.name);
-  if (names.includes('body-pear') && names.includes('body-apple')) {
-    const pearAt = text.search(/梨形|梨型/);
-    const appleAt = text.search(/苹果形|苹果型/);
-    const drop = pearAt <= appleAt ? 'body-apple' : 'body-pear';
-    names.splice(names.indexOf(drop), 1);
-  }
-  const height = heightCm(profile?.height);
-  if (height !== undefined && height <= PETITE_HEIGHT_CM && !names.includes('body-petite')) {
-    names.push('body-petite');
-  }
-  return names;
+export type StylistSkillCatalogEntry = {
+  name: StylistSelectableSkillName;
+  description: string;
+};
+
+/** 选 skill 目录：name + frontmatter「何时选」description。 */
+export function listStylistSelectableSkills(): StylistSkillCatalogEntry[] {
+  return STYLIST_SELECTABLE_SKILL_NAMES.map((name) => ({
+    name,
+    description: loadSkillDescription(name),
+  }));
 }
 
-const COLOR_UNDERTONES: { name: string; pattern: RegExp }[] = [
-  { name: 'color-warm', pattern: /暖调|暖皮|暖黄皮|黄皮|暖色调/ },
-  { name: 'color-cool', pattern: /冷调|冷皮|冷白皮|冷色调/ },
-  { name: 'color-neutral', pattern: /中性肤|中性皮/ },
-];
-
-const COLOR_SCHEME = /撞色|同色|莫兰迪|黑白|大地色|低饱和|高饱和|显白/;
-
-/** 肤色决定脸周冷暖，一套只留一种。用户点了配色、或档案有肤色时，再加色彩与美学。 */
-export function selectColorSkillNames(
-  intent: GatekeeperIntent,
-  userMessage: string,
-  profile?: StylistSkillProfile
-): string[] {
-  const text = [profile?.skin_tone, userMessage, intent.special_requests, intent.style_preference]
-    .filter(Boolean)
-    .join('\n');
-  const undertones = COLOR_UNDERTONES.filter((entry) => entry.pattern.test(text)).map((entry) => entry.name);
-  if (undertones.includes('color-warm') && undertones.includes('color-cool')) {
-    const warmAt = text.search(/暖调|暖皮|暖黄皮|黄皮|暖色调/);
-    const coolAt = text.search(/冷调|冷皮|冷白皮|冷色调/);
-    undertones.splice(undertones.indexOf(warmAt <= coolAt ? 'color-cool' : 'color-warm'), 1);
-  }
-  if (undertones.includes('color-neutral') && undertones.length > 1) {
-    undertones.splice(undertones.indexOf('color-neutral'), 1);
-  }
-  if (undertones.length === 0 && !COLOR_SCHEME.test(text)) return [];
-  return ['color-aesthetics', ...undertones];
-}
-
-/** 本轮 Stylist 要注入的技能。检索 query 与出方案共用。 */
-export function selectStylistSkillNames(
-  intent: GatekeeperIntent,
-  userMessage: string,
-  profile?: StylistSkillProfile
-): string[] {
+/**
+ * 净化模型选出的 skill 名单：剔除非白名单、风格只留一个、
+ * 梨/苹冲突只留先出现的、冷暖中性只留一个，有 undertone 时补 color-aesthetics。
+ */
+export function normalizeStylistSkillNames(raw: string[]): string[] {
+  const seen = new Set<string>();
   const names: string[] = [];
-  if (intent.weather?.trim()) names.push('weather-dressing');
-  if (isAthleticOccasion(intent, userMessage)) names.push('athletic-outfit');
-  if (wantsNewClothes(intent, userMessage)) names.push('outfit-design');
-  const styleSkill = selectStyleSkillName(intent, userMessage, profile);
-  if (styleSkill) names.push(styleSkill);
-  names.push(...selectBodySkillNames(intent, userMessage, profile));
-  names.push(...selectColorSkillNames(intent, userMessage, profile));
+  let stylePicked = false;
+  let undertonePicked = false;
+  let hasPear = false;
+  let hasApple = false;
+
+  for (const item of raw) {
+    const name = item.trim();
+    if (!SELECTABLE_SET.has(name) || seen.has(name)) continue;
+
+    if (STYLE_SKILL_SET.has(name)) {
+      if (stylePicked) continue;
+      stylePicked = true;
+    }
+
+    if (name === 'body-pear') {
+      if (hasApple) continue;
+      hasPear = true;
+    }
+    if (name === 'body-apple') {
+      if (hasPear) continue;
+      hasApple = true;
+    }
+
+    if (COLOR_UNDERTONE_SET.has(name)) {
+      if (undertonePicked) continue;
+      undertonePicked = true;
+    }
+
+    seen.add(name);
+    names.push(name);
+  }
+
+  if (undertonePicked && !seen.has('color-aesthetics')) {
+    const undertoneIndex = names.findIndex((name) => COLOR_UNDERTONE_SET.has(name));
+    names.splice(Math.max(undertoneIndex, 0), 0, 'color-aesthetics');
+  }
+
   return names;
 }
 

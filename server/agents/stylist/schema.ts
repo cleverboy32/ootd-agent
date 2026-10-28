@@ -100,7 +100,11 @@ export const stylistSchema: Schema = {
                 name: { type: Type.STRING, description: '单品名称' },
                 layer: { type: Type.STRING, description: '穿搭层级，如 inner_top (内搭上装), outerwear (外套), bottom (下装), shoes (鞋履), accessory (配饰)' },
                 reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
-                description: { type: Type.STRING, description: '新品必填一句外观，写颜色、材质和能看见的结构：领、门襟、袖和长短。衣橱单品填空字符串。' },
+                description: {
+                  type: Type.STRING,
+                  description:
+                    '新品必填一句外观：颜色、材质，以及该品类能看见的结构差异。上装写下摆长短与领/袖；下装写裤型或裙长；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带。用户否定上一版气质或品类时，禁止只改 name，description 必须写出可区分的外形差异。衣橱单品填空字符串。',
+                },
               },
               required: ['id', 'name', 'layer', 'reason', 'description'],
             },
@@ -127,12 +131,15 @@ export const wardrobeSearchSchema: Schema = {
   properties: {
     wardrobe_search_queries: {
       type: Type.ARRAY,
-      description: '3-6 条衣橱检索项。每条含 slot（槽位）与 query（英文检索词），slot 与 mainCategory 一一对应，禁止同一 slot 重复',
+      description: '3-6 条衣橱检索项。每条含 slot（槽位）与 query（中文检索词），slot 与 mainCategory 一一对应，禁止同一 slot 重复',
       items: {
         type: Type.OBJECT,
         properties: {
           slot: { type: Type.STRING, description: '穿搭槽位，必须是以下之一：top | bottom | dress | shoes | outerwear | accessory' },
-          query: { type: Type.STRING, description: '英文语义检索 query，宽泛描述该槽位可能拥有的单品' },
+          query: {
+            type: Type.STRING,
+            description: '中文语义检索 query，用品类级短词（与衣橱中文描述对齐），不要整句英文',
+          },
         },
         required: ['slot', 'query'],
       },
