@@ -31,8 +31,13 @@ import {
  *   1. correctAnchorSlot                — anchor_slot 与文本描述矛盾时纠正
  *   2. correctDressingClimate           — dressing_climate 与锚点描述矛盾时纠正
  *   3. coerceWardrobeBrowseIntent       — clarify → wardrobe_pairing（衣橱浏览类误判）
- *   4. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景/整轮重做误判为微调）
- *   5. resolveWardrobeAnchorIdFromHistory — 口头确认/幻觉 id 时用上轮展示的候选纠偏
+ *   4. coerceWeatherWearabilityByContext — 穿搭轨上「天气能穿的 X」误判 pairing → outfit；浏览轨不升
+ *   5. adjudicateNewTaskVsRevisionIntent — feedback_revision → wardrobe_outfit（新场景/整轮重做误判为微调）
+ *   6. resolveWardrobeAnchorIdFromHistory — 口头确认/幻觉 id 时用上轮展示的候选纠偏
+ *   7. repairFullRegenIntent            — 「重新生成」等显式重做信号时纠类型
+ *
+ * 已移除：holdBareDissatisfaction（见「不喜欢」强行 clarify 会盖掉 Gatekeeper
+ * 已判对的 outfit_redo / feedback_revision）。不满意是否追问改交给 Gatekeeper LLM。
  *
  * 新增 B 类规则前请先确认：
  *   - 能否通过调整 Gatekeeper prompt/schema 描述解决？优先改 prompt。
@@ -73,8 +78,6 @@ const REVISION_ACTION_PATTERN =
   /换成|改成|换一下|改一下|去掉|不要|保留|替换|调整|微调|加一件|加上|去除|换掉|太.{0,6}了|更.{0,6}一点/;
 const FULL_REGEN_PATTERN =
   /重新生成|再来(?:一|几)套|换一批|全部重(?:做|来|新)|重新(?:搭配|推荐|出方案|做)|重做/;
-const BARE_DISSATISFACTION_PATTERN =
-  /不满意|不喜欢|不太行|都不行|都不好|这套不行|太烂|太丑|太差|不太好|一般般/;
 const CONCRETE_EDIT_PATTERN =
   /换成|改成|换一下|改一下|去掉|换掉|加一件|加上|保留/;
 const NEW_OUTFIT_REQUEST_PATTERN =
@@ -410,6 +413,134 @@ export function isOutfitGeneratingIntent(intent: GatekeeperIntent): boolean {
   );
 }
 
+/** special_requests 里已有温度、但 weather 字段漏填时，截取含 ℃ 的片段。 */
+const WEATHER_TEMP_FRAGMENT_PATTERN =
+  /[^。；;\n]{0,48}(-?\d+)\s*(?:°\s*c|℃)[^。；;\n]{0,48}/i;
+
+/** 用户话术指代「当前天气/适穿」。 */
+const WEATHER_DEIXIS_CUE =
+  /天气|气温|℃|°\s*c|这个天气|今天穿|冷不冷|穿得了|适不适合穿|能穿|适合.{0,6}穿/i;
+
+const OUTFIT_HISTORY_MARKER_PATTERN = /\[OUTFIT:outfit_\d+\]/i;
+
+/**
+ * weather 为空时，若 special_requests 已含可解析温度，写入 weather（免多余 API）。
+ */
+export function hydrateWeatherFromIntentText(intent: GatekeeperIntent): GatekeeperIntent {
+  if (intent.weather.trim()) return intent;
+  const source = intent.special_requests.trim();
+  if (!source) return intent;
+  const match = source.match(WEATHER_TEMP_FRAGMENT_PATTERN);
+  if (!match) return intent;
+  const fragment = match[0].trim();
+  console.log(`[WEATHER] hydrate from special_requests — "${fragment.slice(0, 80)}"`);
+  return { ...intent, weather: fragment };
+}
+
+export function hasWeatherDeixisCue(text: string): boolean {
+  return WEATHER_DEIXIS_CUE.test(text);
+}
+
+/**
+ * 本轮是否应查实况天气。
+ * - weather_lookup.needed / revision·redo / wardrobe_outfit 空 weather
+ * - wardrobe_pairing 空 weather 且上下文有天气指代（浏览后续按温度过滤）
+ */
+export function shouldFetchWeatherForIntent(
+  intent: GatekeeperIntent,
+  weatherLookup?: { needed?: boolean },
+  contextText?: string
+): boolean {
+  if (intent.weather.trim()) return false;
+  if (weatherLookup?.needed) return true;
+  if (
+    intent.request_type === 'feedback_revision' ||
+    intent.request_type === 'outfit_redo' ||
+    intent.request_type === 'wardrobe_outfit'
+  ) {
+    return true;
+  }
+  if (intent.request_type === 'wardrobe_pairing') {
+    return hasWeatherDeixisCue(`${contextText ?? ''}\n${intent.special_requests}`);
+  }
+  return false;
+}
+
+/** 从近到远看历史，最近一次信号决定轨：browse | outfit | none */
+export function resolveRecentWardrobeTrack(
+  history: Content[],
+  lookback = 12
+): 'browse' | 'outfit' | 'none' {
+  const start = Math.max(0, history.length - lookback);
+  for (let i = history.length - 1; i >= start; i--) {
+    const msg = history[i];
+    const text = extractTextFromParts(msg.parts ?? []);
+    if (!text.trim()) continue;
+    if (msg.role === 'model') {
+      if (WARDROBE_CANDIDATES_HISTORY_PATTERN.test(text)) {
+        WARDROBE_CANDIDATES_HISTORY_PATTERN.lastIndex = 0;
+        return 'browse';
+      }
+      if (OUTFIT_HISTORY_MARKER_PATTERN.test(text)) return 'outfit';
+    }
+    if (msg.role === 'user' && WARDROBE_BROWSE_PATTERN.test(text)) {
+      return 'browse';
+    }
+  }
+  return 'none';
+}
+
+export function isRecentWardrobeBrowseContext(history: Content[]): boolean {
+  return resolveRecentWardrobeTrack(history) === 'browse';
+}
+
+export function isRecentOutfitContext(history: Content[]): boolean {
+  return resolveRecentWardrobeTrack(history) === 'outfit';
+}
+
+/**
+ * 天气适穿品类句：穿搭轨误判 pairing → 升 outfit；浏览轨保持 pairing。
+ */
+export function coerceWeatherWearabilityByContext(
+  intent: GatekeeperIntent,
+  history: Content[],
+  currentInput: Part[]
+): GatekeeperIntent {
+  if (intent.request_type !== 'wardrobe_pairing') return intent;
+
+  const currentText = extractTextFromParts(currentInput);
+  const cueText = `${currentText}\n${intent.special_requests}`;
+  if (!hasWeatherDeixisCue(cueText)) return intent;
+
+  const track = resolveRecentWardrobeTrack(history);
+  if (track === 'browse') return intent;
+  if (track !== 'outfit') return intent;
+
+  const categoryHint =
+    intent.anchor_item_summary.trim() ||
+    (intent.wardrobe_search_query ?? '').trim() ||
+    '';
+  const special =
+    intent.special_requests.trim() ||
+    (categoryHint
+      ? `用户想看适合当前天气的${categoryHint}穿搭`
+      : currentText.trim());
+
+  console.log(
+    `[GATEKEEPER] Coerced wardrobe_pairing → wardrobe_outfit (outfit-track weather wearability)`
+  );
+
+  return {
+    ...intent,
+    request_type: 'wardrobe_outfit',
+    anchor_item_summary: '',
+    anchor_slot: '',
+    wardrobe_search_query: '',
+    anchor_wardrobe_id: '',
+    special_requests: special,
+  };
+}
+
 // ─── Anchor item getters ───────────────────────────────────────────────────────
 
 export function extractConfirmedWardrobeId(text: string): string {
@@ -615,15 +746,6 @@ export function looksLikeFullRegenRequest(text: string): boolean {
   if (!normalized || !FULL_REGEN_PATTERN.test(normalized)) return false;
   // 点名了某一套再重做，是微调那一套，不是整套重做
   return !REVISION_TARGET_PATTERN.test(normalized);
-}
-
-/** 只表达不满意，没有要求重做，也没有点名改哪一件。 */
-export function looksLikeBareDissatisfaction(text: string): boolean {
-  const normalized = text.trim();
-  if (!normalized || looksLikeFullRegenRequest(normalized)) return false;
-  if (CONCRETE_EDIT_PATTERN.test(normalized)) return false;
-  if (REVISION_TARGET_PATTERN.test(normalized) && REVISION_ACTION_PATTERN.test(normalized)) return false;
-  return BARE_DISSATISFACTION_PATTERN.test(normalized);
 }
 
 export function hasExplicitRevisionSignal(text: string): boolean {
@@ -903,13 +1025,10 @@ export function enrichIntentFromContext(
     normalized.session_item_id = '';
   }
 
-  return holdBareDissatisfaction(
-    repairFullRegenIntent(normalized, currentText, {
-      sessionItemCount: options?.sessionItems?.length ?? 0,
-      hasCurrentUpload: currentImageUrls.length > 0,
-    }),
-    currentText
-  );
+  return repairFullRegenIntent(normalized, currentText, {
+    sessionItemCount: options?.sessionItems?.length ?? 0,
+    hasCurrentUpload: currentImageUrls.length > 0,
+  });
 }
 
 const FULL_REGEN_REPAIR_TYPES = new Set([
@@ -962,23 +1081,3 @@ export function repairFullRegenIntent(
   };
 }
 
-/** 只说不满意、没让重做：停下来问要改哪里，不出新方案。 */
-export function holdBareDissatisfaction(
-  intent: GatekeeperIntent,
-  currentText: string
-): GatekeeperIntent {
-  if (!looksLikeBareDissatisfaction(currentText)) return intent;
-  if (
-    intent.request_type === 'style_advice' ||
-    intent.request_type === 'outfit_selection' ||
-    intent.request_type === 'outfit_confirmed'
-  ) {
-    return intent;
-  }
-  return {
-    ...intent,
-    request_type: 'clarify',
-    selected_outfit_id: '',
-    purchase_vision_pending: false,
-  };
-}

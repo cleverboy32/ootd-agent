@@ -202,6 +202,47 @@ describe('Gatekeeper — weather lookup', () => {
   });
 });
 
+describe('Gatekeeper — weather wearability by context', () => {
+  it('场合穿搭后续「有这个天气能穿的裙子吗」→ wardrobe_outfit', async () => {
+    const history: Content[] = [
+      userMsg('帮我搭一套上班穿搭'),
+      aiMsg('这是一套米白通勤穿搭方案。\n[OUTFIT:outfit_1]'),
+    ];
+
+    const result = await callGatekeeperAgent(
+      history,
+      [{ text: '有这个天气能穿的裙子吗' }],
+      { profileLocation: '重庆' }
+    );
+
+    assert.equal(
+      result.extracted_intent.request_type,
+      'wardrobe_outfit',
+      '穿搭后续问天气适穿品类应出穿搭，不是衣橱浏览'
+    );
+    assert.equal(result.extracted_intent.anchor_item_summary ?? '', '');
+  });
+
+  it('衣橱浏览后续「有这个天气能穿的裙子吗」→ wardrobe_pairing', async () => {
+    const history: Content[] = [
+      userMsg('我衣橱里有没有白裙子'),
+      aiMsg('请从衣橱候选里选一件～\n[wardrobe_candidates:id=cmth7rbuv000272s8i4g72gce]'),
+    ];
+
+    const result = await callGatekeeperAgent(
+      history,
+      [{ text: '有这个天气能穿的裙子吗' }],
+      { profileLocation: '重庆' }
+    );
+
+    assert.equal(
+      result.extracted_intent.request_type,
+      'wardrobe_pairing',
+      '衣橱浏览后续应按天气继续搜衣橱，不要升成 outfit'
+    );
+  });
+});
+
 describe('Gatekeeper — wardrobe outfit intent', () => {
   it('有明确场合 → wardrobe_outfit 放行', async () => {
     const result = await callGatekeeperAgent(

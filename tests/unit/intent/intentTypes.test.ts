@@ -4,17 +4,45 @@ import {
   buildOutfitSelectionGatekeeperReply,
   adjudicateNewTaskVsRevisionIntent,
   coerceWardrobeBrowseIntent,
+  coerceWeatherWearabilityByContext,
   correctAnchorSlot,
   correctDressingClimate,
   extractConfirmedWardrobeId,
   extractOutfitIdFromText,
   enrichIntentFromContext,
   finalizeGatekeeperResult,
+  hydrateWeatherFromIntentText,
   inferAnchorSlotFromSummary,
   normalizeGatekeeperIntent,
+  resolveRecentWardrobeTrack,
   resolveWardrobeAnchorIdFromHistory,
+  shouldFetchWeatherForIntent,
 } from '@/server/agents/intent';
 import type { Content, Part } from '@google/genai';
+
+describe('normalizeGatekeeperIntent style_preference', () => {
+  it('defaults missing style to empty string', () => {
+    assert.equal(normalizeGatekeeperIntent({}).style_preference, '');
+  });
+
+  it('clears 日常休闲 placeholder', () => {
+    assert.equal(
+      normalizeGatekeeperIntent({ style_preference: '日常休闲' }).style_preference,
+      ''
+    );
+    assert.equal(
+      normalizeGatekeeperIntent({ style_preference: ' 日常休闲 ' }).style_preference,
+      ''
+    );
+  });
+
+  it('keeps an explicitly named style', () => {
+    assert.equal(
+      normalizeGatekeeperIntent({ style_preference: '韩系' }).style_preference,
+      '韩系'
+    );
+  });
+});
 
 describe('inferAnchorSlotFromSummary', () => {
   it('classifies earrings and necklaces as accessory', () => {
@@ -841,12 +869,13 @@ describe('repairFullRegenIntent', () => {
     assert.equal(result.gatekeeper_reply ?? '', '');
   });
 
-  it('asks what to change when the user is unhappy but did not ask to redo', () => {
+  it('does not override Gatekeeper outfit_redo when user only says unhappy', () => {
+    // 不满意是否追问改交给 Gatekeeper LLM；服务端不再 holdBareDissatisfaction 强行 clarify
     const enriched = enrichIntentFromContext(
       normalizeGatekeeperIntent({
         request_type: 'outfit_redo',
         occasion: '日常百搭',
-        special_requests: '用户不满意',
+        special_requests: '用户不满意，要求换一套',
       }),
       [],
       [{ text: '都不太行' }],
@@ -863,9 +892,38 @@ describe('repairFullRegenIntent', () => {
       currentMessageText: '都不太行',
     });
 
-    assert.equal(result.is_complete, false);
-    assert.equal(result.extracted_intent.request_type, 'clarify');
-    assert.match(result.gatekeeper_reply ?? '', /要改的地方/);
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.request_type, 'outfit_redo');
+    assert.equal(result.gatekeeper_reply ?? '', '');
+  });
+
+  it('passes through feedback_revision for 上衣不喜欢 (no bare-dissatisfaction coerce)', () => {
+    const enriched = enrichIntentFromContext(
+      normalizeGatekeeperIntent({
+        request_type: 'feedback_revision',
+        occasion: '上班通勤',
+        selected_outfit_id: 'outfit_1',
+        special_requests: '更换内搭上衣，其余保留',
+      }),
+      [],
+      [{ text: '上衣不喜欢' }]
+    );
+    const history = [
+      {
+        role: 'model',
+        parts: [{ text: '方案如下\n[OUTFIT:outfit_1]' }],
+      },
+    ] as Content[];
+    const result = finalizeGatekeeperResult({
+      extracted_intent: enriched,
+      modelIsComplete: true,
+      currentMessageText: '上衣不喜欢',
+      history,
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.request_type, 'feedback_revision');
+    assert.equal(result.extracted_intent.selected_outfit_id, 'outfit_1');
   });
 });
 
@@ -883,5 +941,156 @@ describe('purchase_vision_pending', () => {
 
     assert.equal(result.is_complete, true);
     assert.equal(result.extracted_intent.purchase_vision_pending, true);
+  });
+});
+
+describe('hydrateWeatherFromIntentText', () => {
+  it('copies temperature fragment from special_requests into weather', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '上班通勤',
+      weather: '',
+      special_requests: '用户想看当前天气（阴天约17℃）适合穿出门的裙子',
+      anchor_item_summary: '裙子',
+    });
+    const hydrated = hydrateWeatherFromIntentText(intent);
+    assert.match(hydrated.weather, /17\s*℃/);
+  });
+});
+
+describe('shouldFetchWeatherForIntent', () => {
+  it('refetches on feedback_revision when weather is empty (no redis inherit)', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'feedback_revision',
+      occasion: '上班通勤',
+      weather: '',
+      selected_outfit_id: 'outfit_1',
+      special_requests: '换成浅色西装外套',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent), true);
+    assert.equal(shouldFetchWeatherForIntent(intent, { needed: false }), true);
+  });
+
+  it('refetches on outfit_redo when weather is empty', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'outfit_redo',
+      occasion: '日常百搭',
+      weather: '',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent), true);
+  });
+
+  it('skips when weather already present', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'feedback_revision',
+      occasion: '上班通勤',
+      weather: '成都 17℃ 多云',
+      selected_outfit_id: 'outfit_1',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent, { needed: true }), false);
+  });
+
+  it('refetches wardrobe_outfit when weather is empty', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常百搭',
+      weather: '',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent), true);
+  });
+
+  it('refetches wardrobe_pairing when weather empty and deixis cue present', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '上班通勤',
+      weather: '',
+      special_requests: '',
+      anchor_item_summary: '裙子',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent, undefined, '有这个天气能穿的裙子吗'), true);
+  });
+
+  it('skips wardrobe_pairing browse without weather cue', () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '日常百搭',
+      weather: '',
+      special_requests: '',
+      anchor_item_summary: '白裙子',
+    });
+    assert.equal(shouldFetchWeatherForIntent(intent, undefined, '有没有白裙子'), false);
+  });
+});
+
+describe('coerceWeatherWearabilityByContext', () => {
+  it('outfit-track + weather wearability pairing → wardrobe_outfit', () => {
+    const history = [
+      { role: 'user', parts: [{ text: '帮我搭一套上班穿搭' }] },
+      {
+        role: 'model',
+        parts: [{ text: '方案如下\n[OUTFIT:outfit_1]\n米白通勤套装' }],
+      },
+    ] as Content[];
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '上班通勤',
+      weather: '',
+      anchor_item_summary: '裙子',
+      wardrobe_search_query: '半身裙',
+      special_requests: '用户想看当前天气适合穿出门的裙子',
+    });
+    const result = coerceWeatherWearabilityByContext(intent, history, [
+      { text: '有这个天气能穿的裙子吗' },
+    ]);
+    assert.equal(resolveRecentWardrobeTrack(history), 'outfit');
+    assert.equal(result.request_type, 'wardrobe_outfit');
+    assert.equal(result.anchor_item_summary, '');
+    assert.equal(result.wardrobe_search_query, '');
+    assert.match(result.special_requests, /裙/);
+  });
+
+  it('browse-track + same utterance stays wardrobe_pairing', () => {
+    const history = [
+      { role: 'user', parts: [{ text: '我衣橱里有没有白裙子' }] },
+      {
+        role: 'model',
+        parts: [{ text: '请选择\n[wardrobe_candidates:id=cmth7rbuv000272s8i4g72gce]' }],
+      },
+    ] as Content[];
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '日常百搭',
+      weather: '',
+      anchor_item_summary: '裙子',
+      wardrobe_search_query: '裙子',
+      special_requests: '适合这个天气穿的裙子',
+    });
+    const result = coerceWeatherWearabilityByContext(intent, history, [
+      { text: '有这个天气能穿的裙子吗' },
+    ]);
+    assert.equal(resolveRecentWardrobeTrack(history), 'browse');
+    assert.equal(result.request_type, 'wardrobe_pairing');
+    assert.equal(result.anchor_item_summary, '裙子');
+  });
+
+  it('inventory browse without weather cue is not upgraded', () => {
+    const history = [
+      { role: 'user', parts: [{ text: '帮我搭一套上班穿搭' }] },
+      {
+        role: 'model',
+        parts: [{ text: '方案如下\n[OUTFIT:outfit_1]' }],
+      },
+    ] as Content[];
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_pairing',
+      occasion: '日常百搭',
+      weather: '',
+      anchor_item_summary: '白裙子',
+      wardrobe_search_query: '白色裙子',
+    });
+    const result = coerceWeatherWearabilityByContext(intent, history, [
+      { text: '我衣橱里有没有白裙子' },
+    ]);
+    assert.equal(result.request_type, 'wardrobe_pairing');
   });
 });

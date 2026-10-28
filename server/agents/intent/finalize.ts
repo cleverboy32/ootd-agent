@@ -17,7 +17,6 @@ import {
   isPurchasePairingAnchorReady,
   isWardrobePairingAnchorReady,
   isWardrobeBrowseIntent,
-  looksLikeBareDissatisfaction,
 } from './utils';
 
 // ─── Reply builders ────────────────────────────────────────────────────────────
@@ -49,8 +48,6 @@ export function buildWardrobeAmbiguousReply(): string {
 
 export const CLARIFY_INTENT_FOLLOWUP =
   '想确认一下您的需求～您是想让我从衣橱里搭一套穿搭，还是有某件单品想搭配，或者要在上一套方案上做调整呢？';
-
-export const DISSATISFACTION_FOLLOWUP = '哪件不合适？说一下要改的地方，我再改。';
 
 export const STYLE_ADVICE_FALLBACK_REPLY = '这个问题可以直接聊方法，不需要先限定场合。';
 
@@ -128,17 +125,8 @@ const handleClarify: RequestTypeHandler = ({
   modelReply,
   modelFollowups,
   fetchedWeather,
-  currentMessageText,
 }) => {
   console.log('[GATEKEEPER] clarify — Gatekeeper 直接追问意图，短路下游');
-  if (looksLikeBareDissatisfaction(currentMessageText ?? '')) {
-    return {
-      is_complete: false,
-      extracted_intent: intent,
-      followup_questions: [],
-      gatekeeper_reply: DISSATISFACTION_FOLLOWUP,
-    };
-  }
   const reply = fetchedWeather?.trim()
     ? buildFetchedWeatherClarifyReply(fetchedWeather.trim())
     : modelReply || modelFollowups.join(' ') || CLARIFY_INTENT_FOLLOWUP;

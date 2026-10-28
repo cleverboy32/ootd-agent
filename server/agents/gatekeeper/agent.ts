@@ -11,8 +11,11 @@ import {
   normalizeGatekeeperIntent,
   finalizeGatekeeperResult,
   coerceWardrobeBrowseIntent,
+  coerceWeatherWearabilityByContext,
   adjudicateNewTaskVsRevisionIntent,
   isOutfitGeneratingIntent,
+  hydrateWeatherFromIntentText,
+  shouldFetchWeatherForIntent,
 } from '../intent';
 import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
@@ -81,10 +84,16 @@ async function finalizeGatekeeperIntent(
     currentImageUrls: ctx.currentImageUrls,
   });
 
-  // 天气由 Gatekeeper LLM 决策（weather_lookup.needed）；服务端在此串行查询补全
+  // 天气：special 里已有 ℃ 则 hydrate；否则 lookup / revision / outfit / 天气指代 pairing 时再查
+  enriched = hydrateWeatherFromIntentText(enriched);
   let fetchedWeather: string | undefined;
-  if (weatherLookup?.needed && !enriched.weather.trim()) {
-    if (weatherLookup.city?.trim()) {
+  if (shouldFetchWeatherForIntent(enriched, weatherLookup, contextText)) {
+    if (weatherLookup?.needed !== true) {
+      console.log(
+        `[WEATHER] continuity refetch — ${enriched.request_type} weather empty, no checkpoint/redis`
+      );
+    }
+    if (weatherLookup?.city?.trim()) {
       enriched = { ...enriched, city: weatherLookup.city.trim() };
     }
     enriched = await enrichIntentWeather(enriched, {
@@ -154,7 +163,12 @@ export async function callGatekeeperAgent(
     const rawIntent = normalizeGatekeeperIntent(parsed.extracted_intent);
     const intentBeforeCoerce = rawIntent.request_type;
     const browsedIntent = coerceWardrobeBrowseIntent(rawIntent, history, currentInput);
-    const coercedIntent = adjudicateNewTaskVsRevisionIntent(browsedIntent, currentInput);
+    const wearabilityIntent = coerceWeatherWearabilityByContext(
+      browsedIntent,
+      history,
+      currentInput
+    );
+    const coercedIntent = adjudicateNewTaskVsRevisionIntent(wearabilityIntent, currentInput);
     const wasCoercedBrowse =
       intentBeforeCoerce === 'clarify' && coercedIntent.request_type === 'wardrobe_pairing';
 
@@ -185,7 +199,8 @@ export async function callGatekeeperAgent(
         ctx.clientId,
         intent.anchor_item_summary,
         intent.anchor_slot || undefined,
-        intent.wardrobe_search_query
+        intent.wardrobe_search_query,
+        intent.weather
       );
     }
 

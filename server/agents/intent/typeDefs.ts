@@ -142,7 +142,7 @@ export const DEFAULT_GATEKEEPER_INTENT: GatekeeperIntent = {
   city: '',
   city_role: '',
   occasion: '',
-  style_preference: '日常休闲',
+  style_preference: '',
   special_requests: '',
   request_type: 'wardrobe_outfit',
   anchor_item_summary: '',

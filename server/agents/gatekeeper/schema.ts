@@ -58,7 +58,7 @@ export const gatekeeperSchema: Schema = {
         style_preference: {
           type: Type.STRING,
           description:
-            '用户原文中明确说出的风格偏好（如：温柔风、美式复古、松弛感）。禁止根据场合臆测风格。用户未提及则填 "日常休闲"。',
+            '用户原文中明确说出的风格偏好（如：温柔风、美式复古、松弛感）。禁止根据场合臆测风格。用户未提及则填空字符串；禁止用「日常休闲」当占位。',
         },
         special_requests: {
           type: Type.STRING,
@@ -68,7 +68,7 @@ export const gatekeeperSchema: Schema = {
         request_type: {
           type: Type.STRING,
           description:
-            '请求类型：wardrobe_outfit（要看到一套造型，含推荐穿搭、想买衣服、想看新品）| wardrobe_pairing（指定衣橱已有单品作锚点）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| outfit_redo（用户明确要求整套重做，不是只说不满意）| style_advice（只咨询穿搭知识：方法、公式、颜色怎么配、某风格怎么穿）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
+            '请求类型：wardrobe_outfit（要看到一套造型；含场合穿搭后续问这个天气能穿某品类）| wardrobe_pairing（指定衣橱已有单品作锚点，或衣橱浏览/浏览后续按天气筛衣橱）| purchase_pairing（待购/上传单品+衣橱互补）| feedback_revision（对上一轮方案的明确修改）| outfit_redo（用户明确要求整套重做，不是只说不满意）| style_advice（只咨询穿搭知识：方法、公式、颜色怎么配、某风格怎么穿）| outfit_selection（仅表示更喜欢第几套，未说满意或微调）| outfit_confirmed（已选定且明确表示满意、不用调整、可直接穿）| clarify（与搭配相关但意图不清，需追问）',
         },
         selected_outfit_id: {
           type: Type.STRING,
@@ -159,7 +159,7 @@ export const gatekeeperSchema: Schema = {
         needed: {
           type: Type.BOOLEAN,
           description:
-            '本轮回复是否依赖实时天气，与 request_type 无关。用户主动询问天气、或问今天明天某次出行怎么穿时为 true。为还没到的季节买衣服或准备衣橱时为 false。与天气无关、或用户已自述天气温度时为 false。',
+            '本轮回复是否依赖实时天气，与 request_type 无关。用户主动询问天气、问今天明天怎么穿、或指代这个天气判断适穿时为 true。为还没到的季节买衣服时为 false。与天气无关时为 false；用户已自述温度时为 false，但温度须写入 extracted_intent.weather。',
         },
         city: {
           type: Type.STRING,

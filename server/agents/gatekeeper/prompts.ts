@@ -6,7 +6,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 
 【请求类型 request_type】
 必须先判断用户属于哪一种：
-1. wardrobe_outfit：用户要从【已有衣橱】搭配一套穿搭（无特定锚定单品）。
+1. wardrobe_outfit：用户要从【已有衣橱】搭配一套穿搭（无特定锚定单品）。含「这个天气/今天适不适合穿某品类」且历史在场合穿搭/出方案中时，归此类，品类写入 special_requests，不要当衣橱浏览。
 2. wardrobe_pairing：用户明确指定【衣橱里已有】的某件单品想穿出门（如「我衣橱那条绿色裙子」「想穿我的白色衬衫」）——用该衣橱单品作锚点，从衣橱找互补单品。【禁止】归为 purchase_pairing 或 clarify。
 3. purchase_pairing：用户上传了【待购/非衣橱】服装单品的【图片】作为锚点。【必须有图片】才能归为此类；仅凭文字说"想买某类单品/对比购买"不触发此类型。【禁止】用于衣橱已有单品。
 4. feedback_revision：用户对上一轮方案提出【明确修改】（必须有明确修订信号，如「第一套太正式了，换成裤装」「鞋换成白色」「不要红色外套」「这套改成…」）——放行，交搭配师微调。若用户只是提出新的活动/场景/目标（如「我还想去做 X，应该穿啥」），归为 wardrobe_outfit。用户明确要求整套重做，归为 outfit_redo，不是 feedback_revision。只说不满意、没说重做，归为 clarify 并追问要改哪里。
@@ -38,7 +38,8 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - anchor_item_summary 填用户描述的衣橱单品（如「绿色裙子」「白裙子」）；anchor_slot 填对应槽位。
 - wardrobe_search_query【关键】：这是实际触发衣橱向量检索的 query，准确性直接决定搜索结果。要求：读完整段对话历史后，理解用户真正想找到的单品，输出「颜色 + 品类」格式的精简词，如「白色连衣裙」「浅蓝牛仔裤」「米白衬衫」。判断原则：以用户最终希望穿/看到的单品为准，不要填系统错误展示的单品颜色，也不要填用户用来纠错的描述词——从历史中找到用户的原始诉求。
 - 若用户已点选确认（消息含 id=xxx），填 anchor_wardrobe_id。
-- 【衣橱浏览】用户只想查看/确认衣橱里有没有某单品（「有没有白裙子」「想看看」「裙子呢」）时：request_type=wardrobe_pairing，is_complete=false，gatekeeper_reply 必须留空，followup_questions 留空，由服务端检索并展示候选卡片；禁止口头说「已帮你筛选/展示」。
+- 【衣橱浏览】用户只想查看/确认衣橱库存（「衣橱里有没有白裙子」「想看看我的 X」「裙子呢」）且无「怎么穿/能穿/搭一套」诉求时：request_type=wardrobe_pairing，is_complete=false，gatekeeper_reply 必须留空，followup_questions 留空，由服务端检索并展示候选卡片；禁止口头说「已帮你筛选/展示」。
+- 【天气适穿 + 品类（看历史）】当前句问「这个天气/今天/适不适合穿某品类」时：若历史是场合穿搭、出方案或微调 → wardrobe_outfit，品类写入 special_requests，anchor 留空，要查天气；若历史是衣橱浏览/已展示候选 → 仍 wardrobe_pairing，更新 wardrobe_search_query，要查天气（服务端按温度过滤）。禁止仅因句式像「有…裙吗」就默认浏览。
 - 【用户纠错】用户指出上一轮展示的颜色/款式不对时：重新归为 wardrobe_pairing，anchor_item_summary 填用户原本要找的描述（从历史提取），不要用 clarify 反复追问。
 - 若缺场合且用户已明确要【搭配】（非仅浏览），is_complete=false，followup_questions 追问场合；服务端会自动检索衣橱确认单品。
 - 不要因缺天气拦截 wardrobe_pairing。
@@ -85,8 +86,9 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
   - weather_lookup.needed 只看「本轮回复是否依赖实时天气」，与 request_type 无关：
     - 用户主动询问天气、气温或冷暖（含询问出行目的地的天气）→ true，无论 request_type 判为什么；
     - 用户问的是今天、明天或某次出行怎么穿，wardrobe_outfit / feedback_revision 要出穿搭 → true；
+    - 用户指代「这个天气/今天」且要判断适不适合穿某品类（出穿搭或衣橱检索）→ true；
     - 用户在为还没到的季节买衣服或准备衣橱（冬天要来了、冬季穿搭、入手夏装）→ false。special_requests 记下目标季节和想买的新品，禁止用今天的温度改写该季节；
-    - 其余与天气无关的请求 → false；用户已自述当前天气/温度时 → false。
+    - 其余与天气无关的请求 → false；用户已自述当前天气/温度时 → false，但须把该温度写入 extracted_intent.weather，禁止只写进 special_requests。
   - weather_lookup.city：只填用户明确提到、且本轮要查的城市（如出行目的地）；未提及则留空字符串，系统会依次用用户档案中的常住城市、IP 兜底，【禁止】自行猜测城市。
 - 系统会在你返回后据 weather_lookup 串行查询并补全天气结果，你无需填写查询结果本身。
 
@@ -104,7 +106,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 - 【禁止自行推断】dressing_climate 一律填空字符串；服务端会在查完天气后根据温度、锚点单品自动计算，勿根据「高原/保暖/温差」等话术填写 cold。
 
 【严格提取，禁止臆测】
-- style_preference：仅当用户明确提到风格词时填写；否则填 "日常休闲"。
+- style_preference：仅当用户明确提到风格词时填写；否则填空字符串。禁止用「日常休闲」当占位，风格判断交给搭配师。
 - city：仅提取用户明确提到的城市；未提及则填 ""。
 - city_role：随 city 判定；无 city 时填 ""；不确定是常住还是出行时优先 travel（宁可本轮不落档，也不误写档案）。
 - anchor_item_summary / anchor_slot：wardrobe_pairing 时按用户文字填写。purchase_pairing 的上传图留空，不要臆造外观。
