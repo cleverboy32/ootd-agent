@@ -80,10 +80,13 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
 
   const client = getClient('chat');
   const messages = buildMessages(options);
+  const thinkingBody =
+    options.thinking != null ? { thinking: { type: options.thinking } } : {};
   const base = {
     model: options.model,
     temperature: resolveChatTemperature(options.model, options.temperature),
     messages,
+    ...(options.maxTokens != null ? { max_tokens: options.maxTokens } : {}),
   };
   const requestOptions = options.signal ? { signal: options.signal } : undefined;
 
@@ -92,6 +95,7 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
       {
         ...base,
         response_format: options.jsonSchema ? { type: 'json_object' as const } : undefined,
+        ...thinkingBody,
       },
       requestOptions
     );
@@ -101,7 +105,10 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
   } catch (error) {
     if (!options.jsonSchema || !isResponseFormatCompatibilityError(error)) throw error;
     console.warn('[LLM] json_object response_format not supported, retrying without it');
-    const completion = await client.chat.completions.create(base, requestOptions);
+    const completion = await client.chat.completions.create(
+      { ...base, ...thinkingBody },
+      requestOptions
+    );
     const text = completion.choices[0]?.message?.content ?? '';
     await recordChatUsage(options.model, completion.usage);
     return { text: extractJsonText(text) };

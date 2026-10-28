@@ -30,6 +30,7 @@ export async function vertexGenerate(options: LlmGenerateOptions): Promise<LlmGe
     config: {
       systemInstruction: options.systemInstruction,
       temperature: options.temperature,
+      maxOutputTokens: options.maxTokens,
       responseMimeType: options.jsonSchema ? 'application/json' : undefined,
       responseSchema: options.jsonSchema as Schema | undefined,
     },
