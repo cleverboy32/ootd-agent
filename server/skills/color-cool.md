@@ -1,6 +1,6 @@
 ---
 name: color-cool
-description: 冷调肤色的脸周用色，冷色贴脸，橙驼放远
+description: 档案或用户为冷调肤色时选用
 ---
 
 # 冷调肤色

@@ -1,6 +1,6 @@
 ---
 name: body-petite
-description: 小个子的剪裁硬性限制，腰线抬高，一件衣服只留一个长度
+description: 档案身高偏矮或用户点名小个子、显高时选用
 ---
 
 # 小个子

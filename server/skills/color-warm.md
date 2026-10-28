@@ -1,6 +1,6 @@
 ---
 name: color-warm
-description: 暖调肤色的脸周用色，暖色贴脸，冷色放远
+description: 档案或用户为暖调肤色时选用
 ---
 
 # 暖调肤色

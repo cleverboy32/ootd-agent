@@ -1,6 +1,6 @@
 ---
 name: body-even
-description: 五五分的剪裁硬性限制，把腰线从中点挪开
+description: 档案或用户点名五五分时选用
 ---
 
 # 五五分

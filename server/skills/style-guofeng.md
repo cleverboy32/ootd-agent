@@ -1,6 +1,6 @@
 ---
 name: style-guofeng
-description: 汉服与古风的形制规则，袄裙是整套，马面裙要写裙门
+description: 汉服形制或明确古风/国风穿搭时选用；练功上课不算
 ---
 
 # 古风与汉服

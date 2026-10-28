@@ -1,6 +1,6 @@
 ---
 name: athletic-outfit
-description: 篮球、跑步、健身等运动场合的功能装备约束，用于检索 query 和选品
+description: 需要大幅度活动、训练、球类、瑜伽等运动功能穿着时选用
 ---
 
 # 运动场合穿搭

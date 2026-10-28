@@ -1,6 +1,6 @@
 ---
 name: style-new-chinese
-description: 新中式是现代版型加一处中式结构，不是整套古装
+description: 用户要新中式时选用
 ---
 
 # 新中式

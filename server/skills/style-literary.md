@@ -1,6 +1,6 @@
 ---
 name: style-literary
-description: 文艺用一件柔软有质感的主角，颜色沉静
+description: 用户要文艺时选用
 ---
 
 # 文艺

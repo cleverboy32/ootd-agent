@@ -1,6 +1,6 @@
 ---
 name: style-french
-description: 法式靠松紧对比和低饱和颜色，不靠装饰
+description: 用户要法式时选用
 ---
 
 # 法式

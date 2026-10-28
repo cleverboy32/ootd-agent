@@ -1,6 +1,6 @@
 ---
 name: style-cool
-description: 潮酷靠比例和对比，不靠整套浅色
+description: 用户要潮酷、甜酷、街头、机能风时选用
 ---
 
 # 潮酷

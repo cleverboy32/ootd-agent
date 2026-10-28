@@ -1,6 +1,6 @@
 ---
 name: body-apple
-description: 苹果形的剪裁硬性限制，腰腹不收紧，体积放在肩线和腿部线条
+description: 档案或用户点名苹果形时选用
 ---
 
 # 苹果形

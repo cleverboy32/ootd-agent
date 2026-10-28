@@ -1,6 +1,6 @@
 ---
 name: style-old-money
-description: 老钱风，一件质地主角，低饱和深色，不堆叠
+description: 用户要老钱、静奢时选用
 ---
 
 # 老钱

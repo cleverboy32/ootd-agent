@@ -1,6 +1,6 @@
 ---
 name: body-broad-shoulder
-description: 宽肩的剪裁硬性限制，肩线不外扩，领口打开
+description: 档案或用户点名宽肩时选用
 ---
 
 # 宽肩

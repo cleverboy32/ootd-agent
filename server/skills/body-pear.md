@@ -1,6 +1,6 @@
 ---
 name: body-pear
-description: 梨形的剪裁硬性限制，体积放在肩和上身，下装高腰并离开胯
+description: 档案或用户点名梨形时选用
 ---
 
 # 梨形

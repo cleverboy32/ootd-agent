@@ -1,6 +1,6 @@
 ---
 name: style-minimal
-description: 极简不超过三件衣服，一个轮廓一种主色
+description: 用户要极简时选用
 ---
 
 # 极简

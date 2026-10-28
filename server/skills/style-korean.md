@@ -1,6 +1,6 @@
 ---
 name: style-korean
-description: 韩系靠上短下长的比例，腰线要看得见
+description: 用户要韩系、韩式时选用
 ---
 
 # 韩系

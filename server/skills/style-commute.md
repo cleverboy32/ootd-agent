@@ -1,6 +1,6 @@
 ---
 name: style-commute
-description: 通勤轮廓清楚，一块深色，鞋和包能出门
+description: 用户明确要通勤或职场穿搭风格时选用；仅场合含通勤不算
 ---
 
 # 通勤

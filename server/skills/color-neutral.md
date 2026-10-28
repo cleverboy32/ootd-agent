@@ -1,6 +1,6 @@
 ---
 name: color-neutral
-description: 中性肤色一套里只选一个金属冷暖，脸周保持干净
+description: 档案或用户为中性肤色时选用
 ---
 
 # 中性肤色

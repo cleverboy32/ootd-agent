@@ -1,6 +1,6 @@
 ---
 name: outfit-design
-description: 买新品或看新品时的造型规则，一套一个主角，两套结构不同
+description: 用户要买、看新品或入手时选用
 ---
 
 # 新品造型

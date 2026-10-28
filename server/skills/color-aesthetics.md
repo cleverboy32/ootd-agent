@@ -1,6 +1,6 @@
 ---
 name: color-aesthetics
-description: 一套衣服的明度、面积和脸周用色，风格不能把它改成整套浅色
+description: 有肤色档案或用户点了配色、明度诉求时选用
 ---
 
 # 色彩与美学
