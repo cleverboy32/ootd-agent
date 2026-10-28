@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import {
+  ACCESSORY_FULLBODY_FRAMING,
   buildModelSubjectDescription,
   buildSeedreamImagePrompt,
+  isAccessoryReferenceLabel,
+  PERSON_REFERENCE_LABEL,
   SEEDREAM_SYSTEM_INSTRUCTION,
   simplifyVisualText,
 } from '@/server/agents/visual/seedreamPrompt';
@@ -115,7 +118,10 @@ describe('buildSeedreamImagePrompt', () => {
     );
     assert.match(prompt, /图1Mini Dress原样穿上/);
     assert.match(prompt, /没有照片的单品：Choker/);
-    assert.doesNotMatch(prompt, /配饰特写|配饰比例【强制】|耳垂大小/);
+    assert.match(prompt, /项链极细贴锁骨/);
+    assert.doesNotMatch(prompt, /禁止添加耳环|禁止添加项链|禁止添加手链|禁止添加戒指/);
+    assert.ok(prompt.includes(ACCESSORY_FULLBODY_FRAMING));
+    assert.doesNotMatch(prompt, /1–2厘米|不要单独放大成画面主角/);
   });
 
   it('keeps outfit text and open-layering when refs exist but inner is text-only', () => {
@@ -358,5 +364,159 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(bijia, /禁止画成拖到脚踝的长马甲/);
     assert.doesNotMatch(bijia, /敞开或半敞/);
     assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /斗篷、比甲、系带和盘扣的外层按描述的门襟/);
+  });
+
+  it('短路径：服装原样穿上，配饰后置且按品类写细小精致约束', () => {
+    const withAcc: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'item_top', name: '白衬衫', layer: 'top', reason: '上装' },
+        { id: 'item_acc', name: '圆环耳环', layer: 'accessory', reason: '点缀' },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '白衬衫配小耳环',
+        background: '街道',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      withAcc,
+      undefined,
+      ['白衬衫 | top', '圆环耳环 真人佩戴比例 | accessory | ACCESSORY'],
+      null
+    );
+    const clothingIdx = prompt.indexOf('白衬衫原样穿上');
+    const accessoryIdx = prompt.indexOf('只取款式颜色，细小精致点缀');
+    assert.ok(clothingIdx >= 0, 'clothing wear line');
+    assert.ok(accessoryIdx > clothingIdx, 'accessory line after clothing');
+    assert.match(prompt, /图\d圆环耳环/);
+    assert.doesNotMatch(prompt, /圆环耳环原样穿上/);
+    assert.match(prompt, /耳环极小极细、紧贴耳垂/);
+    assert.doesNotMatch(prompt, /禁止添加项链|禁止添加手链|禁止添加戒指/);
+    assert.ok(prompt.includes(ACCESSORY_FULLBODY_FRAMING));
+    assert.doesNotMatch(prompt, /1–2厘米|项链细链贴锁骨|不要单独放大成画面主角/);
+  });
+
+  it('短路径：无配饰图时文字补细小精致', () => {
+    const withAcc: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'item_top', name: '白衬衫', layer: 'top', reason: '上装' },
+        { id: 'item_acc', name: '圆环耳环', layer: 'accessory', reason: '点缀' },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '白衬衫配金色圆环耳环',
+        background: '街道',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      withAcc,
+      undefined,
+      ['用户本人 | person', '白衬衫 | top'],
+      null
+    );
+    assert.match(prompt, /没有照片的单品：[\s\S]*圆环耳环[\s\S]*细小精致贴耳/);
+    assert.match(prompt, /禁止偏大圆环/);
+    assert.doesNotMatch(prompt, /禁止添加项链|图\d圆环耳环|1–2厘米/);
+  });
+
+  it('长路径：紧凑编号 + 硬禁令，不再重复整套穿着', () => {
+    const withAcc: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '米白连衣裙',
+          layer: 'dress',
+          reason: '主单品',
+          description: '米白及膝连衣裙。',
+        },
+        {
+          id: 'new_item',
+          name: '金色细链',
+          layer: 'accessory',
+          reason: '点缀',
+          description: '细链贴锁骨。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '米白连衣裙配金色细链',
+        background: '咖啡馆',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(withAcc, undefined, [], null);
+    assert.match(prompt, /^真实街拍/);
+    assert.match(prompt, /穿：\n1\. 米白及膝连衣裙/);
+    assert.match(prompt, /2\. .*细链贴锁骨/);
+    assert.match(prompt, /项链极细贴锁骨/);
+    assert.doesNotMatch(prompt, /禁止添加耳环|禁止添加项链/);
+    assert.match(prompt, /全身或膝上中景/);
+    assert.doesNotMatch(prompt, /整套穿着|无参考图单品|穿搭构成|1–2厘米/);
+    assert.doesNotMatch(prompt, /不要单独放大成画面主角/);
+  });
+
+  it('长路径：方领/及臀写成硬禁令，舞蹈场景加反芭蕾', () => {
+    const dance: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '古典舞录制',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '浅驼色羊毛混纺针织开衫',
+          layer: 'outerwear',
+          reason: '外搭',
+          description: '浅驼色羊毛混纺针织开衫，V 领单排扣，长袖，衣长及臀，罗纹下摆。',
+        },
+        {
+          id: 'new_item',
+          name: '奶白色方领长袖舞蹈上衣',
+          layer: 'inner_top',
+          reason: '内搭',
+          description: '奶白色弹力针织方领上衣，长袖，贴身形，长度到腰。',
+        },
+        {
+          id: 'new_item',
+          name: '小巧金色耳钉',
+          layer: 'accessory',
+          reason: '点缀',
+          description: '金色小圆点耳钉，直径约0.3cm，紧贴耳垂。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立，微侧，一手提裙摆',
+        outfit_details: '方领上衣配及臀开衫',
+        background: '舞蹈教室，木质地板，背景有把杆',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(
+      dance,
+      undefined,
+      [PERSON_REFERENCE_LABEL],
+      null
+    );
+    const full = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
+    const line1 = prompt.split('\n').find((l) => l.startsWith('1. ')) ?? '';
+    const line2 = prompt.split('\n').find((l) => l.startsWith('2. ')) ?? '';
+    const line3 = prompt.split('\n').find((l) => l.startsWith('3. ')) ?? '';
+    assert.match(line1, /衣长必须及臀，禁止短到腰/);
+    assert.match(line1, /敞开穿，露出内搭/);
+    assert.doesNotMatch(line1, /必须方领|禁止大圈耳环/);
+    assert.match(line2, /必须方领，禁止圆领\/U领\/无袖/);
+    assert.doesNotMatch(line2, /禁止大圈耳环|衣长必须及臀/);
+    assert.match(line3, /禁止大圈耳环/);
+    assert.doesNotMatch(line3, /必须方领|及臀/);
+    assert.match(prompt, /不要画成芭蕾演出造型/);
+    assert.doesNotMatch(prompt, /整套穿着|无参考图单品|五官、脸型|塑料皮肤/);
+    assert.ok(full.length < 900, `full prompt too long: ${full.length}`);
+  });
+});
+
+describe('isAccessoryReferenceLabel', () => {
+  it('识别 layer / ACCESSORY / 品类词', () => {
+    assert.equal(isAccessoryReferenceLabel('圆环耳环 真人佩戴比例 | accessory'), true);
+    assert.equal(isAccessoryReferenceLabel('Pendant | ACCESSORY | silver'), true);
+    assert.equal(isAccessoryReferenceLabel('白衬衫 | top'), false);
   });
 });

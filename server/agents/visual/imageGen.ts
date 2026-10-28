@@ -12,6 +12,7 @@ import type { StylistOutfit } from '@/server/agents/stylist';
 import type { AnchorItemImageData } from '@/server/agents/intent';
 import type { UserProfileResult } from '@/server/agents/user-profile/schema';
 import type { ClothingItem } from '@prisma/client';
+import { scaleAccessoryReferenceImages } from '@/server/utils/accessoryScaleRef';
 import {
   buildSeedreamImagePrompt,
   isPersonReferenceLabel,
@@ -32,9 +33,8 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Every listed accessory must appear as a subtle accent within the full outfit look — never the visual focus, never enlarged from product close-ups.',
 ].join(' ');
 
-/** @deprecated 未再使用（配饰参考图仍会传入，比例约束改由 SEEDREAM_SYSTEM_INSTRUCTION 与 CRITICAL FULL-OUTFIT LOOK 承担） */
-export const ACCESSORY_SCALE_HINT =
-  'product close-up ref — wear at realistic on-body scale, do NOT enlarge to fill frame';
+/** 写入配饰参考 label 的 `|` 之前，进入 referenceDisplayName，提醒勿按特写放大 */
+export const ACCESSORY_SCALE_HINT = '真人佩戴比例';
 
 export function isAccessoryReferenceItem(
   layer?: string,
@@ -106,11 +106,20 @@ export function buildOutfitReferenceInputs(
 
   wardrobeImageUrls.forEach((url, idx) => {
     if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) return;
-    referenceUrls.push(url);
     const item = wardrobeItemByUrl.get(url);
     const cached = item ? ragCache?.get(item.id) : undefined;
+    const isAccessory = isAccessoryReferenceItem(item?.layer, cached?.mainCategory);
+    // 有配饰产品图必须进 refs（款式/颜色）；小首饰巨物化由 scaleAccessoryReferenceImages 预处理消化。
+    referenceUrls.push(url);
+    const displayName = item?.name
+      ? isAccessory
+        ? `${item.name} ${ACCESSORY_SCALE_HINT}`
+        : item.name
+      : isAccessory
+        ? `配饰 ${ACCESSORY_SCALE_HINT}`
+        : undefined;
     const parts = [
-      item?.name,
+      displayName,
       item?.layer,
       // description 紧跟名称，避免后续字段把结构细节挤出截断窗口
       cached?.description,
@@ -257,6 +266,11 @@ async function generateWithSeedream(
     additionalPurchaseRefs,
     portraitImageUrl
   );
+  // 小首饰产品特写先缩到大画布（真人佩戴像素占比），再交给 Seedream。
+  const scaledReferenceUrls = await scaleAccessoryReferenceImages(
+    referenceUrls,
+    referenceLabels
+  );
   const prompt = buildSeedreamImagePrompt(outfit, ragCache, referenceLabels, userProfile);
   const hasGarmentReference = referenceLabels.some(
     (label, index) => label.trim().length > 0 && !(index === 0 && isPersonReferenceLabel(label))
@@ -265,7 +279,7 @@ async function generateWithSeedream(
   const fullPrompt = hasGarmentReference ? prompt : `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
 
   const imageResponse = await withRetryOn429(
-    () => callImageGen(fullPrompt, undefined, referenceUrls, signal),
+    () => callImageGen(fullPrompt, undefined, scaledReferenceUrls, signal),
     { label: `ImageGen Seedream (${outfit.id})` }
   );
 
@@ -277,7 +291,7 @@ async function generateWithSeedream(
   return {
     data: imagePart.inlineData.data,
     mimeType: imagePart.inlineData.mimeType,
-    mode: referenceUrls.length > 0 ? 'multimodal' : 'text-only',
+    mode: scaledReferenceUrls.length > 0 ? 'multimodal' : 'text-only',
   };
 }
 

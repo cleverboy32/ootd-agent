@@ -190,6 +190,121 @@ export function outfitHasAccessoryItem(
 export const OVERALL_OUTFIT_LOOK_CONSTRAINT =
   '构图以整套穿搭为主：上装/下装/鞋履与配饰组成一套完整造型；参考图用于还原各单品的款式与颜色，最终画面必须是全身协调的街拍穿搭，配饰自然佩戴融入整体，不得做成单品特写拼贴或抢戏焦点。';
 
+/** 有配饰时强制拉开景别，避免中近景把特写挤大 */
+export const ACCESSORY_FULLBODY_FRAMING =
+  '全身或膝上中景，配饰只作细节点缀，不得成为构图焦点。';
+
+/**
+ * @deprecated 保留导出兼容旧测试；新逻辑用 buildAccessoryPresentConstraints。
+ * 不再写厘米/项链通例，避免诱发多余项链或被理解成画布尺寸。
+ */
+export const ACCESSORY_ONBODY_SCALE_CONSTRAINT =
+  '配饰细小精致、贴身点缀，禁止夸张放大。';
+
+type AccessoryKind = 'earring' | 'necklace' | 'bracelet' | 'ring' | 'hair' | 'other';
+
+function detectAccessoryKinds(blob: string): Set<AccessoryKind> {
+  const kinds = new Set<AccessoryKind>();
+  if (/耳环|耳坠|耳钉|耳圈|hoop|earring|stud/i.test(blob)) kinds.add('earring');
+  if (/项链|项圈|吊坠|细链|锁骨链|choker|necklace|pendant/i.test(blob)) kinds.add('necklace');
+  if (/手链|手镯|bracelet/i.test(blob)) kinds.add('bracelet');
+  if (/戒指|ring\b/i.test(blob)) kinds.add('ring');
+  if (/发夹|发箍|hair\s*clip|headband/i.test(blob)) kinds.add('hair');
+  if (kinds.size === 0 && /配饰|accessory|ACCESSORY/i.test(blob)) kinds.add('other');
+  return kinds;
+}
+
+/** 汇总方案里实际出现的小首饰品类（含参考 label）。 */
+export function collectAccessoryKinds(
+  outfit: StylistOutfit,
+  referenceLabels: string[] = []
+): Set<AccessoryKind> {
+  const blob = [
+    ...outfit.selected_items.map((item) => `${item.name} ${item.layer} ${item.description ?? ''}`),
+    outfit.visual_composition.outfit_details,
+    ...referenceLabels,
+  ].join('\n');
+  return detectAccessoryKinds(blob);
+}
+
+/**
+ * 有什么配饰写什么约束：定性（细小精致）+ 相对人体；未出现的品类写禁止添加。
+ */
+export function buildAccessoryPresentConstraints(
+  outfit: StylistOutfit,
+  referenceLabels: string[] = []
+): string[] {
+  if (!outfitHasAccessoryItem(outfit) && !referenceLabels.some(isAccessoryReferenceLabel)) {
+    return [];
+  }
+  const kinds = collectAccessoryKinds(outfit, referenceLabels);
+  const lines: string[] = [];
+  if (kinds.has('earring')) {
+    lines.push(
+      '耳环极小极细、紧贴耳垂，圈径远小于耳廓，禁止偏大圆环、禁止垂到下颌或占半边脸。'
+    );
+  }
+  if (kinds.has('necklace')) {
+    lines.push('项链极细贴锁骨，坠饰豆粒大小，禁止粗链或胸口巨坠。');
+  }
+  if (kinds.has('bracelet')) {
+    lines.push('手链/手镯细小精致，禁止夸张放大。');
+  }
+  if (kinds.has('ring')) {
+    lines.push('戒指细小精致，禁止夸张放大。');
+  }
+  if (kinds.has('hair')) {
+    lines.push('发饰细小精致，融入发型，禁止夸张放大。');
+  }
+  if (kinds.has('other') && lines.length === 0) {
+    lines.push(ACCESSORY_ONBODY_SCALE_CONSTRAINT);
+  }
+  lines.push('禁止按产品特写占画面比例放大。');
+  lines.push(ACCESSORY_FULLBODY_FRAMING);
+  return lines;
+}
+
+/** 与 accessoryScaleRef 对齐：小首饰才补描写，包/帽等大配饰不改。 */
+function isTextOnlySmallJewelry(name: string, layer: string): boolean {
+  const blob = `${name} ${layer} accessory`;
+  if (/包|帽|围巾|丝巾|腰带|发带|bag|hat|scarf|belt|tote|purse|handbag/i.test(blob)) {
+    return false;
+  }
+  return (
+    layerKey(layer) === 'accessory' ||
+    /耳环|耳坠|耳钉|项链|项圈|手链|手镯|戒指|发夹|发箍|choker|earring|necklace|bracelet|pendant/i.test(
+      blob
+    )
+  );
+}
+
+/** 无产品图的小首饰：补细小精致描写，不用厘米（模型不认真实尺度）。 */
+export function smallJewelryTextOnlyAppearance(name: string, description?: string): string {
+  const baseName = name.trim();
+  const desc = (description ?? '').trim();
+  const blob = `${baseName} ${desc}`;
+  const withDesc =
+    desc && !desc.startsWith(baseName) ? `${baseName}，${desc}` : desc || baseName;
+  if (/细小|精致|贴耳|贴锁骨|huggie|delicate/i.test(blob)) {
+    return withDesc;
+  }
+  if (/圆环|圈式|耳圈|hoop/i.test(blob)) {
+    return `${withDesc}，细小精致贴耳，禁止偏大圆环`;
+  }
+  return `${withDesc}，细小精致点缀，禁止放大`;
+}
+
+/** 参考图 label 是否为配饰（layer / ACCESSORY / 常见品类词） */
+export function isAccessoryReferenceLabel(label: string): boolean {
+  const head = label.split(/\s*[|—]\s*/)[0] ?? label;
+  const rest = label.slice(head.length);
+  if (/\baccessory\b/i.test(label) || /\bACCESSORY\b/.test(label)) return true;
+  if (/配饰/.test(label)) return true;
+  return /耳环|耳坠|耳钉|项链|项圈|手链|手镯|戒指|发夹|发箍|choker|earring|necklace|bracelet|pendant/i.test(
+    `${head} ${rest}`
+  );
+}
+
 function referenceDisplayName(label: string): string {
   const head = label.split(/\s*[|—]\s*/)[0]?.trim() ?? label.trim();
   return head.replace(/\s*\([^)]*\)\s*$/, '').trim() || label.trim();
@@ -222,16 +337,33 @@ function buildShortReferencePrompt(
   }
 
   const firstGarmentIndex = hasPersonReference ? 2 : 1;
-  const worn = garmentLabels
-    .map((label, index) => `图${firstGarmentIndex + index}${referenceDisplayName(label)}`)
-    .join('、');
-  lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。`);
+  const clothingRefs: Array<{ fig: number; label: string }> = [];
+  const accessoryRefs: Array<{ fig: number; label: string }> = [];
+  garmentLabels.forEach((label, index) => {
+    const fig = firstGarmentIndex + index;
+    if (isAccessoryReferenceLabel(label)) {
+      accessoryRefs.push({ fig, label });
+    } else {
+      clothingRefs.push({ fig, label });
+    }
+  });
+
+  // 服装仍「原样穿上」；配饰后置，只取款式颜色，避免产品特写尺度被抄进全身图
+  if (clothingRefs.length > 0) {
+    const worn = clothingRefs
+      .map((ref) => `图${ref.fig}${referenceDisplayName(ref.label)}`)
+      .join('、');
+    lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。`);
+  }
 
   const textOnly = listTextOnlyItems(outfit, referenceLabels);
   if (textOnly.length > 0) {
     const bits = textOnly.map((item) => {
       const name = item.name.trim();
       const desc = disambiguateImageGarmentTerms(item.description?.trim() ?? '');
+      if (isTextOnlySmallJewelry(name, item.layer)) {
+        return smallJewelryTextOnlyAppearance(name, desc);
+      }
       if (!desc || desc === name) return name;
       return desc.startsWith(name) ? desc : `${name}，${desc}`;
     });
@@ -260,16 +392,134 @@ function buildShortReferencePrompt(
     lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
   }
 
+  if (accessoryRefs.length > 0) {
+    const bits = accessoryRefs
+      .map((ref) => `图${ref.fig}${referenceDisplayName(ref.label)}`)
+      .join('、');
+    lines.push(`${bits}只取款式颜色，细小精致点缀，禁止放大。`);
+  }
+  lines.push(...buildAccessoryPresentConstraints(outfit, referenceLabels));
+
   const scene = oneClause(outfit.visual_composition.background);
   const pose = oneClause(outfit.visual_composition.model_pose);
   if (scene) lines.push(`场景：${scene}。`);
   if (pose) lines.push(`姿态：${pose}。`);
+
+  return lines.join('\n');
+}
+
+/**
+ * 从【该件】单品描述抽出「必须/禁止」短句，不串到其他单品。
+ */
+export function structureHardBans(
+  name: string,
+  description: string,
+  options?: { layer?: string; sceneContext?: string }
+): string[] {
+  const self = `${name} ${description}`;
+  const bans: string[] = [];
+  if (/方领/.test(self)) bans.push('必须方领，禁止圆领/U领/无袖');
+  if (/及臀/.test(self)) bans.push('衣长必须及臀，禁止短到腰');
+  if (/耳钉|stud\b/i.test(self)) bans.push('细小精致贴耳，禁止大圈耳环');
+  if (/圆环|耳圈|hoop/i.test(self) && /耳环|耳饰|earring/i.test(self)) {
+    bans.push('细小精致贴耳，禁止偏大圆环');
+  }
+  const layer = (options?.layer ?? '').toLowerCase();
+  const isShoe = layer === 'shoes' || layer.includes('shoe') || /鞋|靴/.test(self);
+  if (
+    isShoe &&
+    /软底/.test(self) &&
+    /舞|绣花|古典|ballet|pointe/i.test(`${self} ${options?.sceneContext ?? ''}`)
+  ) {
+    bans.push('禁止芭蕾足尖鞋、绑带舞鞋');
+  }
+  return bans;
+}
+
+function compactItemAppearance(
+  item: StylistOutfit['selected_items'][number],
+  ragCache?: Map<string, ClothingItem>
+): string {
+  const wardrobeDesc = ragCache?.get(item.id)?.description?.trim() ?? '';
+  const raw = (item.description?.trim() || wardrobeDesc || item.name).trim();
+  const desc = disambiguateImageGarmentTerms(raw);
+  if (isTextOnlySmallJewelry(item.name, item.layer)) {
+    return smallJewelryTextOnlyAppearance(item.name, desc === item.name ? item.description : desc);
+  }
+  if (desc.startsWith(item.name.trim())) return desc;
+  if (desc === item.name.trim()) return desc;
+  // 描述已含款式细节时不再重复名字前缀
+  if (desc.length >= 8) return desc;
+  return `${item.name.trim()}，${desc}`;
+}
+
+/**
+ * 无单品参考图的长路径：短 system + 编号硬约束，避免「整套穿着」与「无图单品」重复堆砌。
+ */
+function buildCompactTextOnlyPrompt(
+  outfit: StylistOutfit,
+  ragCache: Map<string, ClothingItem> | undefined,
+  hasPersonReference: boolean,
+  subject: string
+): string {
+  const lines: string[] = [];
+  if (hasPersonReference) {
+    lines.push('图1只取脸和身材，不穿照片里的衣服。自然光，全身或膝上中景。');
+  } else {
+    lines.push(`真实街拍，${subject || '东亚面孔'}。自然光，全身或膝上中景。`);
+  }
+
+  const sceneContext = outfit.visual_composition.outfit_details;
+  const needsOpen = outfitNeedsOpenLayering(outfit);
+
+  lines.push('穿：');
+  outfit.selected_items.forEach((item, index) => {
+    const appearance = compactItemAppearance(item, ragCache);
+    const bans = structureHardBans(item.name, item.description ?? '', {
+      layer: item.layer,
+      sceneContext,
+    });
+    if (needsOpen && isOuterwearLayer(item.layer)) {
+      bans.push('敞开穿，露出内搭');
+    }
+    const suffix = bans.length > 0 ? `；${bans.join('；')}` : '';
+    lines.push(`${index + 1}. ${appearance}${suffix}`);
+  });
+
+  const drawRules = garmentDrawConstraints(outfit);
+  if (drawRules.length > 0) {
+    lines.push(drawRules.join(''));
+  }
+
+  const garmentBlob = outfit.selected_items
+    .map((item) => `${item.name} ${item.description ?? ''}`)
+    .join(' ');
+  if (/ski pants|滑雪裤|powder gaiter|防雪裙/i.test(`${garmentBlob} ${sceneContext}`)) {
+    lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
+  }
+
+  const scene = oneClause(outfit.visual_composition.background, 48);
+  const pose = oneClause(outfit.visual_composition.model_pose, 48);
+  if (scene) {
+    const balletScene = /把杆|舞蹈|芭蕾|练功/i.test(
+      `${scene} ${outfit.visual_composition.background}`
+    );
+    lines.push(
+      balletScene
+        ? `场景：${scene}；不要画成芭蕾演出造型。`
+        : `场景：${scene}。`
+    );
+  }
+  if (pose) lines.push(`姿态：${pose}。`);
+
+  lines.push(...buildAccessoryPresentConstraints(outfit));
+
   return lines.join('\n');
 }
 
 /**
  * Seedream 专用中文 prompt。
- * 有单品参考图时走短句（照片锁版型）；没有单品图时才展开穿着描述和款式限制。
+ * 有单品参考图时走短句（照片锁版型）；没有单品图时走紧凑编号硬约束。
  */
 export function buildSeedreamImagePrompt(
   outfit: StylistOutfit,
@@ -289,111 +539,14 @@ export function buildSeedreamImagePrompt(
       subject
     );
   }
-  const scene = simplifyVisualText(outfit.visual_composition.background);
-  // 穿着描述含配饰颜色，截断会把句尾的帽子、雪镜切掉
-  const outfitDesc = disambiguateImageGarmentTerms(
-    simplifyVisualText(outfit.visual_composition.outfit_details, Number.POSITIVE_INFINITY)
-  );
-  const pose = simplifyVisualText(outfit.visual_composition.model_pose);
-  const textOnly = listTextOnlyItems(outfit, referenceLabels);
-  const wardrobeDescs = listWardrobeItemDescriptions(outfit, ragCache);
-  const itemSummary = outfit.selected_items
-    .map((i) => `${i.name}(${i.layer})`)
-    .join('、');
-  const garmentBlob = `${outfitDesc} ${itemSummary}`;
-  const skiBottom = /ski pants|滑雪裤|powder gaiter|防雪裙/i.test(garmentBlob);
-
-  const lines = [
-    hasPersonReference
-      ? '真实街拍穿搭照片。图1是用户本人，成片里的脸必须是同一个人。可以轻度整理皮肤，禁止换脸，禁止美颜成另一张脸。'
-      : `真实街拍穿搭照片，${subject}。`,
-    OVERALL_OUTFIT_LOOK_CONSTRAINT,
-    '摄影：白天或阴天的普通自然光，人脸和衣服都清楚，像手机随手拍。禁止浅景深、大光斑、胶片颗粒、夜景路灯、强橙光、塑料皮肤和塑料面料。',
-  ];
-
-  if (hasPersonReference) {
-    lines.push(
-      '人物参考：五官、脸型、眼睛、鼻子、嘴唇、发型和身体比例都跟图1，只换衣服和姿势。禁止复制图1里的服装。皮肤可以均匀一点，去掉临时的痘印和硬阴影，保留毛孔和原来的冷暖肤色。禁止瘦脸、大眼、改鼻、磨成塑料皮肤、看起来年轻一截。禁止拉腿、瘦腰、缩肩、改头身比。脸要清楚，禁止虚化和换脸。'
-    );
-  }
-
-  if (garmentLabels.length > 0) {
-    const firstGarmentIndex = hasPersonReference ? 2 : 1;
-    const refSummary = garmentLabels
-      .map((label, i) => `图${firstGarmentIndex + i}${shortReferenceLabel(label)}`)
-      .join('；');
-    const lastGarmentIndex = firstGarmentIndex + garmentLabels.length - 1;
-    lines.push(
-      `单品参考（${refSummary}）：穿齐图${firstGarmentIndex}至图${lastGarmentIndex}，按参考还原款式、颜色和面料纹理。针织和毛呢保持起毛与罗纹，禁止画成光滑棉布或塑料；牛仔只保留参考图里已有的褪色，禁止自行加渐变水洗。`
-    );
-  }
-
-  // 衣橱原文优先：避免 Stylist 把 front pleats 概括成 pleated 后被模型画成满裤褶皱
-  if (wardrobeDescs.length > 0) {
-    lines.push(
-      `衣橱单品原文（结构细节以此为准，禁止夸张改写）：${wardrobeDescs.join('；')}。`
-    );
-  }
-
-  // 有参考图时仍必须保留文字穿搭：无图新品/内搭只靠这段，否则易被外套盖住或省略
-  if (outfitDesc) {
-    lines.push(`整套穿着：${outfitDesc}。`);
-  }
-  if (itemSummary) {
-    lines.push(`穿搭构成（须全部自然出现在同一套造型里）：${itemSummary}。`);
-  }
-
-  if (textOnly.length > 0) {
-    const names = textOnly
-      .map((item) => {
-        const appearance = item.description?.trim();
-        const label = `${item.name}(${item.layer})`;
-        return appearance ? `${label}：${appearance}` : label;
-      })
-      .join('、');
-    lines.push(
-      `无参考图单品（以这句外观为准，禁止用参考图的品类或颜色替代，禁止省略或被遮挡）：${names}。`
-    );
-  }
-
-  if (skiBottom) {
-    lines.push('下装必须是长滑雪裤，禁止画成半身裙、裙裤或及膝裙。');
-  }
-
-  const drawRules = garmentDrawConstraints(outfit);
-  if (drawRules.length > 0) {
-    lines.push(`款式硬性限制：${drawRules.join('')}`);
-  }
-
-  if (outfitNeedsOpenLayering(outfit)) {
-    lines.push(
-      '叠穿层次：外套/夹克敞开或半敞，使内搭与外套同属一套可见造型，禁止只露外套内衬。'
-    );
-  }
-
-  if (outfitHasAccessoryItem(outfit, ragCache)) {
-    lines.push(
-      '配饰须出现且品类正确，作为整套造型的细节点缀，与服装比例协调，不要单独放大成画面主角。'
-    );
-  }
-
-  if (scene) lines.push(`场景：${scene}，日常真实环境，背景自然不喧宾夺主。`);
-  lines.push('光线用均匀的白天或阴天自然光。场景文字里的路灯、夜景和暖光不要画成强橙光或大光斑。');
-  if (pose) lines.push(`姿态：${pose}，放松自然，非 T 台摆拍。`);
-
-  if (hasPersonReference) {
-    lines.push('再次确认：脸是图1本人，五官和身材比例不变。皮肤只做轻度整理，不要换成另一个人。');
-  }
-  lines.push('全身或膝上中景，整套穿搭一眼可读，织物纹理清晰，表情自然。');
-
-  return lines.join('\n');
+  return buildCompactTextOnlyPrompt(outfit, ragCache, hasPersonReference, subject);
 }
 
+/** 无服装参考图时拼进 prompt；有服装图时不拼，避免冲掉短句。 */
 export const SEEDREAM_SYSTEM_INSTRUCTION = [
-  '生成真实摄影风格的整套穿搭展示图，不要插画、3D 或明显 AI 合成感。',
-  '没有人物参考图时，模特是东亚/中国面孔，禁止生成欧美模特。有人物参考图时，脸必须是该图本人，禁止改成另一张东亚脸。可轻度整理皮肤：肤色更均匀，去掉临时痘印和硬阴影，保留毛孔和冷暖。禁止瘦脸、改五官、塑料皮肤、改变头身比和身材比例。',
-  '以整套造型为主：参考图还原各单品款式颜色，配饰自然融入全身穿搭；禁止做成单品特写拼贴。',
-  '有参考图的单品，款式和颜色跟参考图。面料纹理以参考图为准，文字没写到的起毛、罗纹、针织也要保留。禁止把毛呢或针织画成光滑衬衫，禁止把针织画成塑料，禁止自行添加牛仔裤渐变褪色。没有参考图的单品以穿着描述为准，禁止用参考图的品类替代它们。',
-  '若参考图中有人物全身照，该图只用于脸、发型、肤色和身体比例，禁止把照片里的衣服画进成片；服装以单品参考图和穿着描述为准。',
-  '现代夹克、皮衣、西装外套有内搭时敞开或半敞，露出内搭，禁止只画外套内衬。斗篷、比甲、系带和盘扣的外层按描述的门襟，不要为了露内搭改成长披风。',
+  '真实摄影街拍穿搭图，禁止插画/3D。',
+  '图1只取脸与身材，禁止换脸、整容感美颜、改头身比。',
+  '有图单品跟参考图；没有参考图的单品以穿着描述为准。',
+  '配饰小尺寸点缀，禁止巨物化。',
+  '斗篷、比甲、系带和盘扣的外层按描述的门襟。',
 ].join('');

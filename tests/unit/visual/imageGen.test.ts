@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  ACCESSORY_SCALE_HINT,
   buildImagePrompt,
   buildOutfitReferenceInputs,
 } from '@/server/agents/visual/imageGen';
@@ -221,7 +222,7 @@ describe('buildOutfitReferenceInputs', () => {
     assert.doesNotMatch(referenceLabels[0], /乐福鞋/);
   });
 
-  it('includes accessory reference images for style fidelity', () => {
+  it('keeps small-jewelry product refs (scale handled later in generate)', () => {
     const { referenceUrls, referenceLabels } = buildOutfitReferenceInputs(
       outfitWithAccessory,
       [
@@ -251,6 +252,8 @@ describe('buildOutfitReferenceInputs', () => {
       'https://example.com/necklace.jpg',
     ]);
     assert.match(referenceLabels[2], /Pendant Necklace|silver pendant/i);
+    const nameHead = referenceLabels[2].split(/\s*[|—]\s*/)[0] ?? '';
+    assert.match(nameHead, new RegExp(ACCESSORY_SCALE_HINT));
   });
 });
 
