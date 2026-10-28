@@ -7,6 +7,8 @@ import {
   applyWeatherToDressingClimate,
   buildSeasonFilterContext,
   computeDressingClimate,
+  filterCoolUnseasonalItems,
+  itemFitsTemperature,
   resolveDressingClimateForIntent,
   shouldExcludeBySeason,
 } from '@/server/utils/ragSeasonFilter';
@@ -404,6 +406,28 @@ describe('applySeasonFilter', () => {
 });
 
 describe('applyTemperatureFilter', () => {
+  it('SQL 温度前置谓词与 itemFitsTemperature 同语义', () => {
+    // SQL: (tempMin IS NULL OR tempMin <= t) AND (tempMax IS NULL OR tempMax >= t)
+    const sqlKeeps = (
+      item: { tempMin?: number | null; tempMax?: number | null },
+      t: number
+    ): boolean =>
+      (item.tempMin == null || item.tempMin <= t) && (item.tempMax == null || item.tempMax >= t);
+
+    const cases = [
+      { tempMin: null, tempMax: null },
+      { tempMin: 20, tempMax: null },
+      { tempMin: null, tempMax: 12 },
+      { tempMin: 13, tempMax: 21 },
+      { tempMin: 20, tempMax: 25 },
+    ] as const;
+    for (const t of [12, 16, 19, 26]) {
+      for (const c of cases) {
+        assert.equal(sqlKeeps(c, t), itemFitsTemperature(c, t), JSON.stringify({ c, t }));
+      }
+    }
+  });
+
   it('19℃ 丢掉 tempMax ≤ 12 的羽绒服，保留没有区间的旧单品', () => {
     const results = [
       item({ id: 'puffer', subCategory: 'Puffer Jacket', tempMin: null, tempMax: 12 }),
@@ -420,5 +444,47 @@ describe('applyTemperatureFilter', () => {
   it('解析不到温度时不过滤', () => {
     const results = [item({ id: 'puffer', subCategory: 'Puffer Jacket', tempMax: 12 })];
     assert.equal(applyTemperatureFilter(results, null).length, 1);
+  });
+});
+
+describe('filterCoolUnseasonalItems', () => {
+  it('16℃ 去掉含夏无冬的偏夏货，保留含冬或无夏', () => {
+    const results = [
+      item({
+        id: 'summerSkirt',
+        subCategory: '格纹不规则半身裙',
+        mainCategory: 'BOTTOM',
+        season: ['spring', 'summer', 'autumn'],
+      }),
+      item({
+        id: 'winterKnit',
+        subCategory: '针织翻领衬衫',
+        mainCategory: 'TOP',
+        season: ['spring', 'autumn', 'winter'],
+      }),
+      item({
+        id: 'allSeason',
+        subCategory: '圆环耳环',
+        mainCategory: 'ACCESSORY',
+        season: ['spring', 'summer', 'autumn', 'winter'],
+      }),
+    ];
+    const filtered = filterCoolUnseasonalItems(results, 16);
+    assert.deepEqual(
+      filtered.map((entry) => entry.id),
+      ['winterKnit', 'allSeason']
+    );
+  });
+
+  it('22℃ 舒适档不过滤偏夏货', () => {
+    const results = [
+      item({
+        id: 'summerSkirt',
+        subCategory: '半身裙',
+        mainCategory: 'BOTTOM',
+        season: ['spring', 'summer'],
+      }),
+    ];
+    assert.equal(filterCoolUnseasonalItems(results, 22).length, 1);
   });
 });

@@ -143,23 +143,16 @@ export function assessSlotMatch(
     };
   }
 
-  // 灰区一律 adequate：Stylist prompt 视 weak 为「必须补新品」，而多件候选分数接近意味着衣橱有多个可选项，不是没有
-  if (gap >= thresholds.slotConfidenceGap) {
-    return {
-      slot,
-      status: 'adequate',
-      bestSimilarity: top.similarity,
-      bestSubCategory,
-      note: `相似度 ${top.similarity.toFixed(2)} 灰区，但与第二名差距 ${gap.toFixed(2)}，可优先使用`,
-    };
-  }
-
+  // 灰区（weak～adequate 之间）一律 weak：避免「分数凑合」被当成可硬选
   return {
     slot,
-    status: 'adequate',
+    status: 'weak',
     bestSimilarity: top.similarity,
     bestSubCategory,
-    note: `相似度 ${top.similarity.toFixed(2)} 灰区，有多件相近候选，请按场合与风格择优`,
+    note:
+      gap >= thresholds.slotConfidenceGap
+        ? `相似度 ${top.similarity.toFixed(2)} 灰区（与第二名差 ${gap.toFixed(2)}），未达可用阈值，建议补新品或换候选`
+        : `相似度 ${top.similarity.toFixed(2)} 灰区且多件接近，未达可用阈值，建议补新品`,
   };
 }
 

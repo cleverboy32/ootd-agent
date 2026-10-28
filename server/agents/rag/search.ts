@@ -11,6 +11,7 @@ import {
   applyTemperatureFilter,
   buildSeasonFilterContext,
   expandedSearchLimit,
+  filterCoolUnseasonalItems,
   parseTemperatureCelsius,
 } from '@/server/utils/ragSeasonFilter';
 import {
@@ -19,6 +20,9 @@ import {
   formatSlotMatchSummaryXml,
   isAthleticOccasion,
 } from '@/server/utils/ragMatchQuality';
+import { filterResultsByQueryCategory } from '@/server/utils/queryCategoryFilter';
+import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
+import { filterResultsByStyleSkill } from '@/server/utils/queryStyleFilter';
 import { ClothingItem } from '@prisma/client';
 import type { AnchorItemInfo, GatekeeperIntent } from '../intent';
 
@@ -30,6 +34,8 @@ export interface RagSearchContext {
   userMessage?: string;
   intent?: GatekeeperIntent;
   anchorItem?: AnchorItemInfo;
+  /** 本轮注入的 stylist skills（用于风格一致性过滤） */
+  skillNames?: string[];
 }
 
 function escapeXmlAttr(value: string): string {
@@ -139,6 +145,11 @@ export async function performRagSearch(
       console.log('[RAG_HANDLER] Athletic occasion detected — applying slot fitness filter');
     }
 
+    const temperature = parseTemperatureCelsius(logContext?.intent?.weather?.trim() ?? '');
+    if (temperature !== null) {
+      console.log(`[RAG_HANDLER] Temperature prefilter active: ${temperature}℃ (SQL + post-check)`);
+    }
+
     console.log(`[RAG_HANDLER] Running ${queries.length} slot queries in parallel...`);
 
     const perQueryResults = await Promise.all(
@@ -148,8 +159,9 @@ export async function performRagSearch(
         const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
           slot: parsedSlot,
           intent: logContext?.intent,
+          temperatureCelsius: temperature,
         });
-        const temperature = parseTemperatureCelsius(logContext?.intent?.weather?.trim() ?? '');
+        // 后置再跑一遍：与 SQL 语义一致，作兜底（例如旧调用未传 temperatureCelsius）
         const temperatureFiltered = applyTemperatureFilter(rawResults, temperature);
         const seasonFiltered = applySeasonFilter(
           temperatureFiltered,
@@ -157,7 +169,56 @@ export async function performRagSearch(
           parsedSlot,
           resultLimit
         );
-        const searchResults = filterResultsForAthleticContext(seasonFiltered, parsedSlot, athletic);
+        const athleticFiltered = filterResultsForAthleticContext(
+          seasonFiltered,
+          parsedSlot,
+          athletic
+        );
+        const beforeCategory = athleticFiltered.length;
+        const categoryFiltered = filterResultsByQueryCategory(
+          athleticFiltered,
+          query,
+          parsedSlot
+        );
+        if (categoryFiltered.length !== beforeCategory) {
+          console.log(
+            `[RAG_HANDLER] query-category filter slot=${parsedSlot ?? '?'} ` +
+              `"${query}": ${beforeCategory} → ${categoryFiltered.length}`
+          );
+        }
+
+        const beforeColor = categoryFiltered.length;
+        const { matched: colorFiltered } = filterItemsByQueryColor(query, categoryFiltered);
+        if (colorFiltered.length !== beforeColor) {
+          console.log(
+            `[RAG_HANDLER] query-color filter slot=${parsedSlot ?? '?'} ` +
+              `"${query}": ${beforeColor} → ${colorFiltered.length}`
+          );
+        }
+
+        const beforeCool = colorFiltered.length;
+        const coolFiltered = filterCoolUnseasonalItems(colorFiltered, temperature);
+        if (coolFiltered.length !== beforeCool) {
+          console.log(
+            `[RAG_HANDLER] cool-unseasonal filter slot=${parsedSlot ?? '?'} ` +
+              `${temperature}℃: ${beforeCool} → ${coolFiltered.length}`
+          );
+        }
+
+        const beforeStyle = coolFiltered.length;
+        const searchResults = filterResultsByStyleSkill(
+          coolFiltered,
+          logContext?.skillNames,
+          parsedSlot
+        );
+        if (searchResults.length !== beforeStyle) {
+          console.log(
+            `[RAG_HANDLER] style filter slot=${parsedSlot ?? '?'} ` +
+              `skills=${(logContext?.skillNames ?? []).join('|') || 'none'}: ` +
+              `${beforeStyle} → ${searchResults.length}`
+          );
+        }
+
         return {
           query,
           slot,

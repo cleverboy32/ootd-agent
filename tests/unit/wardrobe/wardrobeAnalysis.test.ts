@@ -17,6 +17,12 @@ describe('WARDROBE_ANALYSIS_PROMPT', () => {
     assert.match(WARDROBE_ANALYSIS_PROMPT, /棉服看蓬松/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /不要写成轻薄、轻量或薄壳/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /薄针织和毛呢衬衫大约 12-22/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /下装与连体也按面料厚薄标温/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /半身裙、短裤、连衣短裙：默认偏薄/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /硬折、有型、格纹不等于厚/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止标成 15 起穿/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /偏薄下装的 season 应含夏/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /不因外套叠穿而压低 tempMin/);
   });
 
   it('maps Chinese season and formality onto the stored enums', () => {

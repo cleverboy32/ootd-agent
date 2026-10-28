@@ -62,17 +62,24 @@ export function normalizeWardrobeSearchQuery(raw: string): string {
 }
 
 const COLOR_FAMILY_PATTERNS: Record<string, RegExp[]> = {
-  white: [/\b(white|cream|ivory|off[\s-]?white)\b/i, /白|米白|奶油/i],
+  white: [/\b(white|cream|ivory|off[\s-]?white)\b/i, /白|米白|奶油|象牙白/i],
+  beige: [/\b(beige|oatmeal|camel)\b/i, /米色|燕麦|杏|浅驼|驼色|奶茶/i],
   black: [/\bblack\b/i, /黑/i],
   green: [/\b(green|olive)\b/i, /绿|橄榄/i],
   blue: [/\b(blue|denim|navy)\b/i, /蓝|牛仔/i],
   red: [/\b(red|maroon|burgundy)\b/i, /红|酒红|枣红/i],
-  gray: [/\b(gray|grey|heather)\b/i, /灰/i],
+  gray: [/\b(gray|grey|heather)\b/i, /灰|浅米灰/i],
   yellow: [/\b(yellow|mustard)\b/i, /黄|姜黄/i],
-  pink: [/\b(pink|rose)\b/i, /粉/i],
-  brown: [/\b(brown|khaki|tan)\b/i, /棕|褐|卡其|大地/i],
+  pink: [/\b(pink|rose)\b/i, /粉|浅粉|蜜桃粉/i],
+  brown: [/\b(brown|khaki|tan)\b/i, /棕|褐|卡其|大地|深棕/i],
   purple: [/\b(purple|violet)\b/i, /紫/i],
   orange: [/\borange\b/i, /橙/i],
+};
+
+/** 邻近色：米色/燕麦可接受米白、浅灰米等暖浅色单品 */
+const COLOR_FAMILY_ALIASES: Record<string, string[]> = {
+  beige: ['beige', 'white', 'brown', 'gray'],
+  white: ['white', 'beige'],
 };
 
 export function extractQueryColorFamilies(query: string): string[] {
@@ -100,19 +107,22 @@ export function extractQueryEmbeddingColors(query: string): string[] {
 
 export function itemMatchesQueryColorFamilies(
   queryFamilies: string[],
-  itemColors: string[]
+  itemColors: string[],
+  itemDescription?: string | null
 ): boolean {
   if (queryFamilies.length === 0) return true;
-  const itemText = itemColors.join(' ');
-  return queryFamilies.some((family) =>
-    COLOR_FAMILY_PATTERNS[family]?.some((p) => p.test(itemText))
-  );
+  const itemText = [...itemColors, itemDescription ?? ''].join(' ');
+  return queryFamilies.some((family) => {
+    const accepted = COLOR_FAMILY_ALIASES[family] ?? [family];
+    return accepted.some((name) =>
+      COLOR_FAMILY_PATTERNS[name]?.some((p) => p.test(itemText))
+    );
+  });
 }
 
-export function filterItemsByQueryColor<T extends { colors: string[] }>(
-  query: string,
-  items: T[]
-): { matched: T[]; rejected: T[] } {
+export function filterItemsByQueryColor<
+  T extends { colors: string[]; description?: string | null },
+>(query: string, items: T[]): { matched: T[]; rejected: T[] } {
   const families = extractQueryColorFamilies(query);
   if (families.length === 0) {
     return { matched: items, rejected: [] };
@@ -120,7 +130,7 @@ export function filterItemsByQueryColor<T extends { colors: string[] }>(
   const matched: T[] = [];
   const rejected: T[] = [];
   for (const item of items) {
-    if (itemMatchesQueryColorFamilies(families, item.colors)) {
+    if (itemMatchesQueryColorFamilies(families, item.colors, item.description)) {
       matched.push(item);
     } else {
       rejected.push(item);

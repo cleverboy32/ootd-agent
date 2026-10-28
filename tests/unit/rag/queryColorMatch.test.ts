@@ -34,6 +34,32 @@ describe('queryColorMatch', () => {
     assert.equal(rejected.length, 1);
     assert.equal(rejected[0].id, '1');
   });
+
+  it('浅粉 query 滤掉黑白格裙', () => {
+    const items = [
+      {
+        id: '1',
+        colors: ['黑白格'],
+        description: '黑白细格纹半身裙',
+        similarity: 0.63,
+      },
+      {
+        id: '2',
+        colors: ['浅粉'],
+        description: '浅粉高腰半身裙',
+        similarity: 0.55,
+      },
+    ];
+    const { matched, rejected } = filterItemsByQueryColor('高腰半身裙 浅粉', items);
+    assert.equal(matched.length, 1);
+    assert.equal(matched[0].id, '2');
+    assert.equal(rejected[0].id, '1');
+  });
+
+  it('燕麦色/米色可识别为 beige 族', () => {
+    assert.ok(extractQueryColorFamilies('薄针织开衫 燕麦色').includes('beige'));
+    assert.ok(extractQueryColorFamilies('玛丽珍鞋 米色').includes('beige'));
+  });
 });
 
 describe('normalizeWardrobeSearchQuery', () => {

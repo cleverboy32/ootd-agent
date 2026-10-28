@@ -2,6 +2,10 @@ import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
 import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
 import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
+import {
+  filterAnchorCandidatesByWeather,
+  parseTemperatureCelsius,
+} from '@/server/utils/ragSeasonFilter';
 import { getTextSimilarityThresholds } from '@/server/services/embedding';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import type {
@@ -50,7 +54,9 @@ export async function resolveWardrobeAnchor(
   summary: string,
   slot?: AnchorSlot | '',
   /** Gatekeeper LLM 直接生成的精简检索词，优先使用 */
-  llmSearchQuery?: string
+  llmSearchQuery?: string,
+  /** 实况天气文本；有可解析温度时丢掉不适穿候选 */
+  weather?: string
 ): Promise<WardrobeResolverResult> {
   const query = (llmSearchQuery?.trim() || summary.trim());
   if (!query || !clientId) {
@@ -75,7 +81,11 @@ export async function resolveWardrobeAnchor(
 
   const mainCategory = effectiveSlot ? slotToMainCategory(effectiveSlot) : undefined;
   const searchSlot = effectiveSlot ? (effectiveSlot as WardrobeSearchSlot) : undefined;
-  const searchOptions = searchSlot ? { slot: searchSlot } : undefined;
+  const temperatureCelsius = parseTemperatureCelsius(weather?.trim() ?? '');
+  const searchOptions = {
+    ...(searchSlot ? { slot: searchSlot } : {}),
+    ...(temperatureCelsius !== null ? { temperatureCelsius } : {}),
+  };
   const rawResults = await searchWardrobeItemsByText(
     query,
     clientId,
@@ -100,7 +110,15 @@ export async function resolveWardrobeAnchor(
     return { status: 'color_mismatch', queriedSummary: query, nearMiss };
   }
 
-  return classifyResults(matched);
+  const temperatureFit = filterAnchorCandidatesByWeather(matched, weather);
+  if (matched.length > 0 && temperatureFit.length === 0) {
+    console.warn(
+      `[WARDROBE_RESOLVER] All ${matched.length} candidates filtered by weather="${(weather ?? '').slice(0, 40)}"`
+    );
+    return { status: 'not_found' };
+  }
+
+  return classifyResults(temperatureFit);
 }
 
 function classifyResults(

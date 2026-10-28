@@ -82,7 +82,7 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
     assert.match(assessment.note, /有可用的衣橱单品/);
   });
 
-  it('灰区且多件候选分数接近 → adequate，提示按场合择优', () => {
+  it('灰区且多件候选分数接近 → weak', () => {
     const assessment = assessSlotMatch(
       [
         item({ id: 'c1', subCategory: 'Trench Coat', similarity: 0.58 }),
@@ -91,11 +91,11 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
       'outerwear',
       false
     );
-    assert.equal(assessment.status, 'adequate');
-    assert.match(assessment.note, /择优/);
+    assert.equal(assessment.status, 'weak');
+    assert.match(assessment.note, /灰区/);
   });
 
-  it('回放 2026-10-14 晚餐：上衣 0.603/0.578、鞋 0.614/0.592 → adequate', () => {
+  it('回放 2026-10-14 晚餐：上衣/鞋灰区分数 → weak', () => {
     const top = assessSlotMatch(
       [
         item({ id: 't1', subCategory: 'Sleeveless Blouse', mainCategory: 'TOP', similarity: 0.6028 }),
@@ -114,8 +114,8 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
       'shoes',
       false
     );
-    assert.equal(top.status, 'adequate');
-    assert.equal(shoes.status, 'adequate');
+    assert.equal(top.status, 'weak');
+    assert.equal(shoes.status, 'weak');
   });
 
   it('多件候选接近但 top1 低于 weak 阈值 → 仍为 weak', () => {
@@ -130,7 +130,7 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
     assert.equal(assessment.status, 'weak');
   });
 
-  it('灰区但 gap 足够大 → adequate', () => {
+  it('灰区但 gap 足够大 → 仍为 weak（未达 adequate 阈值）', () => {
     const assessment = assessSlotMatch(
       [
         item({ id: 'd1', subCategory: 'Trench Coat', similarity: 0.58 }),
@@ -139,8 +139,8 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
       'outerwear',
       false
     );
-    assert.equal(assessment.status, 'adequate');
-    assert.match(assessment.note, /优先使用/);
+    assert.equal(assessment.status, 'weak');
+    assert.match(assessment.note, /灰区/);
   });
 
   it('运动场景下 Wrap Shorts 高分仍判 weak', () => {
