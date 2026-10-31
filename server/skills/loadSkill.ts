@@ -49,10 +49,10 @@ export function buildSkillBlocks(names: string[]): string {
     .join('');
 }
 
-/** 抽出 skill 正文里的「检索」节；没有该节则返回全文。 */
+/** 抽出 skill 正文里的「检索」节；没有该节则返回全文。兼容 `## 检索` 与 `## 6. 检索生成逻辑`。 */
 export function extractRetrievalSection(skillBody: string): string {
   const body = skillBody.trim();
   if (!body) return '';
-  const match = body.match(/##\s*检索\s*\r?\n([\s\S]*?)(?=\r?\n##\s|$)/);
+  const match = body.match(/##\s*(?:\d+\.\s*)?检索[^\n]*\r?\n([\s\S]*?)(?=\r?\n##\s|$)/);
   return (match?.[1] ?? body).trim();
 }

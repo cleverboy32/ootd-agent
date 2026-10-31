@@ -37,7 +37,7 @@ const STYLE_CONFLICT_RULES: Record<string, StyleConflictRule> = {
       shoes: /运动鞋|徒步|球鞋|老爹鞋/,
     },
   },
-  'style-guofeng': {
+  'style-history': {
     conflict: /运动|街头|街头风|工装|厚底|西装套装/,
     slotConflict: {
       shoes: /运动鞋|徒步|球鞋/,
@@ -51,7 +51,10 @@ const STYLE_CONFLICT_RULES: Record<string, StyleConflictRule> = {
     conflict: /汉服|广袖|厚底雪地靴/,
   },
   'style-french': {
-    conflict: /汉服|卫衣|厚底运动鞋|工装/,
+    conflict: /汉服|卫衣|厚底运动鞋|工装|户外|运动|摇粒绒/,
+    slotConflict: {
+      outerwear: /连帽|棒球领|帽衫|徒步/,
+    },
   },
   'style-cool': {
     conflict: /汉服|珍珠多层|玛丽珍|毛呢长裙/,

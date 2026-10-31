@@ -55,8 +55,8 @@ describe('loadSkillDescription', () => {
     assert.match(loadSkillDescription('style-sweet'), /甜美|甜妹|少女感/);
     assert.doesNotMatch(loadSkillDescription('style-sweet'), /只放在一个位置/);
 
-    assert.match(loadSkillDescription('style-guofeng'), /汉服|古风|国风/);
-    assert.match(loadSkillDescription('style-guofeng'), /练功上课不算/);
+    assert.match(loadSkillDescription('style-history'), /汉服|考据|朝代/);
+    assert.doesNotMatch(loadSkillDescription('style-history'), /国风|古风/);
 
     assert.match(loadSkillDescription('athletic-outfit'), /运动|训练|瑜伽/);
   });
@@ -65,6 +65,11 @@ describe('loadSkillDescription', () => {
 describe('extractRetrievalSection', () => {
   it('抽出 ## 检索 节，不含前后其它节', () => {
     const body = `## 何时用\n说明\n\n## 检索\n- 上：短上衣\n- 下：高腰\n\n## 穿搭\n别的规则\n`;
+    assert.equal(extractRetrievalSection(body), '- 上：短上衣\n- 下：高腰');
+  });
+
+  it('抽出 ## N. 检索生成逻辑 节', () => {
+    const body = `## 5. 配饰\n别的\n\n## 6. 检索生成逻辑 (Search)\n- 上：短上衣\n- 下：高腰\n`;
     assert.equal(extractRetrievalSection(body), '- 上：短上衣\n- 下：高腰');
   });
 
@@ -139,7 +144,7 @@ describe('normalizeStylistSkillNames', () => {
       assert.ok(entry.description.length > 0, entry.name);
       assert.ok(loadSkill(entry.name).length > 0, entry.name);
     }
-    assert.ok(buildSkillBlocks(['style-guofeng', 'weather-dressing']).includes('【技能 style-guofeng】'));
+    assert.ok(buildSkillBlocks(['style-history', 'weather-dressing']).includes('【技能 style-history】'));
   });
 
   it('未知技能名抛出含名称的错误', () => {

@@ -3,9 +3,8 @@ import { loadSkillDescription } from '@/server/skills/loadSkill';
 
 /** 先匹配更具体的形制，再匹配风格名。只用于档案 suited_style 归一，不再负责出方案注入。 */
 const STYLE_SKILLS: { name: string; pattern: RegExp }[] = [
-  { name: 'style-guofeng', pattern: /汉服|马面裙|明制|唐制|宋制/ },
-  { name: 'style-new-chinese', pattern: /新中式/ },
-  { name: 'style-guofeng', pattern: /古风|国风/ },
+  { name: 'style-history', pattern: /汉服|马面裙|明制|唐制|宋制|考据/ },
+  { name: 'style-new-chinese', pattern: /新中式|国风|古风/ },
   { name: 'style-old-money', pattern: /老钱|静奢|old\s*money/i },
   { name: 'style-cool', pattern: /潮酷|甜酷|街头|酷帅|机能风?/ },
   { name: 'style-sweet', pattern: /甜美|甜妹|少女感/ },
@@ -22,7 +21,7 @@ function styleSkillFromText(text: string): string | undefined {
 }
 
 const SUITED_STYLE_LABELS: Record<string, string> = {
-  'style-guofeng': '古风',
+  'style-history': '汉服',
   'style-new-chinese': '新中式',
   'style-old-money': '老钱',
   'style-cool': '潮酷',
@@ -44,6 +43,8 @@ export type StylistSkillProfile = {
   body_shape?: string;
   height?: string;
   skin_tone?: string;
+  /** 照片判断的性别（男/女），未上传照片时为空 */
+  gender?: string;
   /** 用户自己说过的风格；「日常休闲」是没填时的占位，不当成风格 */
   personal_style?: string;
   /** 照片判断出的适合风格，只在这轮没点名风格时使用 */
@@ -52,7 +53,7 @@ export type StylistSkillProfile = {
 
 /** Stylist 可选的搭配 skill（不含模式 skill）。 */
 export const STYLIST_SELECTABLE_SKILL_NAMES = [
-  'style-guofeng',
+  'style-history',
   'style-new-chinese',
   'style-old-money',
   'style-cool',

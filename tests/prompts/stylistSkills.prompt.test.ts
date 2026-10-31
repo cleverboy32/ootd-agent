@@ -38,7 +38,7 @@ function assertWhitelistOnly(names: string[]): void {
 }
 
 describe('Stylist — select skills', () => {
-  it('跳古典舞且无汉服点名 → 不含 style-guofeng', async () => {
+  it('跳古典舞且无汉服点名 → 不含 style-history', async () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_outfit',
       occasion: '跳古典舞',
@@ -48,10 +48,10 @@ describe('Stylist — select skills', () => {
     });
     const names = await selectStylistSkills(intent, '明天要去跳古典舞，我穿什么呢', PROFILE);
     assertWhitelistOnly(names);
-    assert.ok(!names.includes('style-guofeng'), `不应含古风: ${names.join(',')}`);
+    assert.ok(!names.includes('style-history'), `不应含汉服 skill: ${names.join(',')}`);
   });
 
-  it('点名汉服 → 含 style-guofeng', async () => {
+  it('点名汉服 → 含 style-history', async () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_outfit',
       occasion: '日常出门',
@@ -60,7 +60,20 @@ describe('Stylist — select skills', () => {
     });
     const names = await selectStylistSkills(intent, '我想穿汉服出门，帮我搭', PROFILE);
     assertWhitelistOnly(names);
-    assert.ok(names.includes('style-guofeng'), `应含古风: ${names.join(',')}`);
+    assert.ok(names.includes('style-history'), `应含汉服 skill: ${names.join(',')}`);
+  });
+
+  it('只说国风 → 挂 style-new-chinese，不含 style-history', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常出门',
+      style_preference: '国风',
+      special_requests: '想穿国风一点',
+    });
+    const names = await selectStylistSkills(intent, '帮我搭一套国风的', PROFILE);
+    assertWhitelistOnly(names);
+    assert.ok(names.includes('style-new-chinese'), `国风应导流新中式: ${names.join(',')}`);
+    assert.ok(!names.includes('style-history'), `国风不应挂汉服 skill: ${names.join(',')}`);
   });
 
   it('有今日天气的出门请求 → 含 weather-dressing', async () => {

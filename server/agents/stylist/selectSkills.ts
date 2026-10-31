@@ -31,7 +31,8 @@ export const SELECT_STYLIST_SKILLS_INSTRUCTION = `你是穿搭助手的技能调
 - 不要为了凑数挂技能；没有依据就返回空数组。
 
 【风格】
-- style-guofeng：用户要汉服形制、马面裙、明/唐/宋制，或明确古风/国风穿成一套形制时再选。练功、上课、日常去跳舞不等于汉服；未点名形制不要挂。
+- style-history：用户要汉服、马面裙、明/唐/宋制或明确考据形制时再选。练功、上课、日常去跳舞不等于汉服；未点名形制不要挂。
+- style-new-chinese：用户点名新中式，或只说「国风」「古风」（无汉服/朝代形制）时挂这个，不要挂 style-history。
 - 其他风格 skill：用户点名，或档案 personal_style / suited_style 明确对应时再选。场合词不等于风格（通勤场合≠必须 style-commute）。
 
 【场景】
@@ -56,6 +57,7 @@ function profileForSkills(profile: UserProfileResult | StylistSkillProfile): Sty
     body_shape: profile.body_shape,
     height: 'height' in profile ? profile.height : undefined,
     skin_tone: profile.skin_tone,
+    gender: 'gender' in profile ? profile.gender : undefined,
     personal_style: profile.personal_style,
     suited_style: profile.suited_style,
   };
@@ -91,6 +93,7 @@ ${userMessage || '（无文字）'}
 - 特殊要求: ${intent.special_requests || '无'}
 
 【用户档案摘要】
+- 性别: ${skillProfile.gender || '未知'}
 - 身高: ${skillProfile.height || '未提供'}
 - 身形: ${skillProfile.body_shape || '未分析'}
 - 肤色: ${skillProfile.skin_tone || '未分析'}
