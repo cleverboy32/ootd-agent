@@ -3,7 +3,8 @@ import ReactMarkdown from "react-markdown";
 import Image from "next/image";
 import remarkGfm from "remark-gfm";
 import { ImageState, Message, MessageProgress } from "@/lib/types";
-import { User, AlertTriangle, RefreshCw, Check, Loader2, Minus, Heart } from "lucide-react";
+import Link from "next/link";
+import { User, AlertTriangle, RefreshCw, Check, Loader2, Minus, Heart, Ticket } from "lucide-react";
 import { useChatHandler } from "@/hooks/useChatHandler";
 import { useImageRetry } from "@/hooks/useImageRetry";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,46 @@ function ImageFailedPlaceholder({
   );
 }
 
+function ImageCreditsRequiredPlaceholder({
+  onRetry,
+  isRetrying,
+}: {
+  onRetry?: () => void;
+  isRetrying?: boolean;
+}) {
+  return (
+    <div className="my-3 flex w-full max-w-[240px] flex-col items-center justify-center rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-center">
+      <Ticket className="mb-2 h-7 w-7 text-amber-600/80" />
+      <p className="text-xs font-medium text-foreground">
+        试用探索次数已用完，充值后可生成效果图
+      </p>
+      <div className="mt-3 flex w-full flex-col gap-1.5">
+        <Button asChild size="sm" className="h-8 w-full text-xs">
+          <Link href="/settings/credits">兑换码加次</Link>
+        </Button>
+        {onRetry && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-auto px-2 py-1 text-xs"
+            disabled={isRetrying}
+            onClick={onRetry}
+          >
+            <RefreshCw className={`mr-1 h-3 w-3 ${isRetrying ? "animate-spin" : ""}`} />
+            {isRetrying ? "生成中..." : "加额后补生成"}
+          </Button>
+        )}
+        <Link
+          href="/settings/credits"
+          className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+        >
+          查看剩余次数
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function CollectOutfitButton({
   messageId,
   outfitId,
@@ -121,14 +162,13 @@ function InlineImageMarker({
 }) {
   const state = imageStates?.[outfitId];
 
-  if (state && state !== "loading" && state !== "failed") {
+  if (state === "credits_required") {
     return (
-      <span
-        id={outfitImageAnchorId(messageId, outfitId)}
-        className="relative inline-block align-middle scroll-mb-36"
-      >
-        <ZoomableOutfitImage src={state} alt="AI 生成的穿搭效果图" />
-        <CollectOutfitButton messageId={messageId} outfitId={outfitId} />
+      <span id={outfitImageAnchorId(messageId, outfitId)} className="scroll-mb-36">
+        <ImageCreditsRequiredPlaceholder
+          onRetry={onRetryImage ? () => onRetryImage(messageId, outfitId) : undefined}
+          isRetrying={false}
+        />
       </span>
     );
   }
@@ -139,6 +179,18 @@ function InlineImageMarker({
         onRetry={onRetryImage ? () => onRetryImage(messageId, outfitId) : undefined}
         isRetrying={false}
       />
+    );
+  }
+
+  if (state && state !== "loading") {
+    return (
+      <span
+        id={outfitImageAnchorId(messageId, outfitId)}
+        className="relative inline-block align-middle scroll-mb-36"
+      >
+        <ZoomableOutfitImage src={state} alt="AI 生成的穿搭效果图" />
+        <CollectOutfitButton messageId={messageId} outfitId={outfitId} />
+      </span>
     );
   }
 

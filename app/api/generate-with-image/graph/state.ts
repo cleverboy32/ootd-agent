@@ -14,9 +14,13 @@ export interface OutfitRuntime {
   controller: ReadableStreamDefaultController;
   imageMap: Map<string, string>;
   failedImageIds: Set<string>;
+  /** 余额不足跳过生图的 outfit id */
+  creditsRequiredIds: Set<string>;
   ragCache: Map<string, ClothingItem>;
   initialParts: Part[];
   clientId?: string;
+  /** AUTH_MODE=user 时的登录用户；access 模式为空 */
+  userId?: string;
   conversationId?: string;
   clientIp?: string;
   /** 本轮请求的待购图 COS URL（与 initialParts inlineData 对应） */

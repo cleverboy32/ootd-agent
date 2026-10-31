@@ -61,6 +61,7 @@ export interface StreamHandlers {
   onImagePlaceholder: (data: { id: string; alt: string; }) => void; // New handler for placeholders
   onImageGenerated: (data: { id: string; imageUrl: string; alt: string; }) => void; // Updated handler
   onImageGenerationFailed: (data: { id: string; message: string; alt: string; }) => void;
+  onImageCreditsRequired?: (data: { id: string; message: string; alt: string; }) => void;
   onWardrobeCandidates?: (data: { items: WardrobeCandidateItem[] }) => void;
   onProgress?: (data: { stage: string; label?: string; done?: boolean; thinking?: string }) => void;
   onError: (message: string) => void;
@@ -155,6 +156,9 @@ export const streamResponse = async (
               break;
             case 'image_generation_failed':
               handlers.onImageGenerationFailed(data);
+              break;
+            case 'image_credits_required':
+              handlers.onImageCreditsRequired?.(data);
               break;
             case 'wardrobe_candidates':
               handlers.onWardrobeCandidates?.(data);

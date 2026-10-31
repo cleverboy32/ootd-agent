@@ -51,8 +51,13 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const { grantSignupCredits } = await import('@/server/billing/credits');
+    const creditBalance = await grantSignupCredits(user.id);
+
     const token = await createSessionToken(user.id, user.sessionVersion);
-    const response = NextResponse.json({ user: { id: user.id, username: user.username } });
+    const response = NextResponse.json({
+      user: { id: user.id, username: user.username, creditBalance },
+    });
     setSessionCookie(response, token);
     await logAuthEvent({ action: 'register', outcome: 'success', username, userId: user.id });
     return response;

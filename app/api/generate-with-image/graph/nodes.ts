@@ -139,11 +139,27 @@ async function executeParallelAgents(
   });
 
   const imageStartedAt = Date.now();
+  const { getAuthMode } = await import('@/server/auth/mode');
+  const { getCreditBalance } = await import('@/server/billing/credits');
+  const { creditCostPerImage } = await import('@/server/config/credits');
+  const enforceCredits = getAuthMode() === 'user' && Boolean(runtime.userId);
+  let affordableSlots = stylistResult.outfits.length;
+  if (enforceCredits && runtime.userId) {
+    const balance = await getCreditBalance(runtime.userId);
+    const cost = creditCostPerImage();
+    affordableSlots = Math.floor(balance / cost);
+    console.log(
+      `[CREDITS] user=${runtime.userId} balance=${balance} cost/image=${cost} affordable=${affordableSlots}/${stylistResult.outfits.length}`
+    );
+  }
+
+  const imageConcurrency = enforceCredits ? 1 : IMAGE_GEN_CONCURRENCY;
   const imageTask = mapWithConcurrency(
     stylistResult.outfits,
-    IMAGE_GEN_CONCURRENCY,
-    (outfit) => {
+    imageConcurrency,
+    (outfit, index) => {
       throwIfAborted(runtime.abortSignal);
+      const skipForCredits = enforceCredits && index >= affordableSlots;
       const labeledUploads = labelPurchaseUploads(
         outfit,
         state.intent?.purchase_items ?? [],
@@ -179,7 +195,12 @@ async function executeParallelAgents(
         stylistResult.anchor_image_url,
         additionalPurchaseRefs,
         portraitImageUrl || undefined,
-        runtime.abortSignal
+        runtime.abortSignal,
+        {
+          userId: runtime.userId,
+          creditsRequiredIds: runtime.creditsRequiredIds,
+          skipForCredits,
+        }
       );
     }
   ).finally(() => {

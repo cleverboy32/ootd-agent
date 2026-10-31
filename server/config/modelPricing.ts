@@ -53,8 +53,14 @@ const FLASH_PEAK: ChatRates = { hit: 0.04, miss: 2, output: 8 };
 const PRO_OFF: ChatRates = { hit: 0.15, miss: 4.5, output: 13.5 };
 const PRO_PEAK: ChatRates = { hit: 0.3, miss: 9, output: 27 };
 
-/** 已知的按张人民币单价。空着表示这个型号还不能折算。 */
-const IMAGE_CNY_PER_SUCCESS = new Map<string, number>();
+/** 已知的按张人民币单价（火山方舟 Seedream 官方价，元/成功张）。 */
+const IMAGE_CNY_PER_SUCCESS = new Map<string, number>([
+  ['doubao-seedream-5-0-flash-260915', 0.12],
+  ['doubao-seedream-5-0-flash', 0.12],
+  ['doubao-seedream-4-0-250828', 0.2],
+  ['doubao-seedream-4-0', 0.2],
+  ['doubao-seedream-4-5', 0.25],
+]);
 
 /** 已知的向量人民币 / 百万 tokens。空着表示这个型号还不能折算。 */
 const EMBEDDING_CNY_PER_MILLION = new Map<string, number>();

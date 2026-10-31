@@ -169,6 +169,7 @@ export interface RequestTraceInit {
   conversationId?: string;
   messageId?: string;
   clientId?: string;
+  userId?: string;
   route?: RequestAuditRoute;
 }
 
@@ -178,6 +179,7 @@ export class RequestTrace {
   private conversationId?: string;
   private messageId?: string;
   private clientId?: string;
+  private userId?: string;
   private route: RequestAuditRoute;
   private requestType?: RequestAuditRequestType;
   private clientCancelled = false;
@@ -200,7 +202,12 @@ export class RequestTrace {
     this.conversationId = init.conversationId;
     this.messageId = init.messageId;
     this.clientId = init.clientId;
+    this.userId = init.userId;
     this.route = init.route ?? RequestAuditRoute.Unknown;
+  }
+
+  setUserId(userId: string | undefined): void {
+    if (userId) this.userId = userId;
   }
 
   markCancelled(reason?: unknown): void {
@@ -231,12 +238,22 @@ export class RequestTrace {
     this.stages[STAGE_FIELD[name]] = Math.max(0, Math.round(ms));
   }
 
-  auditIdentity(): { conversationId?: string; messageId?: string; clientId?: string } {
+  auditIdentity(): {
+    conversationId?: string;
+    messageId?: string;
+    clientId?: string;
+    userId?: string;
+  } {
     return {
       conversationId: this.conversationId,
       messageId: this.messageId,
       clientId: this.clientId,
+      userId: this.userId,
     };
+  }
+
+  getUsageSummary(): RequestUsageSummary {
+    return { ...this.usage };
   }
 
   addUsage(usage: {
@@ -289,11 +306,24 @@ export class RequestTrace {
   }
 }
 
-export async function logRequestAudit(entry: RequestAuditLogEntry): Promise<void> {
+export async function logRequestAudit(
+  entry: RequestAuditLogEntry,
+  options?: { userId?: string }
+): Promise<void> {
   console.log(
     `[REQUEST_AUDIT] kind=${entry.kind} route=${entry.route} type=${entry.requestType ?? '-'} ` +
       `outcome=${entry.outcome} cancelled=${entry.clientCancelled} durationMs=${entry.durationMs} ` +
       `costCny=${entry.summary.usage?.pricedCostCny ?? 0} unpricedCalls=${entry.summary.usage?.unpricedCalls ?? 0}`
   );
   await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'REQUEST_AUDIT');
+  if (entry.messageId && entry.summary.usage) {
+    const { persistUsageMessageRollup } = await import('@/server/billing/usagePersist');
+    await persistUsageMessageRollup({
+      messageId: entry.messageId,
+      userId: options?.userId,
+      conversationId: entry.conversationId,
+      usage: entry.summary.usage,
+      durationMs: entry.durationMs,
+    });
+  }
 }

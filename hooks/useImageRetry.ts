@@ -60,6 +60,21 @@ export function useImageRetry() {
               )
             );
           },
+          onImageCreditsRequired: (data) => {
+            updateMessages((messages) =>
+              messages.map((msg) =>
+                msg.id === messageId
+                  ? {
+                      ...msg,
+                      imageStates: {
+                        ...msg.imageStates,
+                        [data.id]: 'credits_required' as const,
+                      },
+                    }
+                  : msg
+              )
+            );
+          },
           onError: (message) => {
             console.error('[IMAGE_RETRY] Stream error:', message);
             updateMessages((messages) =>

@@ -156,6 +156,17 @@ export const useChatHandler = () => {
           return msg;
         }));
       },
+      onImageCreditsRequired: (data: { id: string; message: string; alt: string }) => {
+        updateMessages(messages => messages.map(msg => {
+          if (msg.id === currentAiMessageId && msg.role === 'ai') {
+            return {
+              ...msg,
+              imageStates: { ...msg.imageStates, [data.id]: 'credits_required' as const },
+            };
+          }
+          return msg;
+        }));
+      },
       onProgress: (data: { stage: string; label?: string; done?: boolean; thinking?: string }) => {
         updateMessages(messages => messages.map(msg => {
           if (msg.id !== currentAiMessageId || msg.role !== 'ai') return msg;
@@ -354,6 +365,13 @@ export const useChatHandler = () => {
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId || m.role !== 'ai') return m;
           return { ...m, imageStates: { ...m.imageStates, [data.id]: 'failed' as const } };
+        }));
+      },
+      onImageCreditsRequired: (data: { id: string; message: string; alt: string }) => {
+        if (!currentAiMessageId) return;
+        updateMessages(messages => messages.map(m => {
+          if (m.id !== currentAiMessageId || m.role !== 'ai') return m;
+          return { ...m, imageStates: { ...m.imageStates, [data.id]: 'credits_required' as const } };
         }));
       },
       onStreamEnd: (finalMessage?: Message) => {

@@ -43,9 +43,27 @@ export async function runOutfitImageGeneration(
   anchorImageUrl?: string,
   additionalPurchaseRefs?: Array<{ url: string; label: string }>,
   portraitImageUrl?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: {
+    userId?: string;
+    creditsRequiredIds?: Set<string>;
+    /** 跳过生图，直接标 credits_required */
+    skipForCredits?: boolean;
+  }
 ): Promise<void> {
   const imageId = outfit.id;
+  const creditsRequiredIds = options?.creditsRequiredIds;
+  const userId = options?.userId;
+
+  if (options?.skipForCredits) {
+    creditsRequiredIds?.add(outfit.id);
+    sendEvent(controller, 'image_credits_required', {
+      id: outfit.id,
+      message: '探索次数不足，充值后可生成效果图',
+      alt: outfit.overall_concept,
+    });
+    return;
+  }
 
   try {
     await callVisualDirectorAgent(
@@ -69,6 +87,33 @@ export async function runOutfitImageGeneration(
         signal,
       }
     );
+
+    if (userId && imageMap.has(outfit.id)) {
+      try {
+        const { debitImageGeneration } = await import('@/server/billing/credits');
+        await debitImageGeneration({
+          userId,
+          messageId,
+          imageId: outfit.id,
+        });
+      } catch (debitErr) {
+        const { InsufficientCreditsError } = await import('@/server/billing/credits');
+        if (debitErr instanceof InsufficientCreditsError) {
+          console.warn(
+            `[CREDITS] 出图成功但扣次失败（并发竞态） outfit=${outfit.id} user=${userId}`
+          );
+          imageMap.delete(outfit.id);
+          creditsRequiredIds?.add(outfit.id);
+          sendEvent(controller, 'image_credits_required', {
+            id: outfit.id,
+            message: '探索次数不足，充值后可生成效果图',
+            alt: outfit.overall_concept,
+          });
+        } else {
+          console.error('[CREDITS] debit after image failed:', debitErr);
+        }
+      }
+    }
   } catch (e) {
     if (isAbortError(e)) throw e;
     failedImageIds.add(outfit.id);
@@ -113,6 +158,7 @@ export function createImageRetryStream(
       const imageMap = new Map<string, string>();
       const failedImageIds = new Set<string>();
       let ragItemCount = 0;
+      let userId: string | undefined;
 
       try {
         const message = await prismadb.message.findUnique({ where: { id: messageId } });
@@ -143,6 +189,23 @@ export function createImageRetryStream(
           const dbProfile = (client?.profileData as Record<string, unknown>) || {};
           portraitImageUrl = readFullBodyImageUrl(dbProfile, clientId);
         }
+
+        const { resolveUserIdByClientId, getCreditBalance } = await import(
+          '@/server/billing/credits'
+        );
+        const { getAuthMode } = await import('@/server/auth/mode');
+        const { creditCostPerImage } = await import('@/server/config/credits');
+        userId = (await resolveUserIdByClientId(clientId)) ?? undefined;
+        if (userId) trace.setUserId(userId);
+        const creditsRequiredIds = new Set<string>();
+        let skipForCredits = false;
+        if (getAuthMode() === 'user' && userId) {
+          const balance = await getCreditBalance(userId);
+          if (balance < creditCostPerImage()) {
+            skipForCredits = true;
+          }
+        }
+
         await runOutfitImageGeneration(
           outfit,
           extractSelectedItemUrls(outfit, ragCache),
@@ -157,7 +220,8 @@ export function createImageRetryStream(
           stylistCache.stylist_result.anchor_image_url,
           undefined,
           portraitImageUrl,
-          abortController.signal
+          abortController.signal,
+          { userId, creditsRequiredIds, skipForCredits }
         );
         trace.markStage('imageGen', Date.now() - imageStartedAt);
 
@@ -170,13 +234,16 @@ export function createImageRetryStream(
           });
         } else {
           const existingStates = extractImageStates(message.content);
+          const nextState = creditsRequiredIds.has(retryOutfitId)
+            ? 'credits_required'
+            : 'failed';
           await prismadb.message.update({
             where: { id: messageId },
             data: {
               content: buildPersistedMessageContent({
                 text: extractTextContent(message.content),
                 stylistCache,
-                imageStates: { ...existingStates, [retryOutfitId]: 'failed' },
+                imageStates: { ...existingStates, [retryOutfitId]: nextState },
               }) as Prisma.InputJsonValue,
             },
           });
@@ -212,7 +279,8 @@ export function createImageRetryStream(
               imageFailedCount: failedImageIds.size,
               ragItemCount,
             },
-          })
+          }),
+          { userId }
         );
         resolveDone();
         unregisterInFlight(inFlightId);

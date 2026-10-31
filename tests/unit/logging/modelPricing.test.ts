@@ -88,6 +88,16 @@ describe('priceModelUsage', () => {
     assert.equal(priced.costCny, null);
   });
 
+  it('prices Seedream 5.0 flash at ¥0.12 per successful image', () => {
+    const priced = priceModelUsage({
+      kind: 'image',
+      model: 'doubao-seedream-5-0-flash-260915',
+      generatedImages: 1,
+      imageOutputTokens: 4096,
+    });
+    assert.equal(priced.costCny, 0.12);
+  });
+
   it('does not treat a missing usage payload as free', () => {
     const priced = priceModelUsage(
       { kind: 'chat', model: 'deepseek-flash', usageMissing: true },

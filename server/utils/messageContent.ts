@@ -64,12 +64,15 @@ export function extractTextContent(content: unknown): string {
 export function buildImageStates(
   outfitIds: string[],
   imageMap: Map<string, string>,
-  failedImageIds: Set<string>
+  failedImageIds: Set<string>,
+  creditsRequiredIds?: Set<string>
 ): Record<string, ImageState> {
   const states: Record<string, ImageState> = {};
   for (const id of outfitIds) {
     if (imageMap.has(id)) {
       states[id] = imageMap.get(id)!;
+    } else if (creditsRequiredIds?.has(id)) {
+      states[id] = 'credits_required';
     } else if (failedImageIds.has(id)) {
       states[id] = 'failed';
     }

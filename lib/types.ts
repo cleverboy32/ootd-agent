@@ -27,7 +27,7 @@ export type MessageProgress = {
 
 export type MessageStatus = 'generating' | 'completed' | 'failed';
 
-export type ImageState = 'loading' | 'failed' | string;
+export type ImageState = 'loading' | 'failed' | 'credits_required' | string;
 
 export type Message = {
   id: string;

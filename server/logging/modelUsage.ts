@@ -3,6 +3,7 @@ import {
   type UsageInput,
   type UsageKind,
 } from '@/server/config/modelPricing';
+import { persistUsageEvent } from '@/server/billing/usagePersist';
 import { auditLogPath } from './paths';
 import { appendJsonlEntry } from './jsonl';
 import { currentRequestTrace } from './usageContext';
@@ -158,6 +159,7 @@ export async function recordModelUsage(input: UsageInput, at: Date = new Date())
       `[USAGE_AUDIT] kind=${entry.kind} model=${entry.model} costCny=${entry.costCny ?? '-'}`
     );
     await appendJsonlEntry(AUDIT_LOG_PATH, entry, 'USAGE_AUDIT');
+    await persistUsageEvent(entry, identity?.userId);
   } catch (error) {
     console.error('[USAGE_AUDIT] Failed to record usage:', error);
   }

@@ -71,6 +71,17 @@ describe('messageContent', () => {
     assert.equal(states.outfit_2, 'failed');
   });
 
+  it('buildImageStates marks credits_required outfits', () => {
+    const states = buildImageStates(
+      ['outfit_1', 'outfit_2'],
+      new Map(),
+      new Set(['outfit_1']),
+      new Set(['outfit_2'])
+    );
+    assert.equal(states.outfit_1, 'failed');
+    assert.equal(states.outfit_2, 'credits_required');
+  });
+
   it('patchMessageImageResult updates text and image_states', () => {
     const original = buildPersistedMessageContent({
       text: '方案 [IMAGE=outfit_1]',

@@ -45,6 +45,7 @@ function createRuntime(params: {
   controller: ReadableStreamDefaultController;
   initialParts: Part[];
   clientId?: string;
+  userId?: string;
   conversationId?: string;
   messageId?: string;
   clientIp?: string;
@@ -72,15 +73,18 @@ function createRuntime(params: {
 
   const imageMap = new Map<string, string>();
   const failedImageIds = new Set<string>();
+  const creditsRequiredIds = new Set<string>();
   const ragCache = new Map<string, ClothingItem>();
 
   const runtime: OutfitRuntime = {
     controller: params.controller,
     imageMap,
     failedImageIds,
+    creditsRequiredIds,
     ragCache,
     initialParts: params.initialParts,
     clientId: params.clientId,
+    userId: params.userId,
     conversationId: params.conversationId,
     clientIp: params.clientIp,
     currentImageUrl: params.currentImageUrl,
@@ -155,11 +159,16 @@ export function createMultiAgentStream(
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
       logLangSmithStatusOnce();
 
+      const { resolveUserIdByClientId } = await import('@/server/billing/credits');
+      const userId = (await resolveUserIdByClientId(clientId)) ?? undefined;
+      if (userId) trace.setUserId(userId);
+
       const profileLocationPromise = getProfileLocation(clientId);
       const { runtime, getSnapshot } = createRuntime({
         controller,
         initialParts,
         clientId,
+        userId,
         conversationId,
         messageId,
         clientIp: options.clientIp,
@@ -283,6 +292,7 @@ export function createMultiAgentStream(
               stylistCache: stylistCacheNode,
               imageMap: runtime.imageMap,
               failedImageIds: runtime.failedImageIds,
+              creditsRequiredIds: runtime.creditsRequiredIds,
               outfitIds,
               status: failed ? 'failed' : 'completed',
               wardrobeCandidates: wardrobeCandidatesNode,
@@ -316,7 +326,8 @@ export function createMultiAgentStream(
               ragItemCount: runtime.ragCache.size,
               wardrobeCandidateCount: wardrobeCandidatesNode?.items.length,
             },
-          })
+          }),
+          { userId: runtime.userId }
         );
 
         if (mainError && !aborted) {

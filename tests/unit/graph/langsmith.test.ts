@@ -12,6 +12,7 @@ function stubRuntime(overrides: Partial<OutfitRuntime> = {}): OutfitRuntime {
     controller: {} as ReadableStreamDefaultController,
     imageMap: new Map(),
     failedImageIds: new Set(),
+    creditsRequiredIds: new Set(),
     ragCache: new Map(),
     initialParts: [],
     conversationId: 'conv-1',

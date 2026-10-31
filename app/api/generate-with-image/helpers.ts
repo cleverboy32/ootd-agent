@@ -124,12 +124,18 @@ export async function persistMessageContent(
     stylistCache: StylistCacheNode | null;
     imageMap: Map<string, string>;
     failedImageIds: Set<string>;
+    creditsRequiredIds?: Set<string>;
     outfitIds: string[];
     status: 'completed' | 'failed' | 'generating';
     wardrobeCandidates?: WardrobeCandidatesNode | null;
   }
 ): Promise<void> {
-  const imageStates = buildImageStates(options.outfitIds, options.imageMap, options.failedImageIds);
+  const imageStates = buildImageStates(
+    options.outfitIds,
+    options.imageMap,
+    options.failedImageIds,
+    options.creditsRequiredIds
+  );
   const content = buildPersistedMessageContent({
     text: options.text,
     stylistCache: options.stylistCache,

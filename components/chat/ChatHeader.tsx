@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Heart, LogOut, Shirt, UserCircle, Shield } from 'lucide-react';
+import { Heart, LogOut, Shirt, Sparkles, UserCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchSession, logout } from '@/lib/api/auth';
 import { fetchProfile } from '@/lib/api/profile';
@@ -107,6 +107,14 @@ export function ChatHeader() {
                   </div>
                 )}
               </div>
+              <Link
+                href="/settings/credits"
+                role="menuitem"
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+              >
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                账单
+              </Link>
               <Link
                 href="/settings/security"
                 role="menuitem"

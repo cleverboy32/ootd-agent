@@ -43,11 +43,86 @@ model User {
   failedLoginAttempts Int          @default(0)
   lockedUntil         DateTime?
   sessionVersion      Int          @default(0)
+  /// 探索次数余额（缓存；以 CreditLedger 为准）
+  creditBalance       Int          @default(0)
   clientProfileId     String       @unique
   clientProfile       ClientProfile @relation(fields: [clientProfileId], references: [id])
   savedOutfits        SavedOutfit[]
+  creditLedger        CreditLedger[]
+  usageEvents         UsageEvent[]
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
+}
+
+/// 积分流水：赠送 / 兑换 / 出图扣次 / 后台加额
+model CreditLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta     Int
+  /// signup_grant | redeem | admin_grant | image_gen | refund
+  reason    String
+  messageId String?
+  imageId   String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model CreditRedeemCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  credits   Int
+  maxUses   Int       @default(1)
+  usedCount Int       @default(0)
+  expiresAt DateTime?
+  note      String?
+  createdAt DateTime  @default(now())
+}
+
+/// 单次模型调用花费（与 usage-audit.jsonl 对齐，供跑数）
+model UsageEvent {
+  id               String   @id @default(cuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  clientId         String?
+  conversationId   String?
+  messageId        String?
+  model            String
+  /// chat | image | embedding
+  kind             String
+  cacheHitTokens   Int      @default(0)
+  cacheMissTokens  Int      @default(0)
+  completionTokens Int      @default(0)
+  embeddingTokens  Int      @default(0)
+  generatedImages  Int      @default(0)
+  costCny          Decimal? @db.Decimal(12, 6)
+  rateId           String
+  createdAt        DateTime @default(now())
+
+  @@index([messageId, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+/// 一条 AI 消息的花费汇总
+model UsageMessageRollup {
+  messageId        String   @id
+  userId           String?
+  conversationId   String?
+  calls            Int      @default(0)
+  cacheHitTokens   Int      @default(0)
+  cacheMissTokens  Int      @default(0)
+  completionTokens Int      @default(0)
+  embeddingTokens  Int      @default(0)
+  generatedImages  Int      @default(0)
+  pricedCostCny    Decimal  @default(0) @db.Decimal(12, 6)
+  unpricedCalls    Int      @default(0)
+  durationMs       Int?
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId, updatedAt])
 }
 
 /// 用户收藏的穿搭方案快照（归属 userId；托管模式可按 eligibleForPlan 抽取）
