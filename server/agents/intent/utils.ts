@@ -813,6 +813,10 @@ export function normalizeGatekeeperIntent(
   if (!merged.city?.trim()) merged.city_role = '';
   if (typeof merged.session_item_id !== 'string') merged.session_item_id = '';
   if (typeof merged.anchor_image_url !== 'string') merged.anchor_image_url = '';
+  // LLM 常把无风格偏好填成占位「日常休闲」；与缺省空串等价，清掉以免误触发风格 skill
+  if (merged.style_preference.trim() === '日常休闲') {
+    merged.style_preference = '';
+  }
   merged.purchase_items = normalizePurchaseItems(merged.purchase_items);
   merged.purchase_vision_pending = Boolean(intent?.purchase_vision_pending);
   return merged;

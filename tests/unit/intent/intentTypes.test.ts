@@ -288,7 +288,7 @@ describe('finalizeGatekeeperResult — selection short-circuit', () => {
 });
 
 describe('finalizeGatekeeperResult — style_advice advice route', () => {
-  it('short-circuits to Style Advice Agent even when a concrete occasion is present', () => {
+  it('放行建议模式：有具体场合也直接 is_complete', () => {
     const result = finalizeGatekeeperResult({
       extracted_intent: normalizeGatekeeperIntent({
         request_type: 'style_advice',
@@ -297,12 +297,12 @@ describe('finalizeGatekeeperResult — style_advice advice route', () => {
       modelIsComplete: true,
     });
 
-    assert.equal(result.is_complete, false);
+    assert.equal(result.is_complete, true);
     assert.equal(result.followup_questions.length, 0);
     assert.equal(result.gatekeeper_reply, undefined);
   });
 
-  it('does not require a Gatekeeper reply when too vague', () => {
+  it('场合为空也不追问，直接放行建议模式', () => {
     const result = finalizeGatekeeperResult({
       extracted_intent: normalizeGatekeeperIntent({
         request_type: 'style_advice',
@@ -311,11 +311,12 @@ describe('finalizeGatekeeperResult — style_advice advice route', () => {
       modelIsComplete: false,
     });
 
-    assert.equal(result.is_complete, false);
+    assert.equal(result.is_complete, true);
+    assert.equal(result.followup_questions.length, 0);
     assert.equal(result.gatekeeper_reply, undefined);
   });
 
-  it('does not generate when model judged incomplete even if occasion present', () => {
+  it('忽略 modelIsComplete=false，建议模式仍放行', () => {
     const result = finalizeGatekeeperResult({
       extracted_intent: normalizeGatekeeperIntent({
         request_type: 'style_advice',
@@ -324,7 +325,7 @@ describe('finalizeGatekeeperResult — style_advice advice route', () => {
       modelIsComplete: false,
     });
 
-    assert.equal(result.is_complete, false);
+    assert.equal(result.is_complete, true);
   });
 });
 
