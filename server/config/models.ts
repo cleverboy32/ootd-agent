@@ -48,7 +48,7 @@ export const AGENT_MODELS = {
     : openaiVisionChat,
   imageGen:
     process.env.LLM_MODEL_IMAGE?.trim() ||
-    (useVertexImage ? VERTEX_DEFAULTS.imageGen : 'doubao-seedream-4-0-250828'),
+    (useVertexImage ? VERTEX_DEFAULTS.imageGen : 'doubao-seedream-5-0-flash-260915'),
   stylist: chatModel('LLM_MODEL_STYLIST', VERTEX_DEFAULTS.stylist),
   /** 搭配师看上传图。文本模型不识图，走视觉变体。 */
   stylistVision: useVertexChat

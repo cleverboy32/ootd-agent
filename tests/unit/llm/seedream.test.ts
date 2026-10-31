@@ -42,6 +42,19 @@ describe('Seedream image vendor routing', () => {
     assert.equal(body.size, '2K');
   });
 
+  it('omits sequential_image_generation for Seedream 5.0 and caps refs at 10', () => {
+    const urls = Array.from({ length: 12 }, (_, i) => `https://example.com/${i}.jpg`);
+    const body = buildSeedreamRequestBody({
+      prompt: 'model wearing outfit',
+      model: 'doubao-seedream-5-0-flash-260915',
+      referenceImageUrls: urls,
+      size: '1728x2304',
+    });
+    assert.equal(body.sequential_image_generation, undefined);
+    assert.equal(Array.isArray(body.image), true);
+    assert.equal((body.image as string[]).length, 10);
+  });
+
   it('defaults image size to 3:4 portrait when size omitted', () => {
     const body = buildSeedreamRequestBody({
       prompt: 'test',

@@ -2,6 +2,8 @@ import { recordImageUsage } from '@/server/logging/modelUsage';
 import { readCredential } from './credentials';
 
 export const SEEDREAM_MAX_REFERENCE_IMAGES = 14;
+/** Seedream 5.0 多图生图上限更紧（文档 2–10） */
+const SEEDREAM_5_MAX_REFERENCE_IMAGES = 10;
 
 interface SeedreamImageResponse {
   data?: Array<{ url?: string; b64_json?: string }>;
@@ -18,21 +20,31 @@ export function isSeedreamImageVendor(): boolean {
   return ['bytedance', 'volc', 'ark', 'seedream'].includes(vendor);
 }
 
+/** Seedream 5.0 pro/flash：不支持 sequential_image_generation，参考图上限也更低 */
+export function isSeedream5Model(model: string): boolean {
+  return /seedream-5-0/i.test(model);
+}
+
 export function buildSeedreamRequestBody(options: {
   prompt: string;
   model: string;
   referenceImageUrls?: string[];
   size?: string;
 }): Record<string, unknown> {
-  const refs = options.referenceImageUrls?.map((u) => u.trim()).filter(Boolean).slice(0, SEEDREAM_MAX_REFERENCE_IMAGES);
+  const isV5 = isSeedream5Model(options.model);
+  const maxRefs = isV5 ? SEEDREAM_5_MAX_REFERENCE_IMAGES : SEEDREAM_MAX_REFERENCE_IMAGES;
+  const refs = options.referenceImageUrls?.map((u) => u.trim()).filter(Boolean).slice(0, maxRefs);
   const body: Record<string, unknown> = {
     model: options.model,
     prompt: options.prompt,
     size: options.size ?? '1728x2304',
     response_format: 'b64_json',
     watermark: false,
-    sequential_image_generation: 'disabled',
   };
+  // 4.x 用 disabled 锁单图；5.0 文档写明不支持配置该字段
+  if (!isV5) {
+    body.sequential_image_generation = 'disabled';
+  }
   if (refs?.length) {
     body.image = refs.length === 1 ? refs[0] : refs;
   }
