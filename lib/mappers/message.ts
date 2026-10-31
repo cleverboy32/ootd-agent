@@ -47,9 +47,13 @@ export function mapDbMessageToClient(db: DbMessage): Message {
   const timestamp =
     ts instanceof Date ? ts.getTime() : ts ? new Date(ts).getTime() : Date.now();
 
+  // DB 写 assistant（OpenAI 惯例）；前端统一用 ai。不转换的话刷新后 failed 重试 UI 不出现。
+  const role: Message['role'] =
+    db.role === 'assistant' || db.role === 'ai' || db.role === 'model' ? 'ai' : 'user';
+
   return {
     id: db.id,
-    role: db.role as 'user' | 'ai',
+    role,
     status: (db.status as Message['status']) ?? 'completed',
     content,
     timestamp,

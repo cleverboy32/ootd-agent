@@ -488,8 +488,14 @@ export const ChatMessage = memo(
               </div>
             )}
 
-            {/* AI 消息生成失败：有正文或仅有进度条都应能重试（断点续传常见场景） */}
-            {msg.role === "ai" && msg.status === "failed" && (msg.content.length > 0 || hasProgress) && (
+            {/* Stylist 早死时 DB 只有 status=failed、正文为空；进度条不落库，刷新后也要能看见并重试 */}
+            {msg.role === "ai" && msg.status === "failed" && !shouldRenderBubble && !hasProgress && (
+              <div className="rounded-2xl px-5 py-3.5 bg-muted/40 border border-border/50 text-muted-foreground rounded-tl-sm shadow-sm text-sm">
+                生成中断，请重试
+              </div>
+            )}
+
+            {msg.role === "ai" && msg.status === "failed" && (
               <div className="flex items-center gap-2 mt-2 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <span className="text-xs">消息生成失败</span>
