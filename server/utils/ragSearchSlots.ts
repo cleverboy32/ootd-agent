@@ -12,6 +12,11 @@ export type WardrobeSearchSlot =
 export interface WardrobeSearchQuery {
   query: string;
   slot?: WardrobeSearchSlot;
+  /** Plan→Retrieve：归属哪一套方案；缺省表示全局槽（旧路径） */
+  outfitId?: string;
+  /** Plan 槽位目标描述（供 Reconcile / audit） */
+  target?: string;
+  allowNew?: boolean;
 }
 
 export type WardrobeSearchInput = string | WardrobeSearchQuery;
@@ -43,7 +48,39 @@ export function normalizeWardrobeSearchInput(input: WardrobeSearchInput): Wardro
   return {
     query: input.query.trim(),
     slot: input.slot,
+    outfitId: input.outfitId?.trim() || undefined,
+    target: input.target?.trim() || undefined,
+    allowNew: input.allowNew,
   };
+}
+
+/** 相同 slot+query 合并为一次向量检索；outfitIds 记录共享方 */
+export function collapseIdenticalSlotQueries(
+  queries: WardrobeSearchQuery[]
+): Array<WardrobeSearchQuery & { outfitIds: string[] }> {
+  const groups = new Map<string, WardrobeSearchQuery & { outfitIds: string[] }>();
+  for (const item of queries) {
+    const q = item.query.trim();
+    if (!q) continue;
+    const slot = item.slot ?? '';
+    const key = `${slot}||${q}`;
+    const outfitId = item.outfitId?.trim() || '';
+    const existing = groups.get(key);
+    if (existing) {
+      if (outfitId && !existing.outfitIds.includes(outfitId)) {
+        existing.outfitIds.push(outfitId);
+      }
+      continue;
+    }
+    groups.set(key, {
+      query: q,
+      slot: item.slot,
+      target: item.target,
+      allowNew: item.allowNew,
+      outfitIds: outfitId ? [outfitId] : [],
+    });
+  }
+  return [...groups.values()];
 }
 
 export function parseWardrobeSearchSlot(slot?: string): WardrobeSearchSlot | undefined {

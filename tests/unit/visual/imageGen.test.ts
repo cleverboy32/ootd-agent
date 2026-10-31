@@ -281,7 +281,7 @@ describe('buildImagePrompt with Seedream references', () => {
     assert.doesNotMatch(prompt, /CRITICAL FULL-OUTFIT LOOK/);
   });
 
-  it('requires open layering when outerwear covers an inner top', () => {
+  it('does not force open layering; still lists text-only inner items', () => {
     const layered: StylistOutfit = {
       ...outfit,
       selected_items: [
@@ -293,7 +293,8 @@ describe('buildImagePrompt with Seedream references', () => {
     const prompt = buildImagePrompt(layered, undefined, [
       'Leather Jacket (outerwear) — anchor garment',
     ]);
-    assert.match(prompt, /CRITICAL LAYERING VISIBILITY/);
+    assert.doesNotMatch(prompt, /CRITICAL LAYERING VISIBILITY/);
+    assert.doesNotMatch(prompt, /敞开穿，露出内搭/);
     assert.match(prompt, /CRITICAL TEXT-ONLY ITEMS/);
     assert.match(prompt, /Cream Tee/);
     assert.match(prompt, /NEW \/ purchase item/);

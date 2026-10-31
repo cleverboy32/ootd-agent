@@ -6,9 +6,13 @@ import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
 import { filterSkillsForWardrobeSearch, selectStylistOutfitSkillNames } from './skillSelection';
 import { selectStylistSkills } from './selectSkills';
-import { WardrobeSearchQuery, parseWardrobeSearchSlot, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import { WardrobeSearchQuery, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
 import { alignStylistItemsWithWardrobe } from '@/server/utils/stylistItemAlign';
+import {
+  flattenOutfitPlanToQueries,
+  type OutfitPlanResult,
+} from '@/server/utils/outfitPlanSearch';
 import { ClothingItem } from '@prisma/client';
 import {
   AnchorItemInfo,
@@ -24,7 +28,7 @@ import {
 import {
   clampStylistOutfits,
   stylistSchema,
-  wardrobeSearchSchema,
+  outfitPlanSearchSchema,
   styleAdviceSchema,
   StylistResult,
   StyleAdviceResult,
@@ -32,7 +36,8 @@ import {
 } from './schema';
 import {
   STYLIST_SYSTEM_INSTRUCTION,
-  WARDROBE_SEARCH_INSTRUCTION,
+  OUTFIT_PLAN_SEARCH_INSTRUCTION,
+  OUTFIT_RECONCILE_ADDENDUM,
   PURCHASE_PAIRING_SEARCH_ADDENDUM,
   WARDROBE_PAIRING_SEARCH_ADDENDUM,
   REVISION_SEARCH_ADDENDUM,
@@ -83,6 +88,7 @@ export async function callStylistAdvice(
   const prompt = `
 【今日用户时尚档案】
 - 风格偏好: ${profile.preferences.join(', ') || '未提供'}
+- 性别: ${profile.gender || '未知'}
 - 肤色: ${profile.skin_tone || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
 - 适合的风格: ${profile.suited_style || '未判断'}
@@ -154,7 +160,12 @@ export type WardrobeSearchAuditContext = {
   messageId?: string;
 };
 
-export async function planWardrobeSearchQueries(
+export type OutfitPlanAndQueries = {
+  plan: OutfitPlanResult;
+  queries: WardrobeSearchQuery[];
+};
+
+export async function planOutfitsAndQueries(
   history: Content[],
   intent: GatekeeperIntent,
   profile: UserProfileResult,
@@ -164,8 +175,8 @@ export async function planWardrobeSearchQueries(
   purchaseAnchors: AnchorItemInfo[] = [],
   skillNames: string[] = [],
   audit?: WardrobeSearchAuditContext
-): Promise<WardrobeSearchQuery[]> {
-  console.log('[STYLIST_AGENT] Planning wardrobe search queries...');
+): Promise<OutfitPlanAndQueries> {
+  console.log('[STYLIST_AGENT] Planning outfits + wardrobe search queries...');
 
   const anchors = purchaseAnchors.length > 0 ? purchaseAnchors : anchorItem ? [anchorItem] : [];
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchors.length > 0;
@@ -199,25 +210,26 @@ ${REVISION_SEARCH_ADDENDUM}
 
   const hasStyleSkill = searchSkillNames.some((name) => name.startsWith('style-'));
   const strategyHint = isRevision
-    ? `- 当前为【反馈微调】：只为 special_requests 要改的槽位出 query，未改槽位不要搜。`
+    ? `- 当前为【反馈微调】：只为 special_requests 要改的槽位写 slots，未改槽位不要写入 plan。`
     : isPairing
-      ? `- 当前为【待购单品搭配】：只为互补槽位检索衣橱单品，围绕已上传的 ${anchors.length} 件锚定单品找搭配。已占用的槽位不要再搜。${
+      ? `- 当前为【待购/衣橱锚定搭配】：只为互补槽位写 slots。已占用的槽位不要写。${
           anchors.length === 1 && anchors[0].slot === 'accessory'
-            ? '锚定为配饰：必须输出 top、bottom、shoes 三条 query。'
+            ? '锚定为配饰：必须包含 top、bottom、shoes。'
             : ''
-        }${hasStyleSkill ? '\n- 已注入风格技能：互补槽位的 query 必须遵循该技能「检索」节。' : ''}`
-      : `- 若用户要「一套」穿搭：按槽位检索（上装 + 下装 + 鞋，视天气加外套），不要混搭裤装与连衣裙路线。
+        }${hasStyleSkill ? '\n- 已注入风格技能：互补槽位的 search_query 必须遵循该技能「检索」节。' : ''}`
+      : `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套），不要混裤装与连衣裙路线。
 ${
   hasStyleSkill
-    ? '- 已注入风格技能：有天气细则时先跟层次与厚薄（外套开不开、薄或厚）；各槽 query 必须带风格词（如甜美）并写清形态；禁止万能词（针织衫/薄外套/平底鞋）。'
-    : '- 无风格技能时：仍写清品类轮廓；场合正式或特殊则按场合需要的品类特制，不要用纯休闲默认词，鞋也不要无理由默认运动鞋。'
+    ? '- 已注入风格技能：有天气细则时先跟层次与厚薄；各槽 search_query 必须带该技能风格词并写清形态；禁止万能词。'
+    : '- 无风格技能时：query 可更宽，但仍写清品类轮廓；鞋不要无理由默认运动鞋。'
 }
-- 若场合需要点缀或用户提及配饰：额外加 1 条 accessory 槽位 query。
-- 特殊要求是为某个季节买衣服或准备衣橱、且没有今天的天气时：用户点名冬季外套，才检索厚外套、大衣、棉服、羽绒服，不要搜薄外套或防晒。已有风格技能时，品类按技能，不要改成厚外套。`;
+- 若场合需要点缀或用户提及配饰：加 accessory 槽。
+- target 与 search_query 必须同向；多套时每套该槽可不同 query（分开检索）。`;
 
   const prompt = `
 【今日用户时尚档案】
 - 风格偏好: ${profile.preferences.join(', ') || '未提供'}
+- 性别: ${profile.gender || '未知'}（影响款式与气质取舍；检索词按需带性别词）
 - 肤色: ${profile.skin_tone || '未分析'}
 - 身材: ${profile.body_shape || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
@@ -233,19 +245,19 @@ ${skillBlock}${pairingBlock}${revisionBlock}
 【用户当前消息】
 ${userMessage || '（无文字，请根据对话历史推断）'}
 
-【检索策略提示】
+【策略提示】
 ${strategyHint}
 
-请输出衣橱检索 query 列表：
+请输出 outfits 方案骨架（含每槽 target + search_query）：
 `;
 
   const contents: Content[] = [...stripHistoryImages(history), { role: 'user', parts: [{ text: prompt }] }];
 
-  let systemInstruction = WARDROBE_SEARCH_INSTRUCTION;
+  let systemInstruction = OUTFIT_PLAN_SEARCH_INSTRUCTION;
   if (isRevision) {
-    systemInstruction = `${WARDROBE_SEARCH_INSTRUCTION}\n${REVISION_SEARCH_ADDENDUM}`;
+    systemInstruction = `${OUTFIT_PLAN_SEARCH_INSTRUCTION}\n${REVISION_SEARCH_ADDENDUM}`;
   } else if (isPairing) {
-    systemInstruction = `${WARDROBE_SEARCH_INSTRUCTION}\n${
+    systemInstruction = `${OUTFIT_PLAN_SEARCH_INSTRUCTION}\n${
       isWardrobePairingIntent(intent)
         ? WARDROBE_PAIRING_SEARCH_ADDENDUM
         : PURCHASE_PAIRING_SEARCH_ADDENDUM
@@ -259,26 +271,23 @@ ${strategyHint}
         contents,
         systemInstruction,
         temperature: 0.3,
-        jsonSchema: wardrobeSearchSchema,
+        jsonSchema: outfitPlanSearchSchema,
         signal,
       }),
-    { label: 'Stylist wardrobe search' }
+    { label: 'Stylist outfit plan search' }
   );
 
   const responseText = response.text;
   if (!responseText) {
-    throw new Error('Empty wardrobe search response from Stylist Agent');
+    throw new Error('Empty outfit plan response from Stylist Agent');
   }
 
-  const parsed = JSON.parse(responseText) as {
-    wardrobe_search_queries: Array<{ slot?: string; query?: string }>;
-  };
-  let queries: WardrobeSearchQuery[] = parsed.wardrobe_search_queries
-    .map((item) => ({
-      slot: parseWardrobeSearchSlot(item.slot),
-      query: item.query?.trim() ?? '',
-    }))
-    .filter((item) => item.query.length > 0);
+  const plan = JSON.parse(responseText) as OutfitPlanResult;
+  if (!Array.isArray(plan.outfits) || plan.outfits.length === 0) {
+    throw new Error('Outfit plan missing outfits[]');
+  }
+
+  let queries = flattenOutfitPlanToQueries(plan);
 
   if (isPairing) {
     const slots =
@@ -301,6 +310,10 @@ ${strategyHint}
   });
   queries = guarded.queries;
 
+  console.log(
+    '[STYLIST_AGENT] Outfit plan:',
+    plan.outfits.map((o) => `${o.id}:${o.overall_concept}`).join(' | ')
+  );
   console.log('[STYLIST_AGENT] Wardrobe search queries:', queries);
 
   void logWardrobeQueryAudit({
@@ -313,7 +326,22 @@ ${strategyHint}
     specialRequests: intent.special_requests,
     stylePreference: intent.style_preference,
     skillNames: searchSkillNames,
-    queries: queries.map((item) => ({ slot: item.slot, query: item.query })),
+    queries: queries.map((item) => ({
+      slot: item.slot,
+      query: item.query,
+      outfitId: item.outfitId,
+      target: item.target,
+    })),
+    planOutfits: plan.outfits.map((o) => ({
+      id: o.id,
+      overall_concept: o.overall_concept,
+      slots: (o.slots ?? []).map((s) => ({
+        slot: String(s.slot),
+        target: s.target,
+        search_query: s.search_query,
+        allow_new: s.allow_new !== false,
+      })),
+    })),
   }).catch((error) => {
     console.warn('[WARDROBE_QUERY] log failed:', error);
   });
@@ -329,7 +357,11 @@ ${strategyHint}
       specialRequests: intent.special_requests,
       stylePreference: intent.style_preference,
       skillNames: searchSkillNames,
-      queries: queries.map((item) => ({ slot: item.slot, query: item.query })),
+      queries: queries.map((item) => ({
+        slot: item.slot,
+        query: item.query,
+        outfitId: item.outfitId,
+      })),
       changes: guarded.changes,
     }).catch((error) => {
       console.warn('[WARDROBE_QUERY_GUARD] log failed:', error);
@@ -346,6 +378,14 @@ ${strategyHint}
     signal,
   });
 
+  return { plan, queries };
+}
+
+/** @deprecated 使用 planOutfitsAndQueries */
+export async function planWardrobeSearchQueries(
+  ...args: Parameters<typeof planOutfitsAndQueries>
+): Promise<WardrobeSearchQuery[]> {
+  const { queries } = await planOutfitsAndQueries(...args);
   return queries;
 }
 
@@ -518,6 +558,7 @@ export async function callStylistAgent(
   let wardrobeXml = '';
   let ragIndexMap = new Map<string, string>();
   let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
+  let outfitPlan: OutfitPlanResult | null = null;
   const userMessage = extractUserMessage(initialParts);
   const skillNames = await selectStylistSkills(intent, userMessage, profile, {
     signal: options.signal,
@@ -528,9 +569,9 @@ export async function callStylistAgent(
   if (clientId && ragCache) {
     try {
       console.log(
-        `[STYLIST_AGENT] Triggering internal RAG search${isRevision ? ' (revision slots)' : ''}...`
+        `[STYLIST_AGENT] Plan→Retrieve${isRevision ? ' (revision slots)' : ''}...`
       );
-      const searchQueries = await planWardrobeSearchQueries(
+      const planned = await planOutfitsAndQueries(
         history,
         intent,
         profile,
@@ -541,7 +582,8 @@ export async function callStylistAgent(
         skillNames,
         { conversationId, messageId: options.messageId }
       );
-      const searchResults = await performRagSearch(searchQueries, clientId, ragCache, {
+      outfitPlan = planned.plan;
+      const searchResults = await performRagSearch(planned.queries, clientId, ragCache, {
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
         conversationId,
         userMessage,
@@ -614,12 +656,22 @@ ${JSON.stringify(previousOutfit, null, 2)}
 `
         : '';
 
+  const planBlock =
+    outfitPlan && outfitPlan.outfits.length > 0
+      ? `
+【方案骨架 Plan — 必须兑现】
+${JSON.stringify(outfitPlan, null, 2)}
+- 确认方案时套数与 id 对齐 Plan；new_item 须兑现对应槽 target/search_query 的品类主线与颜色方向。
+`
+      : '';
+
   const contextPrompt = `
 【今日用户时尚档案】
 - 姓名: ${profile.name || '未提供'}
 - 身高: ${profile.height || '未提供'}
 - 体重: ${profile.weight || '未提供'}
 - 风格偏好: ${profile.preferences.join(', ') || '未提供'}
+- 性别: ${profile.gender || '未知'}
 - 肤色属性: ${profile.skin_tone || '未分析'}
 - 身材属性: ${profile.body_shape || '未分析'}
 - 个人风格定位: ${profile.personal_style || '未分析'}
@@ -632,13 +684,13 @@ ${JSON.stringify(previousOutfit, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
-【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '互补单品'})】
+${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
+【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '按 Plan 分槽召回'})】
 ${
   wardrobeXml ||
   (isRevision && previousCache
-    ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item)*'
-    : '*(用户衣橱为空，请推荐全新单品)*')
+    ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item，且须贴合 Plan)*'
+    : '*(用户衣橱为空或未召回；按 Plan target 用 new_item 兑现)*')
 }
 `;
 
@@ -655,14 +707,14 @@ ${
         llmGenerate({
           model: seesGarments ? AGENT_MODELS.stylistVision : AGENT_MODELS.stylist,
           contents,
-          systemInstruction: `${STYLIST_SYSTEM_INSTRUCTION}${
+          systemInstruction: `${STYLIST_SYSTEM_INSTRUCTION}\n${OUTFIT_RECONCILE_ADDENDUM}${
             seesGarments ? UPLOAD_GARMENT_OUTFIT_ADDENDUM : ''
           }${buildSkillBlocks(selectStylistOutfitSkillNames(intent))}`,
           temperature: 0.4,
           jsonSchema: stylistSchema,
           signal: options.signal,
         }),
-      { label: 'Stylist' }
+      { label: 'Stylist reconcile' }
     );
     const responseText = response.text;
 

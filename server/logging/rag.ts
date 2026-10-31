@@ -41,11 +41,13 @@ export interface RagSearchLogEntry {
   queries: Array<{
     query: string;
     slot?: string;
+    outfitId?: string;
     mainCategory?: string;
   }>;
   perQueryResults: Array<{
     query: string;
     slot?: string;
+    outfitId?: string;
     mainCategory?: string;
     resultCount: number;
     results: RagSearchResultItem[];
@@ -84,10 +86,11 @@ export async function logRagSearch(entry: RagSearchLogEntry): Promise<void> {
 
 export function buildRagSearchLogEntry(params: {
   userId: string;
-  queries: Array<{ query: string; slot?: string; mainCategory?: string }>;
+  queries: Array<{ query: string; slot?: string; outfitId?: string; mainCategory?: string }>;
   perQueryResults: Array<{
     query: string;
     slot?: string;
+    outfitId?: string;
     mainCategory?: string;
     results: WardrobeSearchResult[];
   }>;
@@ -113,18 +116,22 @@ export function buildRagSearchLogEntry(params: {
     intent: params.intent,
     anchorItem: params.anchorItem,
     seasonFilter: params.seasonFilter,
-    queries: params.queries.map(({ query, slot, mainCategory }) => ({
+    queries: params.queries.map(({ query, slot, outfitId, mainCategory }) => ({
       query,
       slot,
+      outfitId,
       mainCategory,
     })),
-    perQueryResults: params.perQueryResults.map(({ query, slot, mainCategory, results }) => ({
-      query,
-      slot,
-      mainCategory,
-      resultCount: results.length,
-      results: results.map(toResultItem),
-    })),
+    perQueryResults: params.perQueryResults.map(
+      ({ query, slot, outfitId, mainCategory, results }) => ({
+        query,
+        slot,
+        outfitId,
+        mainCategory,
+        resultCount: results.length,
+        results: results.map(toResultItem),
+      })
+    ),
     mergedResults: params.mergedResults.map(toResultItem),
     totalUniqueItems: params.mergedResults.length,
   };

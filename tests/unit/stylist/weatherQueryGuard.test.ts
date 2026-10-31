@@ -53,6 +53,43 @@ describe('applyWeatherQueryGuard', () => {
     assert.ok(changes.some((c) => c.slot === 'outerwear'));
   });
 
+  it('rewrites plain 大衣 (not only 厚大衣) in mild_cool 19℃', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '简约羊毛大衣 燕麦色', outfitId: 'outfit_2' }],
+      {
+        weather: '重庆城区，多云，19℃',
+        skillNames: skills,
+        userMessage: '第二套外套有点冷，换个外套吧',
+        specialRequests: '外套有点冷，换个外套',
+      }
+    );
+    assert.equal(queries[0]?.query, '薄针织开衫');
+    assert.ok(changes.some((c) => c.from.includes('大衣') && c.to === '薄针织开衫'));
+  });
+
+  it('keeps 大衣 when user named thick outer', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '驼色羊毛大衣' }],
+      {
+        weather: '重庆城区，多云，19℃',
+        skillNames: skills,
+        userMessage: '换件大衣',
+        specialRequests: '外套换成大衣',
+      }
+    );
+    assert.equal(queries[0]?.query, '驼色羊毛大衣');
+    assert.equal(changes.length, 0);
+  });
+
+  it('does not rewrite 薄风衣 in mild_cool', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '燕麦色薄风衣' }],
+      { weather: '重庆城区，多云，19℃', skillNames: skills, userMessage: '通勤' }
+    );
+    assert.equal(queries[0]?.query, '燕麦色薄风衣');
+    assert.equal(changes.length, 0);
+  });
+
   it('appends thin outerwear when cool sandwich missing outer slot', () => {
     const { queries, changes } = applyWeatherQueryGuard(
       [

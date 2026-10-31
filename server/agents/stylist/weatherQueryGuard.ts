@@ -23,8 +23,9 @@ export type WeatherQueryGuardResult = {
   changes: WeatherQueryGuardChange[];
 };
 
+/** Matches weather-dressing thick outers (大衣/棉服/羽绒). Plain 大衣 counts; 薄风衣 does not. */
 const HEAVY_OUTER =
-  /羽绒|羽绒服|棉服|派克|棉袄|厚大衣|派克服|puffer|parka/i;
+  /羽绒|羽绒服|棉服|派克|棉袄|大衣|派克服|puffer|parka|coat(?!\s*dress)/i;
 const THIN_OUTER_ONLY =
   /薄外套|薄开衫|薄针织|开衫|衬衫外套|薄风衣|针织开衫|cardigan/i;
 const SHORT_TOP = /短袖|无袖|背心|吊带|tank|sleeveless/i;
@@ -142,25 +143,46 @@ export function applyWeatherQueryGuard(
     next.push(item);
   }
 
-  const hasOuter = next.some((q) => q.slot === 'outerwear');
-  if (!hasOuter && !userNamedNoOuter(userText)) {
+  const outfitIds = [
+    ...new Set(next.map((q) => q.outfitId).filter((id): id is string => Boolean(id))),
+  ];
+  const outfitsNeedingOuter =
+    outfitIds.length > 0
+      ? outfitIds.filter((id) => !next.some((q) => q.outfitId === id && q.slot === 'outerwear'))
+      : next.some((q) => q.slot === 'outerwear')
+        ? []
+        : [undefined];
+
+  if (!userNamedNoOuter(userText) && outfitsNeedingOuter.length > 0) {
     if (NEEDS_THIN_OUTER.includes(band)) {
-      next.push({ slot: 'outerwear', query: '薄针织开衫' });
-      changes.push({
-        slot: 'outerwear',
-        from: '',
-        to: '薄针织开衫',
-        reason: `${band}: sandwich requires thin outer layer`,
-      });
+      for (const outfitId of outfitsNeedingOuter) {
+        next.push({
+          slot: 'outerwear',
+          query: '薄针织开衫',
+          ...(outfitId ? { outfitId } : {}),
+        });
+        changes.push({
+          slot: 'outerwear',
+          from: '',
+          to: '薄针织开衫',
+          reason: `${band}: sandwich requires thin outer layer${outfitId ? ` (${outfitId})` : ''}`,
+        });
+      }
     } else if (NEEDS_THICK_OUTER.includes(band)) {
       const thick = band === 'freezing' ? '羽绒服' : '大衣';
-      next.push({ slot: 'outerwear', query: thick });
-      changes.push({
-        slot: 'outerwear',
-        from: '',
-        to: thick,
-        reason: `${band}: sandwich requires thick outer layer`,
-      });
+      for (const outfitId of outfitsNeedingOuter) {
+        next.push({
+          slot: 'outerwear',
+          query: thick,
+          ...(outfitId ? { outfitId } : {}),
+        });
+        changes.push({
+          slot: 'outerwear',
+          from: '',
+          to: thick,
+          reason: `${band}: sandwich requires thick outer layer${outfitId ? ` (${outfitId})` : ''}`,
+        });
+      }
     }
   }
 

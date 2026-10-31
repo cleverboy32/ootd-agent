@@ -13,7 +13,13 @@ export interface WardrobeQueryAuditEntry {
   specialRequests?: string;
   stylePreference?: string;
   skillNames?: string[];
-  queries: Array<{ slot?: string; query: string }>;
+  queries: Array<{ slot?: string; query: string; outfitId?: string; target?: string }>;
+  /** Plan 骨架摘要（concept + slots） */
+  planOutfits?: Array<{
+    id: string;
+    overall_concept: string;
+    slots: Array<{ slot: string; target: string; search_query: string; allow_new: boolean }>;
+  }>;
   approved?: boolean;
   reason?: string;
   failed?: boolean;

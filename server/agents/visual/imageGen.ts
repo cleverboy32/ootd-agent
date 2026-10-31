@@ -17,7 +17,6 @@ import {
   buildSeedreamImagePrompt,
   isPersonReferenceLabel,
   listTextOnlyItems,
-  outfitNeedsOpenLayering,
   PERSON_REFERENCE_LABEL,
   SEEDREAM_SYSTEM_INSTRUCTION,
 } from './seedreamPrompt';
@@ -29,7 +28,7 @@ const IMAGE_GEN_SYSTEM_INSTRUCTION = [
   'Strictly reproduce each wardrobe item silhouette, hem length, neckline, and fit from reference images and text.',
   'Do NOT change shorts to pants, alter skirt/dress lengths, or modify garment proportions.',
   'Text-only / new_item garments without a reference image must still be clearly visible and match the written description.',
-  'When outerwear is layered over an inner top, wear the outer piece open/unzipped so the inner garment (color, neckline, fabric) is clearly visible — never show only the jacket lining.',
+  'When layering outerwear over an inner top, follow the outfit inner_visibility: collar_only keeps the outer closed with only a collar edge of the inner visible; open shows the inner front panel intentionally.',
   'Every listed accessory must appear as a subtle accent within the full outfit look — never the visual focus, never enlarged from product close-ups.',
 ].join(' ');
 
@@ -174,12 +173,6 @@ export function buildImagePrompt(
   if (outfitHasAccessory(outfit, ragCache)) {
     lines.push(
       'CRITICAL FULL-OUTFIT LOOK: Present one coherent full-body outfit. Clothing is the subject; accessories are subtle accents that must appear with correct category but must NOT dominate the frame or be enlarged from product close-ups.'
-    );
-  }
-
-  if (outfitNeedsOpenLayering(outfit)) {
-    lines.push(
-      'CRITICAL LAYERING VISIBILITY: Outerwear (jacket/coat/cardigan) MUST be worn open or half-open so the inner top / base layer is clearly visible at the neckline and front — color and fabric of the inner piece must read clearly. Do NOT show only the dark jacket lining; do NOT fully zip/button closed if that hides the inner garment.'
     );
   }
 

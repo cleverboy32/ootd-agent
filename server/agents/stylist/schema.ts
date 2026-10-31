@@ -41,6 +41,11 @@ export interface StylistOutfit {
     model_pose: string;
     outfit_details: string;
     background: string;
+    /**
+     * 内搭可见性。collar_only=外层罩住、仅领缘暗示层次；open=门襟打开、需看清内搭前片。
+     * 旧数据可能缺失；画图层按缺省策略处理。
+     */
+    inner_visibility?: 'collar_only' | 'open';
   };
 }
 
@@ -103,7 +108,7 @@ export const stylistSchema: Schema = {
                 description: {
                   type: Type.STRING,
                   description:
-                    '新品必填一句外观：颜色、材质，以及该品类能看见的结构差异。上装写下摆长短与领/袖；下装写裤型或裙长；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带。用户否定上一版气质或品类时，禁止只改 name，description 必须写出可区分的外形差异。衣橱单品填空字符串。',
+                    '新品必填一句外观，供后续出图照抄：颜色、材质，以及肉眼可见的结构止点。上装写领型、袖型与袖长止点（袖口落到腕/肘/上臂哪一段）、衣长止点（腰/髋/臀）；下装写裤型或裙型与下摆止点（膝/小腿中/踝）；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带。禁止只写行话（如只写「窄袖」「直筒」却不写袖口或下摆落在哪）。用户否定上一版气质或品类时，禁止只改 name，description 必须写出可区分的外形差异。衣橱单品填空字符串。',
                 },
               },
               required: ['id', 'name', 'layer', 'reason', 'description'],
@@ -113,10 +118,15 @@ export const stylistSchema: Schema = {
             type: Type.OBJECT,
             properties: {
               model_pose: { type: Type.STRING, description: '只用中文写姿态和神态：站立或行走、双手位置、视线。禁止写发色、发型、刘海、五官、脸型、年龄、身材、眼镜和人物设定。' },
-              outfit_details: { type: Type.STRING, description: '只用中文写 selected_items 已有单品的材质、色彩与廓形。每件须含长度或廓形词（及膝、到踝、九分、阔腿、直筒、短款、短裤、五分、过膝、中长、长款），不得省略。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
+              outfit_details: { type: Type.STRING, description: '只用中文写 selected_items 已有单品的材质、色彩与廓形，须与各件 description 一致。每件须写可出图的止点：袖长、衣长、裙长或裤长落到身体的哪一段；禁止只写行话不写止点。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
               background: { type: Type.STRING, description: '只用中文写场景与光线。禁止写人物外形。' },
+              inner_visibility: {
+                type: Type.STRING,
+                description:
+                  '内搭在画面中的可见程度，只能填 collar_only 或 open。外层罩住内搭、只需领缘暗示层次时填 collar_only；外层门襟打开、需要看清内搭前片或颜色层次时填 open。无内搭层时填 collar_only。',
+              },
             },
-            required: ['model_pose', 'outfit_details', 'background'],
+            required: ['model_pose', 'outfit_details', 'background', 'inner_visibility'],
           },
         },
         required: ['id', 'overall_concept', 'selected_items', 'visual_composition'],
@@ -126,6 +136,7 @@ export const stylistSchema: Schema = {
   required: ['outfits'],
 };
 
+/** @deprecated 旧「只出 query」路径；主链路已改用 outfitPlanSearchSchema */
 export const wardrobeSearchSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -146,6 +157,62 @@ export const wardrobeSearchSchema: Schema = {
     },
   },
   required: ['wardrobe_search_queries'],
+};
+
+/** Plan+Query：一次输出多套骨架与每槽检索词 */
+export const outfitPlanSearchSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    outfits: {
+      type: Type.ARRAY,
+      description:
+        '穿搭方案骨架。用户要一套时只出 1 套；明确要多个选择时出 2 到 4 套。每套含 overall_concept 与各槽 target+search_query。',
+      minItems: '1',
+      maxItems: '4',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: {
+            type: Type.STRING,
+            description: '方案 id，从 outfit_1 起连续编号，最多到 outfit_4。',
+          },
+          overall_concept: {
+            type: Type.STRING,
+            description: '本套设计核心概念（中文）。',
+          },
+          slots: {
+            type: Type.ARRAY,
+            description: '本套要检索的槽位；每槽一条，不要同一套内重复 slot。',
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                slot: {
+                  type: Type.STRING,
+                  description: 'top | bottom | dress | shoes | outerwear | accessory',
+                },
+                target: {
+                  type: Type.STRING,
+                  description:
+                    '该槽目标单品描述（颜色+形态+品类+可见止点），供后续确认与出图兑现。上装含袖长/衣长止点，下装含裙长或裤长止点；禁止只写行话不写落到身体哪一段。',
+                },
+                search_query: {
+                  type: Type.STRING,
+                  description: '中文向量检索词，必须与 target 同向（同品类主线与颜色方向）。',
+                },
+                allow_new: {
+                  type: Type.BOOLEAN,
+                  description: '衣橱无合适件时是否允许 new_item；默认 true。',
+                },
+              },
+              required: ['slot', 'target', 'search_query', 'allow_new'],
+            },
+          },
+        },
+        required: ['id', 'overall_concept', 'slots'],
+      },
+    },
+  },
+  required: ['outfits'],
 };
 
 export const styleAdviceSchema: Schema = {

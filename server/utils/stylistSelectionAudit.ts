@@ -10,9 +10,12 @@ export interface StylistSelectionCandidate {
 
 export interface StylistSelectionSlotSnapshot {
   slot: string;
+  outfitId?: string;
   matchStatus?: SlotMatchAssessment['status'];
   bestSimilarity?: number;
   candidates: StylistSelectionCandidate[];
+  query?: string;
+  target?: string;
 }
 
 export interface StylistSelectionPick {
@@ -110,7 +113,10 @@ export function buildStylistSelectionAudit(input: StylistSelectionAuditInput): {
       }
     }
 
-    const slots: StylistSelectionSlotLog[] = input.slotSnapshots.map((snap) => {
+    const outfitSnaps = input.slotSnapshots.filter(
+      (snap) => !snap.outfitId || snap.outfitId === outfit.id
+    );
+    const slots: StylistSelectionSlotLog[] = outfitSnaps.map((snap) => {
       const candidateIds = new Set(snap.candidates.map((c) => c.id));
       const selectedInSlot = outfit.selected_items.filter((item) => {
         if (item.id !== 'new_item' && candidateIds.has(item.id)) return true;

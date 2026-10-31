@@ -66,7 +66,8 @@ export function buildModelSubjectDescription(
   const override = process.env.IMAGE_MODEL_SUBJECT?.trim();
   if (override) return override;
 
-  const parts = ['中国年轻女性', '东亚面孔', '自然肤质'];
+  const genderWord = userProfile?.gender?.trim() === '男' ? '男性' : '女性';
+  const parts = [`中国年轻${genderWord}`, '东亚面孔', '自然肤质'];
   if (!userProfile) return parts.join('，');
 
   const hair = userProfile.visual_features?.hair_color?.trim();
@@ -83,48 +84,10 @@ function layerKey(layer: string): string {
   return layer.trim().toLowerCase();
 }
 
-export function isOuterwearLayer(layer: string): boolean {
-  const l = layerKey(layer);
-  return (
-    l === 'outerwear' ||
-    l.includes('outer') ||
-    l.includes('jacket') ||
-    l.includes('coat') ||
-    l.includes('cardigan')
-  );
-}
-
-export function isInnerOrTopLayer(layer: string): boolean {
-  const l = layerKey(layer);
-  return (
-    l === 'top' ||
-    l === 'inner_top' ||
-    l.includes('inner') ||
-    l.includes('base') ||
-    l.includes('mid') ||
-    l.includes('tee') ||
-    l.includes('shirt')
-  );
-}
-
-/** 外套 + 内搭叠穿时，现代外套需要敞开。斗篷、比甲、系带、盘扣按描述的门襟，不强制敞开。 */
-const CLOSED_OUTER_PATTERN = /斗篷|比甲|系带|盘扣/;
-
-export function outfitNeedsOpenLayering(outfit: StylistOutfit): boolean {
-  const hasOuter = outfit.selected_items.some((item) => isOuterwearLayer(item.layer));
-  const hasInner = outfit.selected_items.some((item) => isInnerOrTopLayer(item.layer));
-  if (!hasOuter || !hasInner) return false;
-  const outerText = outfit.selected_items
-    .filter((item) => isOuterwearLayer(item.layer))
-    .map((item) => `${item.name} ${item.description ?? ''}`)
-    .join('\n');
-  return !CLOSED_OUTER_PATTERN.test(outerText);
-}
-
 const GARMENT_DRAW_RULES: { pattern: RegExp; rule: string }[] = [
   {
     pattern: /马面裙/,
-    rule: '马面裙：前后是平的裙门，褶只在两侧。禁止画成开衩直筒裙、西装裙或普通百褶裙。',
+    rule: '马面裙：前后是平的裙门，褶只在两侧；裙长到脚踝。禁止画成开衩直筒裙、西装裙、普通百褶裙或及膝短裙。',
   },
   {
     pattern: /比甲/,
@@ -135,6 +98,79 @@ const GARMENT_DRAW_RULES: { pattern: RegExp; rule: string }[] = [
     rule: '璎珞：贴在领口到胸前的一组垂饰。禁止画成双层珍珠项链。',
   },
 ];
+
+/**
+ * 整袍扣合类（圆领袍/道袍等）。模型常先验成风衣敞穿；提示词需强调一体式闭合 + 内衬仅领缘。
+ * 不含短打、褙子、比甲等开合外层。
+ */
+const CLOSED_ROBE_PATTERN =
+  /圆领袍|道袍|飞鱼服|曳撒|直身|深衣|官袍|袍服|(?:交领|圆领).{0,8}袍/;
+
+const SLEEVELESS_OUTER_PATTERN = /比甲|无袖|背心|马甲/;
+
+export function isClosedRobeGarment(name: string, description = ''): boolean {
+  return CLOSED_ROBE_PATTERN.test(`${name} ${description}`);
+}
+
+function isInnerLayer(layer: string): boolean {
+  const key = layerKey(layer);
+  return key === 'inner_top' || key === 'inner' || key.includes('inner');
+}
+
+function isSleevelessOuter(name: string, description = ''): boolean {
+  return SLEEVELESS_OUTER_PATTERN.test(`${name} ${description}`);
+}
+
+/**
+ * 读取搭配师给出的内搭可见性。旧数据缺字段时：有整袍则保守 collar_only，否则 open。
+ */
+export function resolveInnerVisibility(outfit: StylistOutfit): 'collar_only' | 'open' {
+  const explicit = outfit.visual_composition.inner_visibility;
+  if (explicit === 'collar_only' || explicit === 'open') return explicit;
+  const hasClosedRobe = outfit.selected_items.some((item) =>
+    isClosedRobeGarment(item.name, item.description ?? '')
+  );
+  return hasClosedRobe ? 'collar_only' : 'open';
+}
+
+/** collar_only 且存在内搭层 → 走覆盖规则 */
+export function shouldCoverInner(outfit: StylistOutfit): boolean {
+  if (resolveInnerVisibility(outfit) !== 'collar_only') return false;
+  return outfit.selected_items.some((item) => isInnerLayer(item.layer));
+}
+
+/** 覆盖宿主：优先整袍，其次 outerwear，再次非内搭 top */
+function findCoverHostItem(
+  outfit: StylistOutfit
+): StylistOutfit['selected_items'][number] | undefined {
+  const candidates = outfit.selected_items.filter((item) => !isInnerLayer(item.layer));
+  return (
+    candidates.find((item) => isClosedRobeGarment(item.name, item.description ?? '')) ??
+    candidates.find((item) => layerKey(item.layer) === 'outerwear' || layerKey(item.layer).includes('outer')) ??
+    candidates.find((item) => {
+      const key = layerKey(item.layer);
+      return key === 'top' || key === 'dress';
+    })
+  );
+}
+
+function softenClosedRobeAppearance(text: string): string {
+  return text.replace(/两侧开衩[^，。；、]*/g, '侧开衩克制不明显').replace(/\s{2,}/g, ' ').trim();
+}
+
+function closedRobeHardBans(): string[] {
+  return [
+    '必须前襟完整扣合闭合的一体式整袍',
+    '禁止敞开、对襟裂开、风衣敞穿、从中间劈开',
+  ];
+}
+
+function coveredOuterSleeveBans(): string[] {
+  return [
+    '外层袖口必须盖至手腕，盖住内搭袖',
+    '禁止前臂露出内搭浅色袖',
+  ];
+}
 
 /** 无参考图时，专用款式补一句画图模型能执行的禁令。连帽斗篷保留帽子，其余斗篷禁止加帽。 */
 export function garmentDrawConstraints(outfit: StylistOutfit): string[] {
@@ -148,6 +184,11 @@ export function garmentDrawConstraints(outfit: StylistOutfit): string[] {
       /连帽/.test(blob)
         ? '斗篷：保留描述里的帽子，衣长停在描述写的位置。禁止无故拖到脚踝。'
         : '斗篷：没有帽子。衣长停在描述写的位置。禁止加帽子，禁止画成连帽长披风。'
+    );
+  }
+  if (shouldCoverInner(outfit) && CLOSED_ROBE_PATTERN.test(blob)) {
+    rules.push(
+      '整袍：前襟完整扣合，禁止敞开或风衣敞穿；内衬仅在领口露出一线领缘，禁止腰腹大面积外露。'
     );
   }
   return rules;
@@ -192,7 +233,7 @@ export const OVERALL_OUTFIT_LOOK_CONSTRAINT =
 
 /** 有配饰时强制拉开景别，避免中近景把特写挤大 */
 export const ACCESSORY_FULLBODY_FRAMING =
-  '全身或膝上中景，配饰只作细节点缀，不得成为构图焦点。';
+  '全身站立（含鞋履入画），配饰只作细节点缀，不得成为构图焦点；禁止膝上特写裁切。';
 
 /**
  * @deprecated 保留导出兼容旧测试；新逻辑用 buildAccessoryPresentConstraints。
@@ -420,9 +461,18 @@ export function structureHardBans(
   const bans: string[] = [];
   if (/方领/.test(self)) bans.push('必须方领，禁止圆领/U领/无袖');
   if (/及臀/.test(self)) bans.push('衣长必须及臀，禁止短到腰');
+  if (/及踝|到脚踝|至脚踝|裙长及踝/.test(self)) {
+    bans.push('裙长/裤长必须到脚踝，禁止及膝、过膝短款或小腿中以上裁短');
+  }
+  if (/窄袖/.test(self) && !/短袖|五分袖|七分袖|过肘/.test(self)) {
+    bans.push('窄袖须长袖收口及腕，禁止短袖、扩口袖或喇叭袖');
+  }
   if (/耳钉|stud\b/i.test(self)) bans.push('细小精致贴耳，禁止大圈耳环');
   if (/圆环|耳圈|hoop/i.test(self) && /耳环|耳饰|earring/i.test(self)) {
     bans.push('细小精致贴耳，禁止偏大圆环');
+  }
+  if (isClosedRobeGarment(name, description)) {
+    bans.push(...closedRobeHardBans());
   }
   const layer = (options?.layer ?? '').toLowerCase();
   const isShoe = layer === 'shoes' || layer.includes('shoe') || /鞋|靴/.test(self);
@@ -464,31 +514,74 @@ function buildCompactTextOnlyPrompt(
 ): string {
   const lines: string[] = [];
   if (hasPersonReference) {
-    lines.push('图1只取脸和身材，不穿照片里的衣服。自然光，全身或膝上中景。');
+    lines.push('图1只取脸和身材，不穿照片里的衣服。自然光，全身站立（含鞋履入画），禁止膝上特写裁切。');
   } else {
-    lines.push(`真实街拍，${subject || '东亚面孔'}。自然光，全身或膝上中景。`);
+    lines.push(`真实街拍，${subject || '东亚面孔'}。自然光，全身站立（含鞋履入画），禁止膝上特写裁切。`);
   }
 
   const sceneContext = outfit.visual_composition.outfit_details;
-  const needsOpen = outfitNeedsOpenLayering(outfit);
+  const coverInner = shouldCoverInner(outfit);
+  const coverHost = coverInner ? findCoverHostItem(outfit) : undefined;
+  const coveredInner = coverInner
+    ? outfit.selected_items.find((item) => isInnerLayer(item.layer))
+    : undefined;
+  const hostIsClosedRobe = Boolean(
+    coverHost && isClosedRobeGarment(coverHost.name, coverHost.description ?? '')
+  );
+  const hostIsSleeveless = Boolean(
+    coverHost && isSleevelessOuter(coverHost.name, coverHost.description ?? '')
+  );
+
+  const coverHostIndex = coverHost ? outfit.selected_items.indexOf(coverHost) : -1;
 
   lines.push('穿：');
-  outfit.selected_items.forEach((item, index) => {
-    const appearance = compactItemAppearance(item, ragCache);
+  let itemIndex = 0;
+  for (const [index, item] of outfit.selected_items.entries()) {
+    // collar_only：内搭并入外层句，避免单独编号诱导外露
+    if (coverInner && isInnerLayer(item.layer)) continue;
+
+    let appearance = compactItemAppearance(item, ragCache);
     const bans = structureHardBans(item.name, item.description ?? '', {
       layer: item.layer,
       sceneContext,
     });
-    if (needsOpen && isOuterwearLayer(item.layer)) {
-      bans.push('敞开穿，露出内搭');
+
+    if (coverInner && index === coverHostIndex) {
+      if (hostIsClosedRobe) {
+        appearance = softenClosedRobeAppearance(appearance).replace(/[。；;]+$/u, '');
+        if (!/完整扣合|一体式整袍/.test(appearance)) {
+          appearance = `完整扣合的一体式整袍：${appearance}`;
+        }
+      } else {
+        appearance = appearance.replace(/[。；;]+$/u, '');
+      }
+      if (coveredInner) {
+        const innerLabel = coveredInner.name.trim() || '交领中衣';
+        appearance += `；内衬${innerLabel}仅在领口露出一线领缘，禁止腰腹、前襟、下摆处大面积外露`;
+      }
+      if (!hostIsSleeveless) {
+        bans.push(...coveredOuterSleeveBans());
+      }
     }
+
+    itemIndex += 1;
     const suffix = bans.length > 0 ? `；${bans.join('；')}` : '';
-    lines.push(`${index + 1}. ${appearance}${suffix}`);
-  });
+    lines.push(`${itemIndex}. ${appearance}${suffix}`);
+  }
 
   const drawRules = garmentDrawConstraints(outfit);
   if (drawRules.length > 0) {
     lines.push(drawRules.join(''));
+  }
+  if (coverInner) {
+    const parts = ['禁止内搭在肚腹或下摆外露'];
+    if (!hostIsSleeveless) parts.push('禁止前臂露出内搭袖');
+    if (hostIsClosedRobe) {
+      parts.unshift(
+        '外袍前襟敞开、对襟裂开、未扣合、风衣敞穿、马甲感、外套从中间劈开'
+      );
+    }
+    lines.push(`硬性禁止：${parts.join('；')}。`);
   }
 
   const garmentBlob = outfit.selected_items
@@ -545,8 +638,7 @@ export function buildSeedreamImagePrompt(
 /** 无服装参考图时拼进 prompt；有服装图时不拼，避免冲掉短句。 */
 export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '真实摄影街拍穿搭图，禁止插画/3D。',
-  '图1只取脸与身材，禁止换脸、整容感美颜、改头身比。',
-  '有图单品跟参考图；没有参考图的单品以穿着描述为准。',
+  '图1只取脸与身材；允许自然美颜美肤，禁止换脸、整容变形、改头身比或拉长腿。',
+  '有图单品跟参考图；没有参考图的单品以穿着描述为准，衣长裙长袖长必须与描述一致。',
   '配饰小尺寸点缀，禁止巨物化。',
-  '斗篷、比甲、系带和盘扣的外层按描述的门襟。',
 ].join('');

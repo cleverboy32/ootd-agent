@@ -108,7 +108,7 @@ function buildMockRagCache(): Map<string, ClothingItem> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const SILHOUETTE_WORDS =
-  /及膝|到踝|九分|阔腿|直筒|短款|短裤|五分|过膝|中长|长款|宽腿|迷你|拖地|knee[-\s]?length|ankle[-\s]?length|midi|maxi|cropped|above[-\s]?the[-\s]?knee|wide[-\s]?leg|straight[-\s]?leg|shorts|mini|floor[-\s]?length/i;
+  /及膝|到踝|及踝|九分|阔腿|直筒|直身|A字|短款|短裤|五分|过膝|中长|长款|宽腿|迷你|拖地|及胯|小腿|长袖|短袖|及腕|到腕|knee[-\s]?length|ankle[-\s]?length|midi|maxi|cropped|above[-\s]?the[-\s]?knee|wide[-\s]?leg|straight[-\s]?leg|shorts|mini|floor[-\s]?length/i;
 
 const VALID_ITEM_ID = /^item_\d+$|^new_item$|^mock-/;
 
@@ -138,6 +138,11 @@ describe('Stylist — output schema compliance', () => {
       assert.ok(outfit.visual_composition.outfit_details, 'outfit_details 不能为空');
       assert.ok(outfit.visual_composition.model_pose, 'model_pose 不能为空');
       assert.ok(outfit.visual_composition.background, 'background 不能为空');
+      assert.match(
+        outfit.visual_composition.inner_visibility ?? '',
+        /^(collar_only|open)$/,
+        `inner_visibility 须为 collar_only 或 open，实际: ${outfit.visual_composition.inner_visibility}`
+      );
       assert.match(outfit.visual_composition.model_pose, /[\u4e00-\u9fff]/, 'model_pose 须为中文');
       assert.doesNotMatch(
         outfit.visual_composition.model_pose,

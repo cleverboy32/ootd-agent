@@ -1,10 +1,12 @@
 import { searchWardrobeItemsByText, WardrobeSearchResult } from '@/server/services/wardrobeService';
 import { buildRagSearchLogEntry, logRagSearch } from '@/server/logging/rag';
 import {
+  collapseIdenticalSlotQueries,
   normalizeWardrobeSearchInput,
   parseWardrobeSearchSlot,
   resolveMainCategoryForSlot,
   WardrobeSearchInput,
+  WardrobeSearchQuery,
 } from '@/server/utils/ragSearchSlots';
 import {
   applySeasonFilter,
@@ -34,9 +36,19 @@ export interface RagSearchContext {
   userMessage?: string;
   intent?: GatekeeperIntent;
   anchorItem?: AnchorItemInfo;
-  /** 本轮注入的 stylist skills（用于风格一致性过滤） */
+  /** 本轮注入的 stylist skills（用于风格一致性过滤；无 style-* 则跳过） */
   skillNames?: string[];
 }
+
+export type RagSlotSnapshot = {
+  slot: string;
+  outfitId?: string;
+  matchStatus?: 'adequate' | 'weak' | 'none';
+  bestSimilarity?: number;
+  candidates: Array<{ id: string; subCategory: string; similarity: number }>;
+  query?: string;
+  target?: string;
+};
 
 function escapeXmlAttr(value: string): string {
   return value
@@ -46,11 +58,13 @@ function escapeXmlAttr(value: string): string {
 }
 
 /**
- * Formats the search results into an XML string for the AI prompt.
- * Uses short `ref` tokens (item_0, item_1…) instead of raw IDs to prevent LLM
- * from corrupting long cuid strings. The returned indexMap maps ref → real ID.
+ * Formats search results into XML for the reconcile prompt.
+ * Groups by outfitId when present; uses short ref tokens (item_0…).
  */
-function formatResultsToXml(items: WardrobeSearchResult[]): {
+function formatResultsToXml(
+  items: WardrobeSearchResult[],
+  metaById?: Map<string, { outfitIds: string[]; slots: string[] }>
+): {
   xml: string;
   indexMap: Map<string, string>;
 } {
@@ -65,7 +79,14 @@ function formatResultsToXml(items: WardrobeSearchResult[]): {
       const tags = (item.tags ?? []).join(', ');
       const similarity =
         typeof item.similarity === 'number' ? item.similarity.toFixed(2) : '';
-      return `  <item ref="${ref}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" mainCategory="${escapeXmlAttr(item.mainCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
+      const meta = metaById?.get(item.id);
+      const outfitsAttr = meta?.outfitIds?.length
+        ? ` outfits="${escapeXmlAttr(meta.outfitIds.join(','))}"`
+        : '';
+      const slotsAttr = meta?.slots?.length
+        ? ` slots="${escapeXmlAttr(meta.slots.join(','))}"`
+        : '';
+      return `  <item ref="${ref}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" mainCategory="${escapeXmlAttr(item.mainCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(item.colors.join(', '))}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"${outfitsAttr}${slotsAttr}/>`;
     })
     .join('\n');
 
@@ -75,12 +96,83 @@ function formatResultsToXml(items: WardrobeSearchResult[]): {
   };
 }
 
+async function runOneSlotSearch(
+  query: string,
+  slot: string | undefined,
+  userId: string,
+  fetchLimit: number,
+  resultLimit: number,
+  temperature: number | null,
+  seasonContext: ReturnType<typeof buildSeasonFilterContext>,
+  athletic: boolean,
+  skillNames: string[] | undefined
+): Promise<WardrobeSearchResult[]> {
+  const mainCategory = resolveMainCategoryForSlot(slot);
+  const parsedSlot = parseWardrobeSearchSlot(slot);
+  const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
+    slot: parsedSlot,
+    temperatureCelsius: temperature,
+  });
+  const temperatureFiltered = applyTemperatureFilter(rawResults, temperature);
+  const seasonFiltered = applySeasonFilter(
+    temperatureFiltered,
+    seasonContext,
+    parsedSlot,
+    resultLimit
+  );
+  const athleticFiltered = filterResultsForAthleticContext(
+    seasonFiltered,
+    parsedSlot,
+    athletic
+  );
+  const beforeCategory = athleticFiltered.length;
+  const categoryFiltered = filterResultsByQueryCategory(
+    athleticFiltered,
+    query,
+    parsedSlot
+  );
+  if (categoryFiltered.length !== beforeCategory) {
+    console.log(
+      `[RAG_HANDLER] query-category filter slot=${parsedSlot ?? '?'} ` +
+        `"${query}": ${beforeCategory} → ${categoryFiltered.length}`
+    );
+  }
+
+  const beforeColor = categoryFiltered.length;
+  const { matched: colorFiltered } = filterItemsByQueryColor(query, categoryFiltered);
+  if (colorFiltered.length !== beforeColor) {
+    console.log(
+      `[RAG_HANDLER] query-color filter slot=${parsedSlot ?? '?'} ` +
+        `"${query}": ${beforeColor} → ${colorFiltered.length}`
+    );
+  }
+
+  const beforeCool = colorFiltered.length;
+  const coolFiltered = filterCoolUnseasonalItems(colorFiltered, temperature);
+  if (coolFiltered.length !== beforeCool) {
+    console.log(
+      `[RAG_HANDLER] cool-unseasonal filter slot=${parsedSlot ?? '?'} ` +
+        `${temperature}℃: ${beforeCool} → ${coolFiltered.length}`
+    );
+  }
+
+  const beforeStyle = coolFiltered.length;
+  const searchResults = filterResultsByStyleSkill(coolFiltered, skillNames, parsedSlot);
+  if (searchResults.length !== beforeStyle) {
+    console.log(
+      `[RAG_HANDLER] style filter slot=${parsedSlot ?? '?'} ` +
+        `skills=${(skillNames ?? []).join('|') || 'none'}: ` +
+        `${beforeStyle} → ${searchResults.length}`
+    );
+  }
+
+  return searchResults;
+}
+
 /**
  * Performs a RAG search against the user's wardrobe using stylist-provided queries.
- * @param searchQueries Search queries from the Stylist Agent.
- * @param userId The user's ID.
- * @param ragCache A cache to store search results for the current request.
- * @returns An object containing the XML string for the prompt and the found items.
+ * Supports Plan→Retrieve: queries may carry outfitId; identical slot+query are collapsed
+ * into one vector search and results are shared across outfitIds.
  */
 export async function performRagSearch(
   searchQueries: WardrobeSearchInput[],
@@ -92,12 +184,7 @@ export async function performRagSearch(
   indexMap: Map<string, string>;
   items: ClothingItem[];
   matchSummaryXml: string;
-  slotSnapshots: Array<{
-    slot: string;
-    matchStatus?: 'adequate' | 'weak' | 'none';
-    bestSimilarity?: number;
-    candidates: Array<{ id: string; subCategory: string; similarity: number }>;
-  }>;
+  slotSnapshots: RagSlotSnapshot[];
 }> {
   console.log('[RAG_HANDLER] Starting RAG search process...');
 
@@ -106,12 +193,7 @@ export async function performRagSearch(
     indexMap: new Map<string, string>(),
     items: [] as ClothingItem[],
     matchSummaryXml: '',
-    slotSnapshots: [] as Array<{
-      slot: string;
-      matchStatus?: 'adequate' | 'weak' | 'none';
-      bestSimilarity?: number;
-      candidates: Array<{ id: string; subCategory: string; similarity: number }>;
-    }>,
+    slotSnapshots: [] as RagSlotSnapshot[],
   };
 
   const queries = searchQueries
@@ -122,7 +204,10 @@ export async function performRagSearch(
     return empty;
   }
 
-  console.log('[RAG_HANDLER] Searching wardrobe with queries:', queries);
+  const collapsed = collapseIdenticalSlotQueries(queries);
+  console.log(
+    `[RAG_HANDLER] Searching wardrobe: ${queries.length} slot queries → ${collapsed.length} unique (slot+query)`
+  );
 
   try {
     const seasonContext = buildSeasonFilterContext(logContext?.intent, logContext?.userMessage);
@@ -150,88 +235,63 @@ export async function performRagSearch(
       console.log(`[RAG_HANDLER] Temperature prefilter active: ${temperature}℃ (SQL + post-check)`);
     }
 
-    console.log(`[RAG_HANDLER] Running ${queries.length} slot queries in parallel...`);
+    console.log(`[RAG_HANDLER] Running ${collapsed.length} searches in parallel...`);
 
-    const perQueryResults = await Promise.all(
-      queries.map(async ({ query, slot }) => {
-        const mainCategory = resolveMainCategoryForSlot(slot);
-        const parsedSlot = parseWardrobeSearchSlot(slot);
-        const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
-          slot: parsedSlot,
-          intent: logContext?.intent,
-          temperatureCelsius: temperature,
-        });
-        // 后置再跑一遍：与 SQL 语义一致，作兜底（例如旧调用未传 temperatureCelsius）
-        const temperatureFiltered = applyTemperatureFilter(rawResults, temperature);
-        const seasonFiltered = applySeasonFilter(
-          temperatureFiltered,
+    const collapsedResults = await Promise.all(
+      collapsed.map(async (group) => {
+        const results = await runOneSlotSearch(
+          group.query,
+          group.slot,
+          userId,
+          fetchLimit,
+          resultLimit,
+          temperature,
           seasonContext,
-          parsedSlot,
-          resultLimit
+          athletic,
+          logContext?.skillNames
         );
-        const athleticFiltered = filterResultsForAthleticContext(
-          seasonFiltered,
-          parsedSlot,
-          athletic
-        );
-        const beforeCategory = athleticFiltered.length;
-        const categoryFiltered = filterResultsByQueryCategory(
-          athleticFiltered,
-          query,
-          parsedSlot
-        );
-        if (categoryFiltered.length !== beforeCategory) {
-          console.log(
-            `[RAG_HANDLER] query-category filter slot=${parsedSlot ?? '?'} ` +
-              `"${query}": ${beforeCategory} → ${categoryFiltered.length}`
-          );
-        }
-
-        const beforeColor = categoryFiltered.length;
-        const { matched: colorFiltered } = filterItemsByQueryColor(query, categoryFiltered);
-        if (colorFiltered.length !== beforeColor) {
-          console.log(
-            `[RAG_HANDLER] query-color filter slot=${parsedSlot ?? '?'} ` +
-              `"${query}": ${beforeColor} → ${colorFiltered.length}`
-          );
-        }
-
-        const beforeCool = colorFiltered.length;
-        const coolFiltered = filterCoolUnseasonalItems(colorFiltered, temperature);
-        if (coolFiltered.length !== beforeCool) {
-          console.log(
-            `[RAG_HANDLER] cool-unseasonal filter slot=${parsedSlot ?? '?'} ` +
-              `${temperature}℃: ${beforeCool} → ${coolFiltered.length}`
-          );
-        }
-
-        const beforeStyle = coolFiltered.length;
-        const searchResults = filterResultsByStyleSkill(
-          coolFiltered,
-          logContext?.skillNames,
-          parsedSlot
-        );
-        if (searchResults.length !== beforeStyle) {
-          console.log(
-            `[RAG_HANDLER] style filter slot=${parsedSlot ?? '?'} ` +
-              `skills=${(logContext?.skillNames ?? []).join('|') || 'none'}: ` +
-              `${beforeStyle} → ${searchResults.length}`
-          );
-        }
-
-        return {
-          query,
-          slot,
-          mainCategory,
-          results: searchResults,
-        };
+        return { group, results };
       })
     );
 
+    // Expand back to per-(outfitId,slot) for assessments / snapshots / logs
+    const perQueryResults: Array<{
+      query: string;
+      slot?: string;
+      outfitId?: string;
+      target?: string;
+      mainCategory?: ReturnType<typeof resolveMainCategoryForSlot>;
+      results: WardrobeSearchResult[];
+    }> = [];
+
+    for (const { group, results } of collapsedResults) {
+      const outfitIds = group.outfitIds.length > 0 ? group.outfitIds : [undefined];
+      for (const outfitId of outfitIds) {
+        perQueryResults.push({
+          query: group.query,
+          slot: group.slot,
+          outfitId,
+          target: group.target,
+          mainCategory: resolveMainCategoryForSlot(group.slot),
+          results,
+        });
+      }
+    }
+
     const seenIds = new Set<string>();
     const mergedResults: WardrobeSearchResult[] = [];
-    for (const { results } of perQueryResults) {
-      for (const item of results) {
+    const metaById = new Map<string, { outfitIds: string[]; slots: string[] }>();
+
+    for (const row of perQueryResults) {
+      for (const item of row.results) {
+        const meta = metaById.get(item.id) ?? { outfitIds: [], slots: [] };
+        if (row.outfitId && !meta.outfitIds.includes(row.outfitId)) {
+          meta.outfitIds.push(row.outfitId);
+        }
+        if (row.slot && !meta.slots.includes(row.slot)) {
+          meta.slots.push(row.slot);
+        }
+        metaById.set(item.id, meta);
         if (!seenIds.has(item.id)) {
           seenIds.add(item.id);
           mergedResults.push(item);
@@ -242,10 +302,11 @@ export async function performRagSearch(
     await logRagSearch(
       buildRagSearchLogEntry({
         userId,
-        queries: queries.map(({ query, slot }) => ({
+        queries: perQueryResults.map(({ query, slot, outfitId, mainCategory }) => ({
           query,
           slot,
-          mainCategory: resolveMainCategoryForSlot(slot),
+          outfitId,
+          mainCategory,
         })),
         perQueryResults,
         mergedResults,
@@ -268,18 +329,20 @@ export async function performRagSearch(
       logContext?.intent,
       logContext?.userMessage
     );
-    const slotSnapshots = perQueryResults.map(({ slot }, idx) => {
+    const slotSnapshots: RagSlotSnapshot[] = perQueryResults.map((row, idx) => {
       const assessment = slotAssessments[idx];
-      const results = perQueryResults[idx]?.results ?? [];
       return {
-        slot: slot ?? assessment?.slot ?? 'unknown',
+        slot: row.slot ?? assessment?.slot ?? 'unknown',
+        outfitId: row.outfitId,
         matchStatus: assessment?.status,
         bestSimilarity: assessment?.bestSimilarity,
-        candidates: results.map((item) => ({
+        candidates: row.results.map((item) => ({
           id: item.id,
           subCategory: item.subCategory,
           similarity: item.similarity,
         })),
+        query: row.query,
+        target: row.target,
       };
     });
 
@@ -314,11 +377,36 @@ export async function performRagSearch(
       console.log('[RAG_HANDLER] Slot match summary:', slotAssessments);
     }
 
-    const { xml: xmlString, indexMap } = formatResultsToXml(mergedResults);
+    // Per-outfit plan brief for reconcile
+    const planBriefParts: string[] = [];
+    const byOutfit = new Map<string, RagSlotSnapshot[]>();
+    for (const snap of slotSnapshots) {
+      const key = snap.outfitId || '_global';
+      const list = byOutfit.get(key) ?? [];
+      list.push(snap);
+      byOutfit.set(key, list);
+    }
+    for (const [outfitKey, snaps] of byOutfit) {
+      const lines = snaps
+        .map(
+          (s) =>
+            `  <slot name="${escapeXmlAttr(s.slot)}" status="${s.matchStatus ?? ''}" query="${escapeXmlAttr(s.query ?? '')}" target="${escapeXmlAttr(s.target ?? '')}" best="${s.bestSimilarity?.toFixed(2) ?? ''}"/>`
+        )
+        .join('\n');
+      planBriefParts.push(
+        `<outfit_retrieve id="${escapeXmlAttr(outfitKey)}">\n${lines}\n</outfit_retrieve>`
+      );
+    }
+    const retrieveBriefXml =
+      planBriefParts.length > 0
+        ? `\n<outfit_retrieve_summary>\n${planBriefParts.join('\n')}\n</outfit_retrieve_summary>\n`
+        : '';
+
+    const { xml: xmlString, indexMap } = formatResultsToXml(mergedResults, metaById);
     console.log('[RAG_HANDLER] Index map:', Object.fromEntries(indexMap));
 
     return {
-      xmlString: matchSummaryXml + xmlString,
+      xmlString: matchSummaryXml + retrieveBriefXml + xmlString,
       indexMap,
       items: clothingItems,
       matchSummaryXml,
@@ -335,4 +423,3 @@ export async function performRagSearch(
     };
   }
 }
-

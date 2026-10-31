@@ -5,9 +5,12 @@ import {
   buildModelSubjectDescription,
   buildSeedreamImagePrompt,
   isAccessoryReferenceLabel,
+  isClosedRobeGarment,
   PERSON_REFERENCE_LABEL,
+  resolveInnerVisibility,
   SEEDREAM_SYSTEM_INSTRUCTION,
   simplifyVisualText,
+  shouldCoverInner,
 } from '@/server/agents/visual/seedreamPrompt';
 import type { StylistOutfit } from '@/server/agents/stylist';
 
@@ -63,6 +66,36 @@ describe('buildModelSubjectDescription', () => {
   it('skips the generic subject when a full-body reference is present', () => {
     process.env.IMAGE_MODEL_SUBJECT = '固定模特';
     assert.equal(buildModelSubjectDescription(null, { hasPersonReference: true }), '');
+  });
+
+  it('uses male subject when verified profile gender is 男', () => {
+    delete process.env.IMAGE_MODEL_SUBJECT;
+    const male = buildModelSubjectDescription({
+      name: '',
+      height: '',
+      weight: '',
+      preferences: [],
+      skin_tone: '',
+      body_shape: '',
+      gender: '男',
+      personal_style: '日常休闲',
+      visual_features: { hair_color: 'unknown', detected_features: 'none' },
+    });
+    assert.match(male, /中国年轻男性/);
+    assert.doesNotMatch(male, /女性/);
+
+    const unknown = buildModelSubjectDescription({
+      name: '',
+      height: '',
+      weight: '',
+      preferences: [],
+      skin_tone: '',
+      body_shape: '',
+      gender: '',
+      personal_style: '日常休闲',
+      visual_features: { hair_color: 'unknown', detected_features: 'none' },
+    });
+    assert.match(unknown, /中国年轻女性/);
   });
 });
 
@@ -362,8 +395,8 @@ describe('buildSeedreamImagePrompt', () => {
       null
     );
     assert.match(bijia, /禁止画成拖到脚踝的长马甲/);
-    assert.doesNotMatch(bijia, /敞开或半敞/);
-    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /斗篷、比甲、系带和盘扣的外层按描述的门襟/);
+    assert.doesNotMatch(bijia, /敞开或半敞|敞开穿，露出内搭/);
+    assert.doesNotMatch(SEEDREAM_SYSTEM_INSTRUCTION, /敞开穿|按描述的门襟/);
   });
 
   it('短路径：服装原样穿上，配饰后置且按品类写细小精致约束', () => {
@@ -452,9 +485,222 @@ describe('buildSeedreamImagePrompt', () => {
     assert.match(prompt, /2\. .*细链贴锁骨/);
     assert.match(prompt, /项链极细贴锁骨/);
     assert.doesNotMatch(prompt, /禁止添加耳环|禁止添加项链/);
-    assert.match(prompt, /全身或膝上中景/);
+    assert.match(prompt, /全身站立（含鞋履入画）/);
+    assert.doesNotMatch(prompt, /膝上中景/);
     assert.doesNotMatch(prompt, /整套穿着|无参考图单品|穿搭构成|1–2厘米/);
     assert.doesNotMatch(prompt, /不要单独放大成画面主角/);
+  });
+
+  it('允许美颜美肤但禁改头身比；及踝与窄袖写成硬禁令', () => {
+    const hanfuWalk: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '明制汉服逛街',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '米白色交领右衽短衫',
+          layer: 'inner_top',
+          reason: '上装',
+          description: '米白色棉麻质地，交领右衽，窄袖，藏蓝色领缘与袖缘，衣长盖住裙腰，下摆短款。',
+        },
+        {
+          id: 'new_item',
+          name: '藏蓝色马面裙',
+          layer: 'bottom',
+          reason: '下装',
+          description: '藏蓝色混纺面料，前后平裙门，两侧打褶，裙长及踝，裙门有少量织金纹样。',
+        },
+        {
+          id: 'new_item',
+          name: '深棕色方头布鞋',
+          layer: 'shoes',
+          reason: '鞋',
+          description: '深棕色棉麻鞋面，方头，平底，鞋底柔软，无绑带，一脚蹬款式。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立姿态，双手自然垂于身侧',
+        outfit_details: '交领短衫配及踝马面裙',
+        background: '暖色木质背景',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(hanfuWalk, undefined, [PERSON_REFERENCE_LABEL], null);
+    const full = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /允许自然美颜美肤/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /禁止换脸、整容变形、改头身比/);
+    assert.doesNotMatch(SEEDREAM_SYSTEM_INSTRUCTION, /禁止.*整容感美颜/);
+    assert.match(prompt, /禁止膝上特写裁切/);
+    assert.match(prompt, /裙长\/裤长必须到脚踝，禁止及膝/);
+    assert.match(prompt, /窄袖须长袖收口及腕/);
+    assert.match(prompt, /裙长到脚踝/);
+    assert.ok(full.length < 1000, `full prompt too long: ${full.length}`);
+  });
+
+  it('整袍 + collar_only：内搭并入袍服句，强调闭合与领缘微露', () => {
+    assert.equal(isClosedRobeGarment('明代大红圆领袍', '圆领窄袖'), true);
+    assert.equal(isClosedRobeGarment('交领右衽短打', '短打'), false);
+
+    const robeOutfit: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '明制圆领袍逛街',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '月白交领中衣',
+          layer: 'inner_top',
+          reason: '内衬',
+          description: '月白交领中衣，窄袖。',
+        },
+        {
+          id: 'new_item',
+          name: '明代大红圆领袍',
+          layer: 'outerwear',
+          reason: '外袍',
+          description:
+            '大红色织金团花纹圆领袍，窄袖及腕，衣长及踝，两侧开衩，前襟扣合。',
+        },
+        {
+          id: 'new_item',
+          name: '月白汉裤',
+          layer: 'bottom',
+          reason: '下装',
+          description: '月白棉麻汉裤，裤脚及踝。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立逛街',
+        outfit_details: '圆领袍配汉裤',
+        background: '古镇石板街',
+        inner_visibility: 'collar_only',
+      },
+    };
+    assert.equal(resolveInnerVisibility(robeOutfit), 'collar_only');
+    assert.equal(shouldCoverInner(robeOutfit), true);
+    const prompt = buildSeedreamImagePrompt(robeOutfit, undefined, [], null);
+    assert.match(prompt, /完整扣合的一体式整袍/);
+    assert.match(prompt, /内衬月白交领中衣仅在领口露出一线领缘/);
+    assert.match(prompt, /禁止腰腹、前襟、下摆处大面积外露/);
+    assert.match(prompt, /禁止敞开、对襟裂开、风衣敞穿/);
+    assert.match(prompt, /硬性禁止：外袍前襟敞开/);
+    assert.match(prompt, /侧开衩克制不明显/);
+    assert.doesNotMatch(prompt, /两侧开衩/);
+    // 内搭不单独编号，避免诱导外露
+    assert.doesNotMatch(prompt, /^1\. 月白交领中衣/m);
+    assert.match(prompt, /1\. 完整扣合的一体式整袍/);
+    assert.match(prompt, /2\. 月白汉裤|2\. .*汉裤/);
+  });
+
+  it('collar_only + 交领短打：内搭并入，外层袖口及腕，禁前臂露内搭', () => {
+    const shortDa: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '侠客劲装',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '米白交领中衣',
+          layer: 'inner_top',
+          reason: '内衬',
+          description: '米白交领中衣，窄袖及腕。',
+        },
+        {
+          id: 'new_item',
+          name: '深藏青交领短打',
+          layer: 'outerwear',
+          reason: '外层',
+          description: '深藏青交领短打，窄袖到手腕，衣长及臀。',
+        },
+        {
+          id: 'new_item',
+          name: '藏青汉裤',
+          layer: 'bottom',
+          reason: '下装',
+          description: '藏青直筒汉裤，裤脚及踝。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '短打配汉裤',
+        background: '古镇街巷',
+        inner_visibility: 'collar_only',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(shortDa, undefined, [], null);
+    assert.match(prompt, /内衬米白交领中衣仅在领口露出一线领缘/);
+    assert.match(prompt, /外层袖口必须盖至手腕，盖住内搭袖/);
+    assert.match(prompt, /禁止前臂露出内搭浅色袖/);
+    assert.match(prompt, /硬性禁止：.*禁止前臂露出内搭袖/);
+    assert.doesNotMatch(prompt, /^1\. 米白交领中衣/m);
+    assert.doesNotMatch(prompt, /完整扣合的一体式整袍/);
+  });
+
+  it('inner_visibility=open：内搭单独成行，不加覆盖硬禁', () => {
+    const openCoat: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '韩系大衣',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '米白高领针织',
+          layer: 'inner_top',
+          reason: '内搭',
+          description: '米白高领针织，长袖到腕。',
+        },
+        {
+          id: 'new_item',
+          name: '炭灰长大衣',
+          layer: 'outerwear',
+          reason: '外套',
+          description: '炭灰羊毛大衣，衣长过膝。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '大衣配高领针织',
+        background: '城市街道',
+        inner_visibility: 'open',
+      },
+    };
+    assert.equal(shouldCoverInner(openCoat), false);
+    const prompt = buildSeedreamImagePrompt(openCoat, undefined, [], null);
+    assert.match(prompt, /1\. .*米白高领针织|1\. 米白高领针织/);
+    assert.match(prompt, /2\. .*炭灰长大衣|2\. 炭灰羊毛大衣/);
+    assert.doesNotMatch(prompt, /仅在领口露出一线领缘/);
+    assert.doesNotMatch(prompt, /硬性禁止：.*禁止内搭在肚腹/);
+    assert.doesNotMatch(prompt, /外层袖口必须盖至手腕/);
+  });
+
+  it('collar_only + 比甲：领缘覆盖，不强制袖口及腕', () => {
+    const bijiaCovered: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '比甲叠穿',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '豆沙粉短袄',
+          layer: 'inner_top',
+          reason: '内搭',
+          description: '交领短袄，窄袖及腕。',
+        },
+        {
+          id: 'new_item',
+          name: '浅驼比甲',
+          layer: 'outerwear',
+          reason: '外层',
+          description: '无袖对襟，衣长至膝盖上方。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '比甲罩在短袄外',
+        background: '庭院',
+        inner_visibility: 'collar_only',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(bijiaCovered, undefined, [], null);
+    assert.match(prompt, /内衬豆沙粉短袄仅在领口露出一线领缘/);
+    assert.match(prompt, /禁止内搭在肚腹或下摆外露/);
+    assert.doesNotMatch(prompt, /外层袖口必须盖至手腕/);
+    assert.doesNotMatch(prompt, /禁止前臂露出内搭/);
   });
 
   it('长路径：方领/及臀写成硬禁令，舞蹈场景加反芭蕾', () => {
@@ -488,6 +734,7 @@ describe('buildSeedreamImagePrompt', () => {
         model_pose: '站立，微侧，一手提裙摆',
         outfit_details: '方领上衣配及臀开衫',
         background: '舞蹈教室，木质地板，背景有把杆',
+        inner_visibility: 'open',
       },
     };
     const prompt = buildSeedreamImagePrompt(
@@ -501,7 +748,7 @@ describe('buildSeedreamImagePrompt', () => {
     const line2 = prompt.split('\n').find((l) => l.startsWith('2. ')) ?? '';
     const line3 = prompt.split('\n').find((l) => l.startsWith('3. ')) ?? '';
     assert.match(line1, /衣长必须及臀，禁止短到腰/);
-    assert.match(line1, /敞开穿，露出内搭/);
+    assert.doesNotMatch(line1, /敞开穿，露出内搭/);
     assert.doesNotMatch(line1, /必须方领|禁止大圈耳环/);
     assert.match(line2, /必须方领，禁止圆领\/U领\/无袖/);
     assert.doesNotMatch(line2, /禁止大圈耳环|衣长必须及臀/);
