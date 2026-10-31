@@ -10,6 +10,7 @@ export const PROFILE_METADATA_KEYS = [
   'selfie_analyzed_at',
   'location',
   'suited_style',
+  'gender',
 ] as const;
 
 /**
@@ -87,13 +88,17 @@ export function mergeVisualAnalysisIntoProfile(
   visualResult: {
     skin_tone: string;
     body_shape: string;
+    gender?: string;
     suited_style?: string;
     visual_features: { hair_color: string; detected_features: string };
   },
   imageUrl: string
 ): Record<string, unknown> {
+  const gender = visualResult.gender?.trim();
   return {
     ...existingProfile,
+    // 新照片判断不出性别时保留旧值，避免被空值抹掉
+    ...(gender ? { gender } : {}),
     skin_tone: visualResult.skin_tone,
     body_shape: visualResult.body_shape,
     suited_style: canonicalSuitedStyle(visualResult.suited_style),

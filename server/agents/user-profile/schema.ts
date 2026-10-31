@@ -10,6 +10,8 @@ export interface UserProfileResult {
   personal_style: string;
   /** 照片判断的适合风格；对话模型不写这个字段 */
   suited_style?: string;
+  /** 照片判断的性别（男/女）；对话模型不写这个字段 */
+  gender?: string;
   visual_features: {
     hair_color: string;
     detected_features: string;

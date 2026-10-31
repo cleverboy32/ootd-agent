@@ -119,36 +119,44 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
               </div>
             )}
 
-            {profile.skin_tone?.trim() && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">肤色分析</p>
-                <p className="text-sm leading-relaxed">{profile.skin_tone}</p>
-              </div>
-            )}
-
-            {profile.body_shape?.trim() && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">身材分析</p>
-                <p className="text-sm leading-relaxed">{profile.body_shape}</p>
-              </div>
-            )}
-
-            <div className="grid gap-3 sm:grid-cols-2">
+            <dl className="space-y-3">
+              {profile.gender?.trim() && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">性别</dt>
+                  <dd className="mt-1 text-sm leading-relaxed">{profile.gender}</dd>
+                </div>
+              )}
+              {profile.skin_tone?.trim() && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">肤色分析</dt>
+                  <dd className="mt-1 text-sm leading-relaxed">{profile.skin_tone}</dd>
+                </div>
+              )}
+              {profile.body_shape?.trim() && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">身材分析</dt>
+                  <dd className="mt-1 text-sm leading-relaxed">{profile.body_shape}</dd>
+                </div>
+              )}
               {profile.visual_features.hair_color &&
                 profile.visual_features.hair_color !== 'unknown' && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">发色</p>
-                    <p className="text-sm">{profile.visual_features.hair_color}</p>
+                    <dt className="text-xs text-muted-foreground">发色</dt>
+                    <dd className="mt-1 text-sm leading-relaxed">
+                      {profile.visual_features.hair_color}
+                    </dd>
                   </div>
                 )}
               {profile.visual_features.detected_features &&
                 profile.visual_features.detected_features !== 'none' && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">外形特征</p>
-                    <p className="text-sm">{profile.visual_features.detected_features}</p>
+                    <dt className="text-xs text-muted-foreground">外形特征</dt>
+                    <dd className="mt-1 text-sm leading-relaxed">
+                      {profile.visual_features.detected_features}
+                    </dd>
                   </div>
                 )}
-            </div>
+            </dl>
 
             {profile.selfie_analyzed_at && (
               <p className="text-xs text-muted-foreground">

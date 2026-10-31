@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
       result: {
         skin_tone: visualResult.skin_tone,
         body_shape: visualResult.body_shape,
+        gender: visualResult.gender,
         suited_style: visualResult.suited_style,
         hair_color: visualResult.visual_features.hair_color,
       },

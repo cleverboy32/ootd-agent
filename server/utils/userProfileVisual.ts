@@ -7,11 +7,12 @@ export function isVisualProfileVerified(dbProfile: Record<string, unknown>): boo
 
 export function emptyVisualProfile(): Pick<
   UserProfileResult,
-  'skin_tone' | 'body_shape' | 'visual_features'
+  'skin_tone' | 'body_shape' | 'visual_features' | 'gender'
 > {
   return {
     skin_tone: '',
     body_shape: '',
+    gender: '',
     visual_features: { hair_color: 'unknown', detected_features: 'none' },
   };
 }
@@ -19,7 +20,7 @@ export function emptyVisualProfile(): Pick<
 /** 仅当用户曾上传自拍并标记 verified 时，才从 DB 读取外形字段 */
 export function readVerifiedVisualProfile(
   dbProfile: Record<string, unknown>
-): Pick<UserProfileResult, 'skin_tone' | 'body_shape' | 'visual_features'> {
+): Pick<UserProfileResult, 'skin_tone' | 'body_shape' | 'visual_features' | 'gender'> {
   if (!isVisualProfileVerified(dbProfile)) {
     return emptyVisualProfile();
   }
@@ -28,6 +29,7 @@ export function readVerifiedVisualProfile(
   return {
     skin_tone: typeof dbProfile.skin_tone === 'string' ? dbProfile.skin_tone : '',
     body_shape: typeof dbProfile.body_shape === 'string' ? dbProfile.body_shape : '',
+    gender: typeof dbProfile.gender === 'string' ? dbProfile.gender : '',
     visual_features: {
       hair_color: visual?.hair_color || 'unknown',
       detected_features: visual?.detected_features || 'none',

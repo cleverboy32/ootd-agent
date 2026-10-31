@@ -153,6 +153,7 @@ export function buildUserProfileFallback(): UserProfileResult {
     preferences: [],
     skin_tone: '',
     body_shape: '',
+    gender: '',
     personal_style: '日常休闲',
     visual_features: { hair_color: 'unknown', detected_features: 'none' },
   };

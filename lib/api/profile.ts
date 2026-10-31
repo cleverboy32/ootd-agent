@@ -12,6 +12,8 @@ export interface ProfileData {
   preferences: string[];
   skin_tone: string;
   body_shape: string;
+  /** 照片分析判断的性别（男/女），未分析时为空 */
+  gender?: string;
   visual_features: {
     hair_color: string;
     detected_features: string;
@@ -51,6 +53,7 @@ function normalizeProfileData(raw: Partial<ProfileData> | undefined): ProfileDat
       : [],
     skin_tone: raw.skin_tone ?? '',
     body_shape: raw.body_shape ?? '',
+    gender: raw.gender?.trim() || undefined,
     visual_features: normalizeVisualFeaturesForZh({
       hair_color: raw.visual_features?.hair_color ?? 'unknown',
       detected_features: raw.visual_features?.detected_features ?? 'none',

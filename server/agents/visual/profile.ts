@@ -8,6 +8,8 @@ export interface VisualProfileResult {
   is_valid_portrait: boolean;
   /** 不通过时的原因代码，通过时为空 */
   portrait_issue: string;
+  /** 照片中人物的性别：男 / 女；非人物照或无法判断为空 */
+  gender: string;
   skin_tone: string;
   body_shape: string;
   /** 适合的风格，只取已有技能对应的一个词；不合格照片为空 */
@@ -47,6 +49,11 @@ const visualProfileSchema: Schema = {
       description:
         'is_valid_portrait 为 true 时填空字符串。为 false 时只填一个代码：half_body、close_up、face_unclear、coat_covers_body、not_standing、multiple_people、not_a_person。',
     },
+    gender: {
+      type: Type.STRING,
+      description:
+        '照片中人物的性别，只填「男」或「女」。非人物照、多人照或无法可靠判断时填空字符串。',
+    },
     skin_tone: {
       type: Type.STRING,
       description:
@@ -60,7 +67,7 @@ const visualProfileSchema: Schema = {
     suited_style: {
       type: Type.STRING,
       description:
-        '这个人适合的风格，只填一个词：新中式、老钱、古风、潮酷、甜美、法式、韩系、极简、文艺、通勤。根据身形比例、肩腰量感和气质判断。照片里的家居服、拖鞋、随手穿的衣服不能当风格依据。对不上或不合格照片填空字符串。',
+        '这个人适合的风格，只填一个词：新中式、老钱、汉服、潮酷、甜美、法式、韩系、极简、文艺、通勤。根据身形比例、肩腰量感和气质判断。照片里的家居服、拖鞋、随手穿的衣服不能当风格依据。国风/古风气质填「新中式」。对不上或不合格照片填空字符串。',
     },
     visual_features: {
       type: Type.OBJECT,
@@ -79,7 +86,7 @@ const visualProfileSchema: Schema = {
       required: ['hair_color', 'detected_features'],
     },
   },
-  required: ['is_valid_portrait', 'portrait_issue', 'skin_tone', 'body_shape', 'suited_style', 'visual_features'],
+  required: ['is_valid_portrait', 'portrait_issue', 'gender', 'skin_tone', 'body_shape', 'suited_style', 'visual_features'],
 };
 
 const VISUAL_PROFILE_SYSTEM_INSTRUCTION = `
@@ -98,10 +105,11 @@ const VISUAL_PROFILE_SYSTEM_INSTRUCTION = `
 - 通过时 portrait_issue 填空字符串。
 
 【分析维度】
+0. 性别 (gender)：只填「男」或「女」。看面部特征、发型与整体气质综合判断；无法可靠判断或非人物照填空字符串。不要仅凭穿着判断（裙子不等于女性）。
 1. 肤色 (skin_tone)：判断冷/暖色调，给出适合的色彩建议。非人物照填空字符串。
 2. 身材 (body_shape)：能判断时写身材类型与版型建议。看不清就留空，不要因此判失败。
 3. 外形特征 (visual_features)：发色、发型、眼镜等客观描述。
-4. 适合的风格 (suited_style)：只填一个词，新中式、老钱、古风、潮酷、甜美、法式、韩系、极简、文艺、通勤。看身形比例、肩腰量感和气质，不看照片里正在穿的家居服、拖鞋或随手衣服。对不上就空着。不合格照片也空着。
+4. 适合的风格 (suited_style)：只填一个词，新中式、老钱、汉服、潮酷、甜美、法式、韩系、极简、文艺、通勤。看身形比例、肩腰量感和气质，不看照片里正在穿的家居服、拖鞋或随手衣服。国风/古风气质填「新中式」。对不上就空着。不合格照片也空着。
 
 【语言要求】
 所有面向用户的文字必须使用简体中文。
