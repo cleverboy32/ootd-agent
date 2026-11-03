@@ -6,6 +6,7 @@ import { extractUserMessageMedia } from '@/lib/messageMedia';
 import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import { Message, MessageContentPart } from '@/lib/types';
 import { useAccess } from '@/components/access/AccessProvider';
+import { useOnboardingStore } from '@/store/onboarding';
 
 export const useChatHandler = () => {
   const { canInvokeAI } = useAccess();
@@ -23,6 +24,12 @@ export const useChatHandler = () => {
     imageUrl?: string | string[] | null
   ) => {
     if (!canInvokeAI) return;
+
+    // 用户开始发消息：穿搭引导气泡自动消失
+    const onboarding = useOnboardingStore.getState();
+    if (onboarding.step === 'chat') {
+      onboarding.completeChat();
+    }
 
     setWaitReply(true);
     let conversationId = activeConversationId;

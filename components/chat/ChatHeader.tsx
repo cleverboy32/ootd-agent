@@ -1,19 +1,34 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { Heart, LogOut, Shirt, Sparkles, UserCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { GuideBubble } from '@/components/onboarding/GuideBubble';
+import { useAccess } from '@/components/access/AccessProvider';
+import { useOnboarding } from '@/hooks/useOnboarding';
 import { fetchSession, logout } from '@/lib/api/auth';
 import { fetchProfile } from '@/lib/api/profile';
-import { useAccess } from '@/components/access/AccessProvider';
 import { withBasePath } from '@/lib/utils';
+
+const emptySubscribe = () => () => {};
 
 export function ChatHeader() {
   const { canInvokeAI } = useAccess();
+  const { ready: onboardingReady, step: onboardingStep, dismiss: dismissOnboarding } =
+    useOnboarding();
   const [authenticated, setAuthenticated] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [needsFullBody, setNeedsFullBody] = useState(false);
+  const profileAnchorRef = useRef<HTMLDivElement>(null);
+  const [fullBodyPos, setFullBodyPos] = useState<{
+    top: number;
+    left: number;
+    placeRight: boolean;
+  } | null>(null);
+  const portalReady = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const showFullBodyGuide = onboardingReady && onboardingStep === 'fullBody';
 
   useEffect(() => {
     fetchSession()
@@ -34,6 +49,27 @@ export function ChatHeader() {
     };
   }, [canInvokeAI]);
 
+  useLayoutEffect(() => {
+    if (!showFullBodyGuide) return;
+    const update = () => {
+      const rect = profileAnchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const bubbleWidth = 176;
+      const gap = 8;
+      const spaceRight = window.innerWidth - rect.right - gap;
+      // 右侧够放就贴右侧；否则翻到按钮左侧，避免出屏
+      const placeRight = spaceRight >= bubbleWidth;
+      setFullBodyPos({
+        top: rect.top + rect.height / 2,
+        left: placeRight ? rect.right + gap : rect.left - gap - bubbleWidth,
+        placeRight,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [showFullBodyGuide]);
+
   async function onLogout() {
     setLoggingOut(true);
     try {
@@ -49,14 +85,26 @@ export function ChatHeader() {
       <h2 className="font-semibold text-foreground">AI 时尚搭配助手</h2>
 
       <div className="flex items-center gap-1">
-        <Link href="/wardrobe" passHref>
-          <Button variant="ghost" className="flex items-center gap-2">
-            <Shirt className="h-5 w-5" />
-            <span className="hidden sm:inline">我的衣橱</span>
-          </Button>
-        </Link>
+        <div className="relative">
+          <Link href="/wardrobe" passHref>
+            <Button variant="ghost" className="flex items-center gap-2">
+              <Shirt className="h-5 w-5" />
+              <span className="hidden sm:inline">我的衣橱</span>
+            </Button>
+          </Link>
+          {onboardingReady && onboardingStep === 'wardrobe' && (
+            <div className="absolute right-0 top-full z-50 mt-2">
+              <GuideBubble
+                title="先去衣橱上传几件衣服"
+                onDismiss={dismissOnboarding}
+                arrow="top"
+                arrowAlign="end"
+              />
+            </div>
+          )}
+        </div>
 
-        <div className="relative group">
+        <div ref={profileAnchorRef} className="relative group">
           <Button
             variant="ghost"
             className={`relative flex items-center gap-2 ${needsFullBody ? 'pr-4' : ''}`}
@@ -72,6 +120,23 @@ export function ChatHeader() {
               />
             )}
           </Button>
+          {portalReady &&
+            showFullBodyGuide &&
+            fullBodyPos &&
+            createPortal(
+              <div
+                className="pointer-events-auto fixed z-[100] -translate-y-1/2"
+                style={{ top: fullBodyPos.top, left: fullBodyPos.left }}
+              >
+                <GuideBubble
+                  title="上传一张全身照"
+                  description="效果图会更像你"
+                  onDismiss={dismissOnboarding}
+                  arrow={fullBodyPos.placeRight ? 'left' : 'right'}
+                />
+              </div>,
+              document.body
+            )}
 
           <div
             role="menu"

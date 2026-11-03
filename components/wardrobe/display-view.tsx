@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { getClientId, withBasePath } from '@/lib/utils';
 import { deleteWardrobeItem, deleteWardrobeItems, reanalyzeWardrobeItem } from '@/lib/api/wardrobe';
 import { useAccess } from '@/components/access/AccessProvider';
+import { useOnboarding } from '@/hooks/useOnboarding';
 
 const categories = [
   { value: 'all', label: '全部' },
@@ -42,6 +43,7 @@ interface DisplayViewProps {
 
 export function DisplayView({ onAddItems }: DisplayViewProps) {
   const { canMutate } = useAccess();
+  const { refresh: refreshOnboarding } = useOnboarding();
   const [items, setItems] = useState<ClothingItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
         setFetchError(result.error);
       } else {
         setItems(result.items);
+        if (result.items.length > 0) void refreshOnboarding();
       }
       setIsLoading(false);
     });
@@ -79,7 +82,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshOnboarding]);
 
   const getFilteredItems = useCallback(
     (category: string) =>

@@ -3,7 +3,9 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
+import { GuideBubble } from '@/components/onboarding/GuideBubble';
 import { useImageHandler } from '@/hooks/useImageHandler';
+import { useOnboarding } from '@/hooks/useOnboarding';
 import { MAX_PURCHASE_UPLOADS } from '@/lib/purchaseUploads';
 import { useAccess } from '@/components/access/AccessProvider';
 
@@ -22,6 +24,9 @@ export function ChatInputArea({
   handleSend,
 }: ChatInputAreaProps) {
   const { canInvokeAI } = useAccess();
+  const { ready: onboardingReady, step: onboardingStep, dismiss: dismissOnboarding } =
+    useOnboarding();
+  const showChatGuide = onboardingReady && onboardingStep === 'chat';
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 4. 在组件内部直接使用 useImageHandler 来管理所有图片相关的状态和逻辑
@@ -105,6 +110,17 @@ export function ChatInputArea({
           </div>
         )}
 
+        {showChatGuide && (
+          <div className="mb-3 w-fit">
+            <GuideBubble
+              title="试试问我今天怎么穿"
+              onDismiss={dismissOnboarding}
+              arrow="bottom"
+              arrowAlign="start"
+            />
+          </div>
+        )}
+
         <div className="relative group">
           <div className="flex items-start bg-background border border-border/20 rounded-3xl p-2 pl-4 shadow-md focus-within:ring-2 focus-within:ring-[var(--gold)]/30 hover:ring-2 hover:ring-[var(--gold)]/20 transition-all">
             <input 
@@ -133,7 +149,7 @@ export function ChatInputArea({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown} // 使用封装后的 onKeyDown
               disabled={!canInvokeAI}
-              placeholder={canInvokeAI ? "上传衣服照片，获取搭配建议..." : "浏览模式下不可发送消息"}
+              placeholder={canInvokeAI ? "上传衣服照片，获取搭配建议..." : "请先登录后再发送消息"}
               className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg resize-none min-h-[40px]"
             />
             <Button
