@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useChatStore } from '@/store/chat';
 import { useOnboardingStore } from '@/store/onboarding';
 
-/** 订阅全局引导状态；进入相关页面时 hydrate */
+/** 订阅全局引导状态；hydrate 在 store 内去重，多组件挂载只会打一次网 */
 export function useOnboarding() {
   const conversations = useChatStore((s) => s.conversations);
   const hasConversations = conversations.length > 0;
@@ -25,6 +25,6 @@ export function useOnboarding() {
     progress,
     dismiss: () => dismissStore(hasConversations),
     completeChat,
-    refresh: () => hydrate(hasConversations),
+    refresh: () => hydrate(hasConversations, { force: true }),
   };
 }
