@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import { fetchSession } from '@/lib/api/auth';
 import {
   deleteSavedOutfit,
   fetchSavedOutfits,
   saveOutfit,
   type SavedOutfit,
 } from '@/lib/api/savedOutfits';
+import { useSessionStore } from '@/store/session';
 import { stripBasePath, withBasePath } from '@/lib/utils';
 
 function redirectToLogin(): void {
@@ -45,7 +45,7 @@ export const useSavedOutfitsStore = create<SavedOutfitsState & SavedOutfitsActio
   refresh: async () => {
     set({ loading: true });
     try {
-      const session = await fetchSession();
+      const session = await useSessionStore.getState().ensureSession();
       const ok = Boolean(session.authenticated && session.user);
       if (!ok) {
         set({ authenticated: false, items: [], loading: false, hydrated: true });
@@ -68,7 +68,7 @@ export const useSavedOutfitsStore = create<SavedOutfitsState & SavedOutfitsActio
     let ok = get().authenticated;
     if (!ok) {
       try {
-        const session = await fetchSession();
+        const session = await useSessionStore.getState().ensureSession();
         ok = Boolean(session.authenticated && session.user);
         set({ authenticated: ok });
       } catch {

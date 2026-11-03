@@ -1,18 +1,17 @@
 /**
  * 认证 API 客户端（/api/auth/*）。
  * 不走 apiClient：auth 接口不需要 X-Client-ID 头，401 也不触发登录页跳转。
+ * session 走 zustand（store/session），避免各模块重复打 /api/auth/session。
  */
 import { withBasePath } from '@/lib/utils';
+import { useSessionStore, type SessionSnapshot } from '@/store/session';
 
 export interface AuthUser {
   id: string;
   username: string;
 }
 
-export interface SessionState {
-  authenticated: boolean;
-  user?: AuthUser & { hasSecurityQuestions: boolean };
-}
+export type SessionState = SessionSnapshot;
 
 async function parseOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -47,14 +46,12 @@ export async function register(username: string, password: string): Promise<Auth
 
 export async function logout(): Promise<void> {
   await post('/api/auth/logout');
+  useSessionStore.getState().clearSession();
 }
 
-export async function fetchSession(): Promise<SessionState> {
-  const res = await fetch(withBasePath('/api/auth/session'), {
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
-  return parseOrThrow<SessionState>(res);
+/** 读 zustand 中的 session；未就绪则拉一次并写入 store（并发合并） */
+export async function fetchSession(options?: { bust?: boolean }): Promise<SessionState> {
+  return useSessionStore.getState().ensureSession(options);
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {

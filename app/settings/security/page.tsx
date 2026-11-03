@@ -17,13 +17,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAccess } from '@/components/access/AccessProvider';
 import {
   changePassword,
   fetchMySecurityQuestions,
-  fetchSession,
   generateRecoveryCodes,
   setSecurityQuestions,
-  type AuthUser,
 } from '@/lib/api/auth';
 
 /** 已设置答案的密文占位（非真实答案；提交时若未改动则传空串以保留原哈希） */
@@ -344,23 +343,15 @@ function RecoveryCodesCard() {
 
 export default function SecuritySettingsPage() {
   const router = useRouter();
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { ready, authenticated, user } = useAccess();
+  const loading = !ready;
 
   useEffect(() => {
-    fetchSession()
-      .then((state) => {
-        if (!state.authenticated || !state.user) {
-          router.push('/login?redirect=/settings/security');
-          return;
-        }
-        setUser(state.user);
-        setLoading(false);
-      })
-      .catch(() => {
-        router.push('/login?redirect=/settings/security');
-      });
-  }, [router]);
+    if (!ready) return;
+    if (!authenticated || !user) {
+      router.push('/login?redirect=/settings/security');
+    }
+  }, [ready, authenticated, user, router]);
 
   return (
     <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">

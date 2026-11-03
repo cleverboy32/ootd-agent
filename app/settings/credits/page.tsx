@@ -8,7 +8,7 @@ import { AppSidebar } from '@/components/AppSidebar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fetchSession } from '@/lib/api/auth';
+import { useAccess } from '@/components/access/AccessProvider';
 import {
   fetchCredits,
   redeemCode,
@@ -31,6 +31,7 @@ function formatTime(iso: string): string {
 
 export default function CreditsSettingsPage() {
   const router = useRouter();
+  const { ready, authenticated } = useAccess();
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState(0);
   const [ledger, setLedger] = useState<CreditLedgerItem[]>([]);
@@ -40,17 +41,15 @@ export default function CreditsSettingsPage() {
   const [redeeming, setRedeeming] = useState(false);
 
   useEffect(() => {
+    if (!ready) return;
+    if (!authenticated) {
+      router.push('/login?redirect=/settings/credits');
+      return;
+    }
     let cancelled = false;
-    fetchSession()
-      .then((session) => {
-        if (!session.authenticated || !session.user) {
-          router.push('/login?redirect=/settings/credits');
-          return null;
-        }
-        return fetchCredits(50);
-      })
+    fetchCredits(50)
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled) return;
         setBalance(data.balance);
         setLedger(data.ledger);
         setLoading(false);
@@ -61,7 +60,7 @@ export default function CreditsSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [ready, authenticated, router]);
 
   async function onRedeem(e: FormEvent) {
     e.preventDefault();
