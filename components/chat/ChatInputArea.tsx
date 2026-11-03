@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Upload, SendHorizontal, X, Loader2 } from 'lucide-react';
 import { GuideBubble } from '@/components/onboarding/GuideBubble';
+import { useAuthModal } from '@/components/auth/AuthModalProvider';
 import { useImageHandler } from '@/hooks/useImageHandler';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { MAX_PURCHASE_UPLOADS } from '@/lib/purchaseUploads';
@@ -23,10 +24,11 @@ export function ChatInputArea({
   isLoading, 
   handleSend,
 }: ChatInputAreaProps) {
-  const { canInvokeAI } = useAccess();
+  const { ready: accessReady, authenticated, canInvokeAI } = useAccess();
+  const { openAuthModal } = useAuthModal();
   const { ready: onboardingReady, step: onboardingStep, dismiss: dismissOnboarding } =
     useOnboarding();
-  const showChatGuide = onboardingReady && onboardingStep === 'chat';
+  const showChatGuide = authenticated && onboardingReady && onboardingStep === 'chat';
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 4. 在组件内部直接使用 useImageHandler 来管理所有图片相关的状态和逻辑
@@ -72,6 +74,36 @@ export function ChatInputArea({
   // 6. 决定“发送”按钮是否应该被禁用
   // 正在发送消息(isLoading) 或 正在上传图片(isUploading) 或 (没有文字且没有上传成功的图片) 时，禁用按钮
   const isSendDisabled = !canInvokeAI || isLoading || isUploading || (!input.trim() && uploadedImageUrls.length === 0);
+
+  if (accessReady && !authenticated) {
+    return (
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent p-6">
+        <div className="mx-auto max-w-5xl">
+          <button
+            type="button"
+            onClick={() => openAuthModal({ redirect: '/' })}
+            className="group relative block w-full rounded-3xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)]/30"
+            aria-label="登录后开始搭配"
+          >
+            <div className="flex items-start rounded-3xl border border-border/20 bg-background p-2 pl-4 shadow-md transition-all group-hover:ring-2 group-hover:ring-[var(--gold)]/20">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground">
+                <Upload className="h-5 w-5" />
+              </span>
+              <span className="flex min-h-[40px] flex-1 items-center px-3 py-2 text-base text-muted-foreground sm:text-lg">
+                登录后开始搭配…
+              </span>
+              <span className="ml-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 text-black opacity-60">
+                <SendHorizontal className="h-5 w-5" />
+              </span>
+            </div>
+          </button>
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            Fashion AI 会根据提供的图片和描述生成搭配建议，结果仅供参考。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-20">
@@ -147,19 +179,18 @@ export function ChatInputArea({
               maxRows={5}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown} // 使用封装后的 onKeyDown
+              onKeyDown={onKeyDown}
               disabled={!canInvokeAI}
-              placeholder={canInvokeAI ? "上传衣服照片，获取搭配建议..." : "请先登录后再发送消息"}
+              placeholder="上传衣服照片，获取搭配建议..."
               className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-foreground placeholder:text-muted-foreground py-2 px-3 text-base sm:text-lg resize-none min-h-[40px]"
             />
             <Button
               size="icon"
               aria-label="发送消息"
-              onClick={onSend} // 使用封装后的 onSend
-              disabled={isSendDisabled} // 使用计算出的禁用状态
+              onClick={onSend}
+              disabled={isSendDisabled}
               className="h-10 w-10 bg-gradient-to-br from-amber-400 to-yellow-600 hover:brightness-110 text-black rounded-full shrink-0 ml-2 disabled:opacity-50 transition-all"
             >
-              {/* 优先显示消息发送的 loading，其次才是默认的发送图标 */}
               {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
             </Button>
           </div>

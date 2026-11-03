@@ -7,6 +7,7 @@ import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatMessagesList } from "@/components/chat/ChatMessagesList";
 import { GreetingSection } from "@/components/chat/GreetingSection";
 import { ChatInputArea } from "@/components/chat/ChatInputArea";
+import { useAccess } from "@/components/access/AccessProvider";
 import { Button } from "@/components/ui/button";
 import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
@@ -16,6 +17,7 @@ import { outfitImageAnchorId } from "@/lib/api/savedOutfits";
 import { stripBasePath } from "@/lib/utils";
 
 function FashionAIPageInner() {
+  const { authenticated } = useAccess();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -46,8 +48,9 @@ function FashionAIPageInner() {
   const lastMessage = messages.at(-1);
 
   useEffect(() => {
+    if (!authenticated) return;
     fetchConversations();
-  }, [fetchConversations]);
+  }, [authenticated, fetchConversations]);
 
   /** 有 o= 时必须命中效果图锚点，不能先滚到气泡再当成功（否则图挂上后位置已偏） */
   function resolveOutfitEl(
@@ -276,9 +279,7 @@ function FashionAIPageInner() {
 
   return (
     <div className="flex h-screen bg-background text-foreground font-sans overflow-hidden">
-      <SidebarLeft 
-        onNewChat={handleNewChat}
-      />
+      <SidebarLeft onNewChat={handleNewChat} />
       <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
         <ChatHeader />
         <div
@@ -301,14 +302,16 @@ function FashionAIPageInner() {
         />
       </main>
 
-      <SidebarRight />
+      {authenticated && <SidebarRight />}
 
       {/* Floating Help Button */}
-      <div className="fixed bottom-6 right-6 z-30 lg:hidden">
-        <Button variant="outline" size="icon" className="h-12 w-12 rounded-full border-border shadow-lg bg-background hover:bg-accent text-muted-foreground">
-          <HelpCircle className="h-6 w-6" />
-        </Button>
-      </div>
+      {authenticated && (
+        <div className="fixed bottom-6 right-6 z-30 lg:hidden">
+          <Button variant="outline" size="icon" className="h-12 w-12 rounded-full border-border shadow-lg bg-background hover:bg-accent text-muted-foreground">
+            <HelpCircle className="h-6 w-6" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

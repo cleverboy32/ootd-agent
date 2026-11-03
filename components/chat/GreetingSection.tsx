@@ -1,8 +1,11 @@
+'use client';
+
 import React from 'react';
 import Image from 'next/image';
 import { Briefcase, Shirt, Heart, Palette } from 'lucide-react';
 import { FeatureCard } from './FeatureCard';
 import { useAccess } from '@/components/access/AccessProvider';
+import { useAuthModal } from '@/components/auth/AuthModalProvider';
 import { LOGO_SRC } from '@/lib/utils';
 
 interface GreetingSectionProps {
@@ -11,6 +14,15 @@ interface GreetingSectionProps {
 
 export function GreetingSection({ handleSend }: GreetingSectionProps) {
   const { canInvokeAI } = useAccess();
+  const { openAuthModal } = useAuthModal();
+
+  function onCard(prompt: string) {
+    if (canInvokeAI) {
+      handleSend(prompt);
+      return;
+    }
+    openAuthModal({ redirect: '/' });
+  }
 
   return (
     <div className="max-w-4xl mx-auto pt-16 px-6 sm:px-12">
@@ -26,40 +38,36 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
         </p>
       </div>
 
-      {canInvokeAI ? <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        <FeatureCard 
+      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <FeatureCard
           icon={<Briefcase className="h-6 w-6 text-blue-500" />}
           iconBg="bg-blue-50"
           title="商务搭配"
           description="职场通勤穿搭建议"
-          onClick={() => handleSend("我想了解商务通勤风格的穿搭，有什么好建议吗？")}
+          onClick={() => onCard('我想了解商务通勤风格的穿搭，有什么好建议吗？')}
         />
-        <FeatureCard 
+        <FeatureCard
           icon={<Shirt className="h-6 w-6 text-green-500" />}
           iconBg="bg-green-50"
           title="休闲风格"
           description="日常出街穿搭方案"
-          onClick={() => handleSend("请给我推荐几套适合周末日常出街的休闲穿搭。")}
+          onClick={() => onCard('请给我推荐几套适合周末日常出街的休闲穿搭。')}
         />
-        <FeatureCard 
+        <FeatureCard
           icon={<Heart className="h-6 w-6 text-rose-500" />}
           iconBg="bg-rose-50"
           title="约会搭配"
           description="浪漫优雅的着装推荐"
-          onClick={() => handleSend("我周末有个约会，想要浪漫优雅一点的风格，求推荐。")}
+          onClick={() => onCard('我周末有个约会，想要浪漫优雅一点的风格，求推荐。')}
         />
-        <FeatureCard 
+        <FeatureCard
           icon={<Palette className="h-6 w-6 text-amber-500" />}
           iconBg="bg-amber-50"
           title="配色建议"
           description="专业色彩搭配指导"
-          onClick={() => handleSend("如何进行高级感的色彩搭配？请教我一些色彩搭配的公式。")}
+          onClick={() => onCard('如何进行高级感的色彩搭配？请教我一些色彩搭配的公式。')}
         />
-      </div> : (
-        <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-          请先登录后再开始搭配咨询。
-        </p>
-      )}
+      </div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { isGuestAllowedPath } from '@/lib/guestAccess';
 import { getClientId, stripBasePath, withBasePath } from '@/lib/utils';
 
 /**
@@ -42,15 +43,17 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   if (!response.ok) {
     // Try to parse the error body
     const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status}` }));
-    // user 模式下未登录：跳登录页并记住来源（登录页自身除外，避免循环）
+    // 未登录 401：访客允许页（首页）只抛错不跳转；其余页跳登录并记住来源
     if (
       response.status === 401 &&
       errorBody?.code === 'UNAUTHENTICATED' &&
-      typeof window !== 'undefined' &&
-      !stripBasePath(window.location.pathname).startsWith('/login')
+      typeof window !== 'undefined'
     ) {
-      const current = stripBasePath(window.location.pathname) + window.location.search;
-      window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
+      const path = stripBasePath(window.location.pathname);
+      if (!isGuestAllowedPath(path)) {
+        const current = path + window.location.search;
+        window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
+      }
     }
     // Throw an error with more info for the upper layer to catch
     throw new Error(errorBody.error || errorBody.message || `HTTP error! Status: ${response.status}`);

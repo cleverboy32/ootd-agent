@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AccessProvider } from "@/components/access/AccessProvider";
+import { AuthBootOverlay } from "@/components/auth/AuthBootOverlay";
+import { AuthModalProvider } from "@/components/auth/AuthModalProvider";
 import { SavedOutfitsBootstrap } from "@/components/collect/SavedOutfitsBootstrap";
 import "./globals.css";
 
@@ -31,8 +33,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AccessProvider>
-          <SavedOutfitsBootstrap />
-          {children}
+          <AuthBootOverlay />
+          <AuthModalProvider>
+            <SavedOutfitsBootstrap />
+            {children}
+          </AuthModalProvider>
         </AccessProvider>
       </body>
     </html>
