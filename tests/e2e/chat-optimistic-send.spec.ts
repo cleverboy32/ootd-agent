@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import { mockVerifiedAccess } from './helpers/mock-access';
+import { mockLoggedIn } from './helpers/mock-session'
 import { mockSuccessfulChatStream } from './helpers/mock-apis';
 
 type CreateHandler = (route: Route) => Promise<void>;
@@ -40,7 +40,7 @@ async function sendFirstMessage(page: Page, text: string): Promise<void> {
 
 test.describe('new conversation optimistic send', () => {
   test('[ACC-C4] shows the first message before the conversation is persisted', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
     await mockSuccessfulChatStream(page, '白裙子搭配建议');
 
     let releaseCreate: () => void = () => {};
@@ -76,7 +76,7 @@ test.describe('new conversation optimistic send', () => {
   });
 
   test('[ACC-C5] failed conversation creation keeps the message and retries', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
     await mockSuccessfulChatStream(page, '重试后创建成功');
 
     let createCalls = 0;

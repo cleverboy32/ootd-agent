@@ -193,13 +193,12 @@ export function createImageRetryStream(
         const { resolveUserIdByClientId, getCreditBalance } = await import(
           '@/server/billing/credits'
         );
-        const { getAuthMode } = await import('@/server/auth/mode');
         const { creditCostPerImage } = await import('@/server/config/credits');
         userId = (await resolveUserIdByClientId(clientId)) ?? undefined;
         if (userId) trace.setUserId(userId);
         const creditsRequiredIds = new Set<string>();
         let skipForCredits = false;
-        if (getAuthMode() === 'user' && userId) {
+        if (userId) {
           const balance = await getCreditBalance(userId);
           if (balance < creditCostPerImage()) {
             skipForCredits = true;

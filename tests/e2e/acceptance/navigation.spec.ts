@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { mockBrowseAccess, mockVerifiedAccess } from '../helpers/mock-access';
+import { mockLoggedIn } from '../helpers/mock-session';
 import { mockWardrobeApi, mockProfileApi } from '../helpers/mock-apis';
 
 test.describe('navigation', () => {
   test('[ACC-N1] sidebar chat link loads home', async ({ page }) => {
-    await mockBrowseAccess(page);
+    await mockLoggedIn(page);
     await page.goto('/wardrobe');
     await mockWardrobeApi(page);
 
@@ -14,7 +14,7 @@ test.describe('navigation', () => {
   });
 
   test('[ACC-N2] sidebar wardrobe link loads wardrobe page', async ({ page }) => {
-    await mockBrowseAccess(page);
+    await mockLoggedIn(page);
     await mockWardrobeApi(page);
     await mockProfileApi(page);
     // 聊天页用 SidebarLeft，无衣橱入口；从 profile 页的 AppSidebar 导航
@@ -26,7 +26,7 @@ test.describe('navigation', () => {
   });
 
   test('[ACC-N3] sidebar profile link loads profile page', async ({ page }) => {
-    await mockBrowseAccess(page);
+    await mockLoggedIn(page);
     await mockProfileApi(page);
     await mockWardrobeApi(page);
     await page.goto('/wardrobe');
@@ -36,17 +36,10 @@ test.describe('navigation', () => {
     await expect(page.getByText('E2E Tester')).toBeVisible();
   });
 
-  test('[ACC-N4] browse mode hides add clothing on wardrobe overview', async ({ page }) => {
-    await mockBrowseAccess(page);
-    await mockWardrobeApi(page);
-    await page.goto('/wardrobe');
-
-    await expect(page.getByRole('link', { name: '添加衣物' })).toBeHidden();
-    await expect(page.getByRole('button', { name: '添加衣物' })).toBeHidden();
-  });
-
-  test('[ACC-N5] verified mode shows add clothing next to batch manage, not in sidebar', async ({ page }) => {
-    await mockVerifiedAccess(page);
+  test('[ACC-N5] logged-in mode shows add clothing next to batch manage, not in sidebar', async ({
+    page,
+  }) => {
+    await mockLoggedIn(page);
     await mockWardrobeApi(page);
     await page.goto('/wardrobe');
 

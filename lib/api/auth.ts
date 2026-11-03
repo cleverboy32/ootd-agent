@@ -37,15 +37,10 @@ export async function login(username: string, password: string): Promise<AuthUse
   return data.user;
 }
 
-export async function register(
-  username: string,
-  password: string,
-  inviteCode: string
-): Promise<AuthUser> {
+export async function register(username: string, password: string): Promise<AuthUser> {
   const data = await post<{ user: AuthUser }>('/api/auth/register', {
     username,
     password,
-    inviteCode,
   });
   return data.user;
 }

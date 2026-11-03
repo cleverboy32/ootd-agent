@@ -1,6 +1,6 @@
 "use client";
 
-import { withBasePath } from "@/lib/utils";
+import { stripBasePath, withBasePath } from "@/lib/utils";
 import {
   createContext,
   useCallback,
@@ -11,84 +11,71 @@ import {
   type ReactNode,
 } from "react";
 
-export type AccessMode = "loading" | "browse" | "verified";
-
-/** access：访问码单用户模式；user：登录体系（能力由登录 session 决定，不展示访问码入口） */
-export type AuthMode = "access" | "user";
-
 interface AccessContextValue {
-  mode: AccessMode;
-  authMode: AuthMode;
-  configured: boolean;
+  /** 是否已登录（加载中为 false） */
+  ready: boolean;
+  authenticated: boolean;
   canMutate: boolean;
   canInvokeAI: boolean;
-  verify: (code: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AccessContext = createContext<AccessContextValue | null>(null);
 
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const path = stripBasePath(window.location.pathname);
+  if (path.startsWith("/login")) return;
+  const current = path + window.location.search;
+  window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
+}
+
 export function AccessProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<AccessMode>("loading");
-  const [authMode, setAuthMode] = useState<AuthMode>("access");
-  const [configured, setConfigured] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetch(withBasePath("/api/access/status"), { credentials: "same-origin" })
+    fetch(withBasePath("/api/auth/session"), { credentials: "same-origin" })
       .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load access status");
-        return response.json() as Promise<{
-          mode: "browse" | "verified";
-          configured: boolean;
-          authMode?: AuthMode;
-        }>;
+        if (!response.ok) throw new Error("Unable to load session");
+        return response.json() as Promise<{ authenticated: boolean }>;
       })
       .then((result) => {
         if (!active) return;
-        setMode(result.mode);
-        setAuthMode(result.authMode ?? "access");
-        setConfigured(result.configured);
+        setAuthenticated(Boolean(result.authenticated));
+        setReady(true);
+        if (!result.authenticated) redirectToLogin();
       })
       .catch(() => {
-        if (active) setMode("browse");
+        if (!active) return;
+        setAuthenticated(false);
+        setReady(true);
+        redirectToLogin();
       });
     return () => {
       active = false;
     };
   }, []);
 
-  const verify = useCallback(async (code: string): Promise<void> => {
-    const response = await fetch(withBasePath("/api/access/verify"), {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    if (!response.ok) throw new Error(body?.error || "验证失败");
-    setMode("verified");
-  }, []);
-
   const logout = useCallback(async (): Promise<void> => {
-    await fetch(withBasePath("/api/access/logout"), {
+    await fetch(withBasePath("/api/auth/logout"), {
       method: "POST",
       credentials: "same-origin",
     });
-    setMode("browse");
+    setAuthenticated(false);
+    redirectToLogin();
   }, []);
 
   const value = useMemo<AccessContextValue>(
     () => ({
-      mode,
-      authMode,
-      configured,
-      canMutate: mode === "verified",
-      canInvokeAI: mode === "verified",
-      verify,
+      ready,
+      authenticated,
+      canMutate: authenticated,
+      canInvokeAI: authenticated,
       logout,
     }),
-    [authMode, configured, logout, mode, verify]
+    [authenticated, logout, ready]
   );
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>;

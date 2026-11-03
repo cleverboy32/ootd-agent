@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { mockBrowseAccess } from '../helpers/mock-access';
+import { mockLoggedIn } from '../helpers/mock-session';
 import { mockProfileApi } from '../helpers/mock-apis';
 
 test.describe('profile display', () => {
   test('[ACC-P1] profile page loads mock profile data', async ({ page }) => {
-    await mockBrowseAccess(page);
+    await mockLoggedIn(page);
     await mockProfileApi(page);
     await page.goto('/profile');
 

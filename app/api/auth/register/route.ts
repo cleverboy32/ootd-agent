@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAccessCodeValid } from '@/server/auth/access';
 import { normalizeUsername, validateUsername } from '@/server/auth/credentials';
 import { hashSecret, validatePasswordStrength } from '@/server/auth/password';
 import { createSessionToken } from '@/server/auth/session';
@@ -10,7 +9,6 @@ import { logAuthEvent } from '@/server/logging/authAudit';
 interface RegisterBody {
   username?: unknown;
   password?: unknown;
-  inviteCode?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -25,14 +23,6 @@ export async function POST(req: NextRequest) {
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {
     return NextResponse.json({ error: passwordError, code: 'VALIDATION_ERROR' }, { status: 400 });
-  }
-
-  // 邀请码：REGISTRATION_MODE=open 时跳过；默认 invite，复用 ACCESS_CODE
-  const inviteRequired = (process.env.REGISTRATION_MODE?.trim() || 'invite') !== 'open';
-  const inviteCode = typeof body?.inviteCode === 'string' ? body.inviteCode : '';
-  if (inviteRequired && !isAccessCodeValid(inviteCode)) {
-    await logAuthEvent({ action: 'register', outcome: 'failure', username, reason: 'invite_invalid' });
-    return NextResponse.json({ error: '邀请码不正确', code: 'INVITE_INVALID' }, { status: 403 });
   }
 
   try {

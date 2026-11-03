@@ -29,7 +29,7 @@ export default defineConfig({
   projects: [
     {
       name: 'mock',
-      // auth/ 需要 AUTH_MODE=user 独立 server，由 playwright.auth.config.ts 运行
+      // auth/ 由 playwright.auth.config.ts 独立跑
       testIgnore: ['**/acceptance-live/**', '**/auth/**'],
       use: chromeUse,
     },

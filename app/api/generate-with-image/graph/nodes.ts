@@ -139,10 +139,9 @@ async function executeParallelAgents(
   });
 
   const imageStartedAt = Date.now();
-  const { getAuthMode } = await import('@/server/auth/mode');
   const { getCreditBalance } = await import('@/server/billing/credits');
   const { creditCostPerImage } = await import('@/server/config/credits');
-  const enforceCredits = getAuthMode() === 'user' && Boolean(runtime.userId);
+  const enforceCredits = Boolean(runtime.userId);
   let affordableSlots = stylistResult.outfits.length;
   if (enforceCredits && runtime.userId) {
     const balance = await getCreditBalance(runtime.userId);

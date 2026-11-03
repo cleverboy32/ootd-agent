@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mockVerifiedAccess } from './helpers/mock-access';
+import { mockLoggedIn } from './helpers/mock-session'
 import { mockConversationApis } from './helpers/mock-apis';
 
 const sse = (events: Array<[string, unknown]>) =>
@@ -7,7 +7,7 @@ const sse = (events: Array<[string, unknown]>) =>
 
 test.describe('chat image retry', () => {
   test('[ACC-C4] 效果图失败后点「重新生成」，重试期间展示 loading', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
     await mockConversationApis(page);
 
     let releaseRetry!: () => void;
@@ -62,7 +62,7 @@ test.describe('chat image retry', () => {
   });
 
   test('[ACC-C5] 历史消息中的失败效果图，重试期间展示 loading', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
 
     await page.route('**/api/conversations**', async (route) => {
       const pathname = new URL(route.request().url()).pathname.replace(/^\/ootd(?=\/)/, '');

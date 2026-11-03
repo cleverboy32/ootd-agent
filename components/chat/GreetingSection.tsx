@@ -57,7 +57,7 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
         />
       </div> : (
         <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-          当前可浏览历史对话。输入访问码后即可开始新的搭配咨询。
+          请先登录后再开始搭配咨询。
         </p>
       )}
     </div>

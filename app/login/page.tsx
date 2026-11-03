@@ -4,7 +4,7 @@ import { Suspense, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -127,11 +127,10 @@ function LoginFields({
   );
 }
 
-type RegisterField = 'username' | 'password' | 'confirm' | 'invite';
+type RegisterField = 'username' | 'password' | 'confirm';
 
 function mapRegisterError(message: string): Partial<Record<RegisterField, string>> {
   if (message.includes('用户名') || message.includes('已被占用')) return { username: message };
-  if (message.includes('邀请码')) return { invite: message };
   if (message.includes('密码')) return { password: message };
   return { username: message };
 }
@@ -148,7 +147,6 @@ function RegisterFields({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<RegisterField, string>>>({});
 
   function clearField(field: RegisterField) {
@@ -169,7 +167,7 @@ function RegisterFields({
     }
     onPendingChange(true);
     try {
-      await registerAccount(username, password, inviteCode);
+      await registerAccount(username, password);
       enterApp(redirect);
     } catch (err) {
       const message = err instanceof Error ? err.message : '注册失败，请稍后重试';
@@ -231,22 +229,6 @@ function RegisterFields({
           required
         />
         <FieldError message={fieldErrors.confirm} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="reg-invite" className={labelClass}>邀请码</label>
-        <Input
-          id="reg-invite"
-          className={fieldInputClass(Boolean(fieldErrors.invite))}
-          value={inviteCode}
-          onChange={(e) => {
-            setInviteCode(e.target.value);
-            clearField('invite');
-          }}
-          placeholder="内测期间需邀请码注册"
-          aria-invalid={Boolean(fieldErrors.invite)}
-          required
-        />
-        <FieldError message={fieldErrors.invite} />
       </div>
     </form>
   );
@@ -498,7 +480,7 @@ function LoginPageInner() {
     panel === 'forgot'
       ? '通过密保问题或恢复码设置新密码'
       : panel === 'register'
-        ? '内测邀请制，注册后即可同步衣橱与搭配'
+        ? null
         : '登录后同步你的衣橱、档案与搭配记录';
 
   const activeFormId =
@@ -550,9 +532,28 @@ function LoginPageInner() {
         </div>
 
         <div className="relative z-10 w-full max-w-[400px]">
-          <div className="mb-6">
+          <div className={cn('relative', panel === 'register' ? 'mb-12' : 'mb-6')}>
             <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{description}</p>
+            {description && (
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{description}</p>
+            )}
+            {panel === 'register' && (
+              <div
+                role="status"
+                className="pointer-events-none absolute left-0 top-full z-20 mt-2.5 w-max max-w-[min(100%,18rem)] rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs text-background shadow-md"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="size-3 shrink-0" aria-hidden />
+                  <p className="leading-none whitespace-nowrap">
+                    注册即赠送 <span className="font-semibold">5 积分</span>
+                  </p>
+                </div>
+                <span
+                  aria-hidden
+                  className="absolute -top-1 left-5 size-2 rotate-45 bg-[var(--gold)]"
+                />
+              </div>
+            )}
           </div>
 
           {panel === 'forgot' ? (

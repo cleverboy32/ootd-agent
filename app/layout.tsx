@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { AccessBanner } from "@/components/access/AccessBanner";
 import { AccessProvider } from "@/components/access/AccessProvider";
 import { SavedOutfitsBootstrap } from "@/components/collect/SavedOutfitsBootstrap";
 import "./globals.css";
@@ -34,7 +33,6 @@ export default function RootLayout({
         <AccessProvider>
           <SavedOutfitsBootstrap />
           {children}
-          <AccessBanner />
         </AccessProvider>
       </body>
     </html>

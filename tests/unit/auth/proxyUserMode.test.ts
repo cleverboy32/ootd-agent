@@ -2,15 +2,12 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { NextRequest } from 'next/server';
 import { proxy } from '@/proxy';
-import { getAuthMode } from '@/server/auth/mode';
 
 const originalEnv = {
-  AUTH_MODE: process.env.AUTH_MODE,
   USER_SESSION_SECRET: process.env.USER_SESSION_SECRET,
 };
 
 before(() => {
-  process.env.AUTH_MODE = 'user';
   process.env.USER_SESSION_SECRET = 'test-user-session-secret-32-chars!';
 });
 
@@ -21,19 +18,7 @@ after(() => {
   }
 });
 
-describe('getAuthMode', () => {
-  it('defaults to access and switches on AUTH_MODE=user', () => {
-    delete process.env.AUTH_MODE;
-    assert.equal(getAuthMode(), 'access');
-    process.env.AUTH_MODE = 'user';
-    assert.equal(getAuthMode(), 'user');
-    process.env.AUTH_MODE = 'anything-else';
-    assert.equal(getAuthMode(), 'access');
-    process.env.AUTH_MODE = 'user';
-  });
-});
-
-describe('proxy in user mode', () => {
+describe('proxy login gate', () => {
   it('rejects requests without a session cookie', async () => {
     const res = await proxy(new NextRequest('http://localhost/api/conversations'));
     assert.equal(res.status, 401);

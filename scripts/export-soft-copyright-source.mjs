@@ -46,7 +46,6 @@ const INCLUDE_DIRS = [
   'app/api/conversations',
   'app/api/profile',
   'app/api/upload',
-  'app/api/access',
 ];
 
 const EXT_OK = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs']);

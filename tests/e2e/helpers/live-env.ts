@@ -1,62 +1,35 @@
 import { expect, type Page } from '@playwright/test';
 
-export function requireLiveEnv(): { accessCode: string } {
-  const accessCode = process.env.ACCESS_CODE?.trim();
-  if (!accessCode) {
-    throw new Error('ACCESS_CODE is required for live UI tests');
-  }
-  if (!process.env.NEXT_PUBLIC_OWNER_CLIENT_ID?.trim()) {
-    throw new Error('NEXT_PUBLIC_OWNER_CLIENT_ID is required for live UI tests');
-  }
-  return { accessCode };
-}
+const LIVE_PASSWORD = 'abc12345';
 
-export async function isVerifiedMode(page: Page): Promise<boolean> {
-  return page.getByRole('button', { name: '退出完整模式' }).isVisible().catch(() => false);
-}
+/** 注册并登录一个临时用户（cookie 写入 page context） */
+export async function ensureLoggedIn(page: Page): Promise<{ username: string }> {
+  const username = `live${Date.now().toString(36)}`;
 
-/** 在 browse 态下通过 UI 提交真实 ACCESS_CODE */
-export async function verifyAccessViaUi(page: Page): Promise<void> {
-  const { accessCode } = requireLiveEnv();
-
-  await page.getByRole('button', { name: '输入访问码' }).click();
-  const codeInput = page.getByPlaceholder('访问码');
-  await expect(codeInput).toBeVisible();
-  await codeInput.fill(accessCode);
-
-  const verifyResponse = page.waitForResponse(
-    (resp) =>
-      resp.url().includes('/api/access/verify') && resp.request().method() === 'POST'
-  );
-  await page.getByRole('button', { name: '解锁完整功能' }).click();
-  const response = await verifyResponse;
-
-  if (!response.ok()) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(`verify API failed: ${response.status()} ${body?.error ?? ''}`.trim());
-  }
-
-  await expect(page.getByRole('button', { name: '退出完整模式' })).toBeVisible({
-    timeout: 10_000,
+  const register = await page.request.post('/api/auth/register', {
+    data: { username, password: LIVE_PASSWORD },
   });
+  if (!register.ok()) {
+    const body = (await register.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(`register failed: ${register.status()} ${body?.error ?? ''}`.trim());
+  }
+
+  const login = await page.request.post('/api/auth/login', {
+    data: { username, password: LIVE_PASSWORD },
+  });
+  if (!login.ok()) {
+    const body = (await login.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(`login failed: ${login.status()} ${body?.error ?? ''}`.trim());
+  }
+
+  return { username };
 }
 
-/** 若当前为 browse，用真实 ACCESS_CODE 解锁 */
-export async function ensureVerifiedAccess(page: Page): Promise<void> {
-  if (await isVerifiedMode(page)) return;
-
-  await expect(page.getByText('浏览模式')).toBeVisible({ timeout: 15_000 });
-  await verifyAccessViaUi(page);
+export async function logoutViaApi(page: Page): Promise<void> {
+  await page.request.post('/api/auth/logout');
 }
 
-export async function logoutIfVerified(page: Page): Promise<void> {
-  if (!(await isVerifiedMode(page))) return;
-
-  const logoutResponse = page.waitForResponse(
-    (resp) =>
-      resp.url().includes('/api/access/logout') && resp.request().method() === 'POST'
-  );
-  await page.getByRole('button', { name: '退出完整模式' }).click();
-  await logoutResponse;
-  await expect(page.getByText('浏览模式')).toBeVisible({ timeout: 10_000 });
+export async function expectLoginPage(page: Page): Promise<void> {
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.locator('#login-username')).toBeVisible({ timeout: 15_000 });
 }

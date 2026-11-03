@@ -1,14 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
- * 登录体系 API 级 e2e（AUTH_MODE=user 独立 server，见 playwright.auth.config.ts）。
+ * 登录体系 API 级 e2e（独立 server，见 playwright.auth.config.ts）。
  * 命中真实 dev DB，用户名随机后缀避免冲突。
  */
-
-const INVITE_CODE = process.env.ACCESS_CODE;
-if (!INVITE_CODE) {
-  throw new Error('ACCESS_CODE missing: e2e auth tests require it as the invite code');
-}
 
 const VALID_PASSWORD = 'abc12345';
 
@@ -19,20 +14,12 @@ function uniqueName(prefix: string): string {
 
 async function registerUser(request: APIRequestContext, username: string) {
   const res = await request.post('/api/auth/register', {
-    data: { username, password: VALID_PASSWORD, inviteCode: INVITE_CODE },
+    data: { username, password: VALID_PASSWORD },
   });
   return res;
 }
 
 test.describe('registration', () => {
-  test('rejects an invalid invite code', async ({ request }) => {
-    const res = await request.post('/api/auth/register', {
-      data: { username: uniqueName('inv'), password: VALID_PASSWORD, inviteCode: 'wrong-code' },
-    });
-    expect(res.status()).toBe(403);
-    expect((await res.json()).code).toBe('INVITE_INVALID');
-  });
-
   test('rejects duplicate usernames', async ({ request }) => {
     const username = uniqueName('dup');
     expect((await registerUser(request, username)).status()).toBe(200);

@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { mockVerifiedAccess } from '../helpers/mock-access';
+import { mockLoggedIn } from '../helpers/mock-session';
 import { mockConversationApis, mockSuccessfulChatStream } from '../helpers/mock-apis';
 
-test.describe('verified chat', () => {
-  test('[ACC-C1] verified user can send message and receive mock SSE reply', async ({ page }) => {
-    await mockVerifiedAccess(page);
+test.describe('logged-in chat', () => {
+  test('[ACC-C1] logged-in user can send message and receive mock SSE reply', async ({ page }) => {
+    await mockLoggedIn(page);
     await mockConversationApis(page);
     await mockSuccessfulChatStream(page, 'E2E mock 搭配建议');
 

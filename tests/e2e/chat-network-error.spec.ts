@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { mockVerifiedAccess } from './helpers/mock-access';
+import { mockLoggedIn } from './helpers/mock-session'
 import { mockConversationApis } from './helpers/mock-apis';
 
 test.describe('chat network error handling', () => {
   test('[ACC-C2] shows send failure below the user message and allows retry', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
     let shouldFail = true;
 
     await page.route('**/api/generate-with-image', async (route) => {
@@ -47,7 +47,7 @@ test.describe('chat network error handling', () => {
   });
 
   test('[ACC-C3] shows retry on AI message when stream errors mid-response', async ({ page }) => {
-    await mockVerifiedAccess(page);
+    await mockLoggedIn(page);
     let callCount = 0;
 
     await page.route('**/api/generate-with-image', async (route) => {

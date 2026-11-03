@@ -175,7 +175,7 @@ export function VisualAnalysisSection({ profile, onProfileUpdated }: VisualAnaly
           </div>
         ) : !canMutate ? (
           <p className="text-sm text-muted-foreground">
-            当前为浏览模式，验证访问码后可上传全身照。
+            请先登录后再上传全身照。
           </p>
         ) : status !== 'error' ? (
           <div className="flex w-full flex-col items-start gap-4 p-6 border border-dashed rounded-lg">

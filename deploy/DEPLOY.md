@@ -32,7 +32,7 @@
 ```
 
 - 浏览器只访问 Next；API 走 `/ootd/api/*`。
-- **浏览模式**：未验证访问码时只读（历史对话、衣橱）；验证后可发消息、上传、改数据。
+- **登录体系**：未登录跳转 `/login`；开放注册（用户名 + 密码）。
 
 ## 3. 前置条件
 
@@ -137,10 +137,9 @@ nginx -t && nginx -s reload
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `DATABASE_URL` | ✅ | Neon PostgreSQL 连接串 |
-| `OWNER_CLIENT_ID` | ✅ | 单用户模式的 clientId，与库里 `ClientProfile.id` 一致 |
-| `NEXT_PUBLIC_OWNER_CLIENT_ID` | ✅ | 前端路由用，与 `OWNER_CLIENT_ID` 相同 |
-| `ACCESS_CODE` | ✅ | 浏览模式解锁用的访问码 |
-| `ACCESS_SESSION_SECRET` | ✅ | ≥32 字符，用于 session cookie 签名 |
+| `USER_SESSION_SECRET` | ✅ | ≥32 字符，用户登录 session 签名 |
+| `OWNER_CLIENT_ID` |  | 运维脚本用 |
+| `NEXT_PUBLIC_OWNER_CLIENT_ID` |  | 前端 BFF 路由提示（身份以 session 为准） |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` | ✅ | 腾讯云 COS |
 | `COS_BUCKET` / `COS_REGION` | ✅ | 桶名与地域 |
 | `COS_KEY_PREFIX` |  | 对象 key 前缀，如 `shows/` |
@@ -160,10 +159,9 @@ nginx -t && nginx -s reload
 
 ```bash
 DATABASE_URL=postgresql://...
+USER_SESSION_SECRET=at-least-32-characters-long-secret
 OWNER_CLIENT_ID=your-client-uuid
 NEXT_PUBLIC_OWNER_CLIENT_ID=your-client-uuid
-ACCESS_CODE=your-access-code
-ACCESS_SESSION_SECRET=at-least-32-characters-long-secret
 
 COS_SECRET_ID=...
 COS_SECRET_KEY=...
@@ -245,17 +243,17 @@ pm2 restart ootd-agent
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
 
 curl -s -o /dev/null -w 'page:%{http_code}\n' http://127.0.0.1:3002/ootd
-curl -s http://127.0.0.1:3002/ootd/api/access/status
+curl -s http://127.0.0.1:3002/ootd/api/auth/session
 
 # 经 nginx（HTTPS）
 curl -sk -o /dev/null -w 'https:%{http_code}\n' https://www.meetu.online/ootd
-curl -sk https://www.meetu.online/ootd/api/access/status
+curl -sk https://www.meetu.online/ootd/api/auth/session
 ```
 
-浏览模式应能拉取历史数据：
+未登录 API 应返回 401：
 
 ```bash
-curl -sk -H 'X-Client-ID: <OWNER_CLIENT_ID>' \
+curl -sk -o /dev/null -w '%{http_code}\n' \
   https://www.meetu.online/ootd/api/conversations
 ```
 
@@ -286,11 +284,11 @@ pnpm 严格隔离下 Prisma 运行时依赖未提升。仓库已在 `package.jso
 
 `basePath` 部署下 `next/image` 请求 `/logo.png` 会 404/400。使用 `LOGO_SRC`（`lib/utils.ts`），不要写死 `/logo.png`。
 
-### 10.4 浏览模式没有历史对话
+### 10.4 登录后没有历史对话
 
 1. 看 `pm2 logs ootd-agent` 是否有 Prisma 报错（§10.2）。
-2. 确认 `OWNER_CLIENT_ID` 与数据库里 `ClientProfile.id` 一致。
-3. 确认 `/ootd/api/conversations` 返回 200。
+2. 确认当前用户已绑定 `clientProfileId`，且衣橱/会话归属该 profile。
+3. 确认带登录 cookie 的 `/ootd/api/conversations` 返回 200。
 
 ### 10.5 天气查不到 / 回复说「没拿到温度」
 
@@ -326,10 +324,10 @@ NODE_OPTIONS='--max-old-space-size=1536' pnpm build
 
 - `.env` 权限：`chmod 600 .env`
 - 勿将 `.env`、COS 密钥、API Key 提交到 git
-- `ACCESS_CODE` / `ACCESS_SESSION_SECRET` 定期轮换后 `pm2 restart ootd-agent`
+- `USER_SESSION_SECRET` 定期轮换后 `pm2 restart ootd-agent --update-env`
 
 ## 12. 相关文档
 
 - LLM 后端切换：`design/openai_compatible_llm.md`
-- 访问控制行为：`server/auth/access.ts`
+- 登录 session：`server/auth/session.ts`
 - E2E 验收：`design/features/2026-08-31-e2e-acceptance-test-plan.md`

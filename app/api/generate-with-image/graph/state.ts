@@ -19,7 +19,7 @@ export interface OutfitRuntime {
   ragCache: Map<string, ClothingItem>;
   initialParts: Part[];
   clientId?: string;
-  /** AUTH_MODE=user 时的登录用户；access 模式为空 */
+  /** 登录用户 id */
   userId?: string;
   conversationId?: string;
   clientIp?: string;
