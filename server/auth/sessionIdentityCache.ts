@@ -1,5 +1,5 @@
 /**
- * proxy 用的 session 身份短缓存：省掉每个 API 请求的 User 查询。
+ * session 身份短缓存：省掉每个 API / session 探针的 User 查询。
  *
  * sessionVersion 单调递增，据此保证吊销语义：
  * - token 版本 == 缓存版本 → 命中
@@ -10,9 +10,17 @@
 
 export interface SessionIdentity {
   id: string;
+  username: string;
   sessionVersion: number;
   clientProfileId: string;
+  hasSecurityQuestions: boolean;
 }
+
+export type SessionIdentityResolveResult = {
+  identity: SessionIdentity | null;
+  /** true = 未打库（命中或凭缓存拒绝旧 token） */
+  cacheHit: boolean;
+};
 
 interface CacheOptions {
   ttlMs: number;
@@ -22,7 +30,7 @@ interface CacheOptions {
 }
 
 export interface SessionIdentityCache {
-  resolve: (userId: string, sessionVersion: number) => Promise<SessionIdentity | null>;
+  resolve: (userId: string, sessionVersion: number) => Promise<SessionIdentityResolveResult>;
 }
 
 export function createSessionIdentityCache({
@@ -37,20 +45,29 @@ export function createSessionIdentityCache({
     async resolve(userId, sessionVersion) {
       const cached = entries.get(userId);
       if (cached && cached.expiresAt > now()) {
-        if (cached.identity.sessionVersion === sessionVersion) return cached.identity;
-        if (cached.identity.sessionVersion > sessionVersion) return null;
+        if (cached.identity.sessionVersion === sessionVersion) {
+          return { identity: cached.identity, cacheHit: true };
+        }
+        if (cached.identity.sessionVersion > sessionVersion) {
+          return { identity: null, cacheHit: true };
+        }
       }
 
       const identity = await load(userId);
       entries.delete(userId);
-      if (!identity) return null;
+      if (!identity) {
+        return { identity: null, cacheHit: false };
+      }
 
       entries.set(userId, { identity, expiresAt: now() + ttlMs });
       if (entries.size > maxEntries) {
         const oldest = entries.keys().next().value;
         if (oldest !== undefined) entries.delete(oldest);
       }
-      return identity.sessionVersion === sessionVersion ? identity : null;
+      return {
+        identity: identity.sessionVersion === sessionVersion ? identity : null,
+        cacheHit: false,
+      };
     },
   };
 }

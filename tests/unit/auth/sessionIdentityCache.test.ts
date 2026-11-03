@@ -28,13 +28,23 @@ function setup(initial: Record<string, SessionIdentity>, ttlMs = 30_000, maxEntr
   };
 }
 
-const alice: SessionIdentity = { id: 'u1', sessionVersion: 0, clientProfileId: 'p1' };
+const alice: SessionIdentity = {
+  id: 'u1',
+  username: 'alice',
+  sessionVersion: 0,
+  clientProfileId: 'p1',
+  hasSecurityQuestions: false,
+};
 
 describe('createSessionIdentityCache', () => {
   it('serves repeated lookups from cache within the TTL', async () => {
     const t = setup({ u1: alice });
-    assert.deepEqual(await t.cache.resolve('u1', 0), alice);
-    assert.deepEqual(await t.cache.resolve('u1', 0), alice);
+    const first = await t.cache.resolve('u1', 0);
+    assert.equal(first.cacheHit, false);
+    assert.deepEqual(first.identity, alice);
+    const second = await t.cache.resolve('u1', 0);
+    assert.equal(second.cacheHit, true);
+    assert.deepEqual(second.identity, alice);
     assert.equal(t.loads(), 1);
   });
 
@@ -42,7 +52,8 @@ describe('createSessionIdentityCache', () => {
     const t = setup({ u1: alice });
     await t.cache.resolve('u1', 0);
     t.advance(30_001);
-    await t.cache.resolve('u1', 0);
+    const again = await t.cache.resolve('u1', 0);
+    assert.equal(again.cacheHit, false);
     assert.equal(t.loads(), 2);
   });
 
@@ -50,7 +61,9 @@ describe('createSessionIdentityCache', () => {
     const t = setup({ u1: alice });
     await t.cache.resolve('u1', 0);
     t.db.set('u1', { ...alice, sessionVersion: 1 });
-    assert.equal((await t.cache.resolve('u1', 1))?.sessionVersion, 1);
+    const next = await t.cache.resolve('u1', 1);
+    assert.equal(next.identity?.sessionVersion, 1);
+    assert.equal(next.cacheHit, false);
     assert.equal(t.loads(), 2);
   });
 
@@ -59,7 +72,9 @@ describe('createSessionIdentityCache', () => {
     await t.cache.resolve('u1', 0);
     t.db.set('u1', { ...alice, sessionVersion: 1 });
     await t.cache.resolve('u1', 1);
-    assert.equal(await t.cache.resolve('u1', 0), null);
+    const stale = await t.cache.resolve('u1', 0);
+    assert.equal(stale.identity, null);
+    assert.equal(stale.cacheHit, true);
     assert.equal(t.loads(), 2);
   });
 
@@ -67,15 +82,16 @@ describe('createSessionIdentityCache', () => {
     const t = setup({ u1: alice });
     await t.cache.resolve('u1', 0);
     t.db.set('u1', { ...alice, sessionVersion: 1 });
-    assert.deepEqual(await t.cache.resolve('u1', 0), alice);
+    // TTL 内旧 token 仍可能命中旧缓存版本（与既有语义一致）
+    assert.deepEqual((await t.cache.resolve('u1', 0)).identity, alice);
     t.advance(30_001);
-    assert.equal(await t.cache.resolve('u1', 0), null);
+    assert.equal((await t.cache.resolve('u1', 0)).identity, null);
   });
 
   it('returns null for unknown users and does not cache the miss', async () => {
     const t = setup({});
-    assert.equal(await t.cache.resolve('ghost', 0), null);
-    assert.equal(await t.cache.resolve('ghost', 0), null);
+    assert.equal((await t.cache.resolve('ghost', 0)).identity, null);
+    assert.equal((await t.cache.resolve('ghost', 0)).identity, null);
     assert.equal(t.loads(), 2);
   });
 
@@ -83,8 +99,20 @@ describe('createSessionIdentityCache', () => {
     const t = setup(
       {
         u1: alice,
-        u2: { id: 'u2', sessionVersion: 0, clientProfileId: 'p2' },
-        u3: { id: 'u3', sessionVersion: 0, clientProfileId: 'p3' },
+        u2: {
+          id: 'u2',
+          username: 'bob',
+          sessionVersion: 0,
+          clientProfileId: 'p2',
+          hasSecurityQuestions: false,
+        },
+        u3: {
+          id: 'u3',
+          username: 'carol',
+          sessionVersion: 0,
+          clientProfileId: 'p3',
+          hasSecurityQuestions: true,
+        },
       },
       30_000,
       2
