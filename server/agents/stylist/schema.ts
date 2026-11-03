@@ -178,7 +178,8 @@ export const outfitPlanSearchSchema: Schema = {
           },
           overall_concept: {
             type: Type.STRING,
-            description: '本套设计核心概念（中文）。',
+            description:
+              '本套设计核心概念（中文）。有风格技能合法分支时须点名，如「形制=长身交领袍」或「路径=短款裤装」，并简述气质。',
           },
           slots: {
             type: Type.ARRAY,

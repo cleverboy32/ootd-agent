@@ -53,6 +53,8 @@ import { applyWeatherQueryGuard } from './weatherQueryGuard';
 import {
   buildNewItemDiversityBlock,
   collectRecentNewItemLabels,
+  collectRecentOutfitFingerprints,
+  collectRecentWardrobeIds,
 } from './newItemDiversity';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { stripHistoryImages } from '../gatekeeper/textInput';
@@ -174,7 +176,8 @@ export async function planOutfitsAndQueries(
   signal?: AbortSignal,
   purchaseAnchors: AnchorItemInfo[] = [],
   skillNames: string[] = [],
-  audit?: WardrobeSearchAuditContext
+  audit?: WardrobeSearchAuditContext,
+  diversityBlock = ''
 ): Promise<OutfitPlanAndQueries> {
   console.log('[STYLIST_AGENT] Planning outfits + wardrobe search queries...');
 
@@ -244,7 +247,7 @@ ${
 ${skillBlock}${pairingBlock}${revisionBlock}
 【用户当前消息】
 ${userMessage || '（无文字，请根据对话历史推断）'}
-
+${diversityBlock}
 【策略提示】
 ${strategyHint}
 
@@ -544,14 +547,22 @@ export async function callStylistAgent(
     previousCache?.stylist_result.outfits,
     options.priorStylistResults
   );
+  const recentFingerprints = collectRecentOutfitFingerprints(
+    previousCache?.stylist_result.outfits,
+    options.priorStylistResults
+  );
+  const recentWardrobeIds = collectRecentWardrobeIds(
+    previousCache?.stylist_result.outfits,
+    options.priorStylistResults
+  );
   const newItemDiversityBlock = buildNewItemDiversityBlock(
     intent.request_type,
-    recentNewItemLabels
+    recentNewItemLabels,
+    { fingerprints: recentFingerprints, wardrobeIds: recentWardrobeIds }
   );
   if (newItemDiversityBlock) {
     console.log(
-      `[STYLIST_AGENT] new_item diversity blacklist (${recentNewItemLabels.length}):`,
-      recentNewItemLabels.join(' | ')
+      `[STYLIST_AGENT] diversity fingerprints=${recentFingerprints.length} new_items=${recentNewItemLabels.length} wardrobe=${recentWardrobeIds.length}`
     );
   }
 
@@ -580,7 +591,8 @@ export async function callStylistAgent(
         options.signal,
         purchaseAnchors,
         skillNames,
-        { conversationId, messageId: options.messageId }
+        { conversationId, messageId: options.messageId },
+        newItemDiversityBlock
       );
       outfitPlan = planned.plan;
       const searchResults = await performRagSearch(planned.queries, clientId, ragCache, {

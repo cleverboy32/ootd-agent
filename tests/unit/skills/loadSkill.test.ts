@@ -82,7 +82,18 @@ describe('extractRetrievalSection', () => {
     const section = extractRetrievalSection(loadSkill('style-korean'));
     assert.ok(section.length > 0);
     assert.ok(section.length < loadSkill('style-korean').length);
-    assert.match(section, /短|高腰|检索|上|下|鞋/);
+    assert.match(section, /韩系|路径|高腰|检索|Query/);
+  });
+
+  it('style-history menu 改写含形制分支与检索节', () => {
+    const body = loadSkill('style-history');
+    assert.match(body, /形制分支|合法集合/);
+    assert.match(body, /短打劲装/);
+    assert.match(body, /长身交领袍/);
+    const section = extractRetrievalSection(body);
+    assert.ok(section.length > 0);
+    assert.ok(section.length < body.length);
+    assert.match(section, /正统汉服|考据汉服|形制分支/);
   });
 });
 
