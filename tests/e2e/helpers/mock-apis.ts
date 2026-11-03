@@ -38,7 +38,13 @@ export async function mockWardrobeApi(page: Page): Promise<void> {
 }
 
 export async function mockProfileApi(page: Page): Promise<void> {
-  await page.route('**/api/clients/**', async (route: Route) => {
+  await page.route('**/api/profile**', async (route: Route) => {
+    const url = route.request().url();
+    // 勿拦截 /api/profile/visual-analysis
+    if (url.includes('/api/profile/visual-analysis')) {
+      await route.continue();
+      return;
+    }
     const req = route.request();
     if (req.method() === 'GET') {
       await route.fulfill({

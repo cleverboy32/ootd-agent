@@ -1,6 +1,5 @@
-import { getClientId } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
-import { fetchSession } from '@/lib/api/auth';
+import { useSessionStore } from '@/store/session';
 import { normalizeVisualFeaturesForZh } from '@/lib/hairColorDisplay';
 
 export interface ProfileData {
@@ -24,7 +23,7 @@ export interface ProfileData {
   selfie_analyzed_at?: string;
 }
 
-interface ClientProfileResponse {
+interface ProfileResponse {
   id: string;
   profileData: Partial<ProfileData>;
 }
@@ -65,20 +64,25 @@ function normalizeProfileData(raw: Partial<ProfileData> | undefined): ProfileDat
   };
 }
 
-/** 浏览器按完整 URL 缓存。路径里的 owner id 对所有账号相同，用户 id 放在查询参数里分开缓存。服务端不读这个参数，身份仍以 session 为准。 */
-export function profileRequestPath(ownerClientId: string, userId: string | null): string {
-  const base = `/api/clients/${ownerClientId}`;
-  if (!userId) return base;
-  return `${base}?u=${encodeURIComponent(userId)}`;
+/**
+ * 浏览器按完整 URL 缓存；按 userId 区分不同账号的 force-cache。
+ * 服务端身份只认 session，不读查询参数。
+ */
+export function profileRequestPath(userId: string | null): string {
+  if (!userId) return '/api/profile';
+  return `/api/profile?u=${encodeURIComponent(userId)}`;
 }
 
 /** 档案 GET：走 getCached（服务端需 Cache-Control）；写后 bust:true */
 export async function fetchProfile(options?: { bust?: boolean }): Promise<ProfileData> {
-  const session = await fetchSession().catch(() => null);
+  const store = useSessionStore.getState();
+  const session = store.ready
+    ? { authenticated: store.authenticated, user: store.user }
+    : await store.ensureSession().catch(() => null);
   const userId = session?.authenticated && session.user ? session.user.id : null;
-  const res = (await apiClient.getCached(profileRequestPath(getClientId(), userId), {
+  const res = (await apiClient.getCached(profileRequestPath(userId), {
     bust: options?.bust,
-  })) as ClientProfileResponse;
+  })) as ProfileResponse;
   return normalizeProfileData(res.profileData);
 }
 
