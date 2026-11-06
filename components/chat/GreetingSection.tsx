@@ -25,7 +25,7 @@ export function GreetingSection({ handleSend }: GreetingSectionProps) {
   }
 
   return (
-    <div className="max-w-4xl mx-auto pt-16 px-6 sm:px-12">
+    <div className="max-w-4xl mx-auto pt-4 px-6 sm:px-12">
       <div className="flex flex-col items-start mb-12">
         <div className="mb-6">
           <Image src={LOGO_SRC} alt="Fashion AI Logo" width={56} height={56} className="rounded-full" />

@@ -2,14 +2,11 @@
 import { Suspense, useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SidebarLeft } from "@/components/chat/SidebarLeft";
-import { SidebarRight } from "@/components/chat/SidebarRight";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatMessagesList } from "@/components/chat/ChatMessagesList";
 import { GreetingSection } from "@/components/chat/GreetingSection";
 import { ChatInputArea } from "@/components/chat/ChatInputArea";
 import { useAccess } from "@/components/access/AccessProvider";
-import { Button } from "@/components/ui/button";
-import { HelpCircle } from "lucide-react";
 import { useChatStore } from "@/store/chat";
 import type { Message } from "@/lib/types";
 import { useChatHandler } from "@/hooks/useChatHandler";
@@ -302,16 +299,6 @@ function FashionAIPageInner() {
         />
       </main>
 
-      {authenticated && <SidebarRight />}
-
-      {/* Floating Help Button */}
-      {authenticated && (
-        <div className="fixed bottom-6 right-6 z-30 lg:hidden">
-          <Button variant="outline" size="icon" className="h-12 w-12 rounded-full border-border shadow-lg bg-background hover:bg-accent text-muted-foreground">
-            <HelpCircle className="h-6 w-6" />
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
