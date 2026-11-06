@@ -47,6 +47,7 @@ const WARDROBE_PAIRING_INTENT = normalizeGatekeeperIntent({
 function buildMockRagCache(): Map<string, ClothingItem> {
   const base = {
     userId: 'test-user',
+    status: 'completed' as const,
     season: ['spring', 'summer'] as string[],
     material: ['cotton'] as string[],
     tags: ['casual', 'minimalist'] as string[],

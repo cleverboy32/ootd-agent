@@ -356,6 +356,7 @@ export async function performRagSearch(
     const clothingItems: ClothingItem[] = mergedResults.map((result) => ({
       ...result,
       userId,
+      status: 'completed' as const,
       season: result.season ?? [],
       material: result.material ?? [],
       tags: result.tags ?? [],

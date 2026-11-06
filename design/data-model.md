@@ -213,7 +213,9 @@ CreditRedeemCode、UsageMessageRollup 不挂外键关系
 | `userId` | 指向 `User`。删用户时级联删衣物 |
 | `createdAt` / `updatedAt` | |
 
-索引：`@@index([userId])` 拉某人衣橱。两列向量没有 Prisma `@@index`；相似度检索若用了 ivfflat / hnsw，是在迁移或 SQL 里另建的，不在这份 schema 里。
+`status`：`analyzing` 正在分析，`completed` 分析已写入，`failed` 失败后可再传这张图重试。列表和检索只看 `completed`。重新分析已有单品时先把状态改成 `analyzing`，分析中的第二次请求直接拒绝；失败且原先已完成时改回 `completed`。
+
+索引：`@@unique([userId, imageUrl])`，同一用户同一张图只有一条。`@@index([userId])` 拉某人衣橱。两列向量没有 Prisma `@@index`；相似度检索若用了 ivfflat / hnsw，是在迁移或 SQL 里另建的，不在这份 schema 里。
 
 ### ClothingMainCategory
 

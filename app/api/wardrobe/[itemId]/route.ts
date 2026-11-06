@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import { reanalyzeWardrobeItem } from '@/server/services/analyzeWardrobeItem';
-import { deleteWardrobeItems, getWardrobeItemDetails } from '@/server/services/wardrobeService';
+import {
+  deleteWardrobeItems,
+  getWardrobeItemDetails,
+  WardrobeAnalysisInProgressError,
+} from '@/server/services/wardrobeService';
 
 export async function GET(
   req: Request,
@@ -73,6 +77,9 @@ export async function POST(
     const item = await reanalyzeWardrobeItem(itemId);
     return NextResponse.json(item, { status: 200 });
   } catch (error) {
+    if (error instanceof WardrobeAnalysisInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error(`[API-ERROR] Failed to reanalyze wardrobe item ${itemId}:`, error);
     return NextResponse.json({ error: '重新分析失败，原描述未改' }, { status: 502 });
   }

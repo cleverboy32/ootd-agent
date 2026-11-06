@@ -429,7 +429,7 @@ export async function loadProfileNode(
   if (anchorWardrobeId && runtime.userId) {
     try {
       const anchorItem = await prismadb.clothingItem.findFirst({
-        where: { id: anchorWardrobeId, userId: runtime.userId },
+        where: { id: anchorWardrobeId, userId: runtime.userId, status: 'completed' },
       });
       if (anchorItem) runtime.ragCache.set(anchorItem.id, anchorItem);
     } catch (e) {

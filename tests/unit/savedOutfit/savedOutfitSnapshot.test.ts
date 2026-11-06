@@ -20,6 +20,7 @@ function wardrobeItem(partial: Pick<ClothingItem, 'id' | 'imageUrl'>): ClothingI
     formality: null,
     silhouette: [],
     userId: 'client-1',
+    status: 'completed' as const,
     tempMin: null,
     tempMax: null,
     createdAt: new Date(),

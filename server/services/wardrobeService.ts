@@ -19,7 +19,7 @@ import {
   getTextSimilarityThresholds,
 } from './embedding';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
-import { ClothingMainCategory } from '@prisma/client';
+import { ClothingMainCategory, type ClothingItem, type ClothingItemStatus, type Prisma } from '@prisma/client';
 
 export interface WardrobeSearchEmbeddingContext extends WardrobeQueryEmbeddingContext {
   /** 脚本对比用：跳过 query 文本格式化，使用原始 query 生成向量 */
@@ -118,6 +118,7 @@ export async function searchWardrobeItemsByText(
               "ClothingItem"
             WHERE
               "userId" = ${userId}
+              AND "status" = 'completed'
               AND "textEmbedding" IS NOT NULL
               AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
               AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
@@ -145,7 +146,8 @@ export async function searchWardrobeItemsByText(
                 "ClothingItem"
               WHERE
                 "userId" = ${userId}
-                AND "textEmbedding" IS NOT NULL
+                AND "status" = 'completed'
+              AND "textEmbedding" IS NOT NULL
                 AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
               ORDER BY
                 "textEmbedding" <=> ${vectorQueryString}::vector
@@ -170,7 +172,8 @@ export async function searchWardrobeItemsByText(
                   "ClothingItem"
                 WHERE
                   "userId" = ${userId}
-                  AND "textEmbedding" IS NOT NULL
+                  AND "status" = 'completed'
+              AND "textEmbedding" IS NOT NULL
                   AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
                   AND ("tempMax" IS NULL OR "tempMax" >= ${temperatureCelsius})
                 ORDER BY
@@ -194,7 +197,9 @@ export async function searchWardrobeItemsByText(
                 FROM
                   "ClothingItem"
                 WHERE
-                  "userId" = ${userId} AND "textEmbedding" IS NOT NULL
+                  "userId" = ${userId}
+                  AND "status" = 'completed'
+                  AND "textEmbedding" IS NOT NULL
                 ORDER BY
                   "textEmbedding" <=> ${vectorQueryString}::vector
                 LIMIT ${limit};
@@ -257,6 +262,147 @@ export async function findWardrobeItemByImageUrl(userId: string, imageUrl: strin
   return prismadb.clothingItem.findFirst({
     where: { userId: userId, imageUrl },
     orderBy: { createdAt: 'desc' },
+  });
+}
+
+const ANALYZING_STALE_MS = 2 * 60 * 1000;
+
+export type WardrobeUploadClaim =
+  | { action: 'completed'; item: ClothingItem }
+  | { action: 'wait'; item: ClothingItem }
+  | { action: 'analyze'; item: ClothingItem };
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
+  );
+}
+
+function isFreshAnalyzing(item: ClothingItem): boolean {
+  return item.status === 'analyzing' && Date.now() - item.updatedAt.getTime() < ANALYZING_STALE_MS;
+}
+
+/** 同一张图只占一行。completed 直接复用；failed 或卡住的 analyzing 由本次请求接手。 */
+export async function claimWardrobeUpload(userId: string, imageUrl: string): Promise<WardrobeUploadClaim> {
+  let item = await findWardrobeItemByImageUrl(userId, imageUrl);
+  if (!item) {
+    try {
+      item = await prismadb.clothingItem.create({
+        data: {
+          userId,
+          imageUrl,
+          mainCategory: 'TOP',
+          subCategory: 'pending',
+          colors: [],
+          tags: [],
+          status: 'analyzing',
+        },
+      });
+      return { action: 'analyze', item };
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      item = await findWardrobeItemByImageUrl(userId, imageUrl);
+      if (!item) throw error;
+    }
+  }
+
+  if (item.status === 'completed') return { action: 'completed', item };
+  if (isFreshAnalyzing(item)) return { action: 'wait', item };
+
+  const claimed = await prismadb.$executeRaw`
+    UPDATE "ClothingItem"
+    SET "status" = 'analyzing'::"ClothingItemStatus", "updatedAt" = NOW()
+    WHERE "id" = ${item.id}
+      AND (
+        "status" = 'failed'::"ClothingItemStatus"
+        OR (
+          "status" = 'analyzing'::"ClothingItemStatus"
+          AND "updatedAt" < NOW() - INTERVAL '2 minutes'
+        )
+      )
+  `;
+  if (Number(claimed) !== 1) {
+    const latest = await findWardrobeItemByImageUrl(userId, imageUrl);
+    if (latest?.status === 'completed') return { action: 'completed', item: latest };
+    return { action: 'wait', item: latest ?? item };
+  }
+
+  const owned = await prismadb.clothingItem.findUnique({ where: { id: item.id } });
+  return { action: 'analyze', item: owned ?? item };
+}
+
+export async function completeWardrobeAnalysis(
+  itemId: string,
+  data: Prisma.ClothingItemUpdateInput
+): Promise<ClothingItem> {
+  return prismadb.clothingItem.update({
+    where: { id: itemId },
+    data: { ...data, status: 'completed' },
+  });
+}
+
+export async function failWardrobeAnalysis(itemId: string): Promise<void> {
+  await prismadb.clothingItem.updateMany({
+    where: { id: itemId, status: 'analyzing' },
+    data: { status: 'failed' },
+  });
+}
+
+export class WardrobeAnalysisInProgressError extends Error {
+  readonly code = 'ANALYZING';
+
+  constructor() {
+    super('这件衣物正在分析，请稍后重试');
+  }
+}
+
+export type WardrobeItemAnalysisClaim = {
+  item: ClothingItem;
+  previousStatus: ClothingItemStatus;
+};
+
+/** 重新分析已有单品。新鲜的 analyzing 不接手，避免同一次点击打两次模型。 */
+export async function claimWardrobeItemAnalysis(itemId: string): Promise<WardrobeItemAnalysisClaim> {
+  const item = await prismadb.clothingItem.findUnique({ where: { id: itemId } });
+  if (!item) {
+    throw new Error('Item not found');
+  }
+  if (isFreshAnalyzing(item)) {
+    throw new WardrobeAnalysisInProgressError();
+  }
+
+  const claimed = await prismadb.$executeRaw`
+    UPDATE "ClothingItem"
+    SET "status" = 'analyzing'::"ClothingItemStatus", "updatedAt" = NOW()
+    WHERE "id" = ${item.id}
+      AND (
+        "status" = 'completed'::"ClothingItemStatus"
+        OR "status" = 'failed'::"ClothingItemStatus"
+        OR (
+          "status" = 'analyzing'::"ClothingItemStatus"
+          AND "updatedAt" < NOW() - INTERVAL '2 minutes'
+        )
+      )
+  `;
+  if (Number(claimed) !== 1) {
+    throw new WardrobeAnalysisInProgressError();
+  }
+
+  const owned = await prismadb.clothingItem.findUnique({ where: { id: item.id } });
+  return { item: owned ?? item, previousStatus: item.status };
+}
+
+/** 重新分析失败时，已完成的单品恢复 completed，避免从列表消失。 */
+export async function releaseWardrobeItemAnalysis(
+  itemId: string,
+  previousStatus: ClothingItemStatus
+): Promise<void> {
+  await prismadb.clothingItem.updateMany({
+    where: { id: itemId, status: 'analyzing' },
+    data: { status: previousStatus === 'completed' ? 'completed' : 'failed' },
   });
 }
 

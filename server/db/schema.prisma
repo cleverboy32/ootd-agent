@@ -171,6 +171,12 @@ model Summary {
 
 // --- [新增] --- 橱窗功能模型
 // 1. 定义衣物主类别枚举
+enum ClothingItemStatus {
+  analyzing
+  completed
+  failed
+}
+
 enum ClothingMainCategory {
   TOP       // 上装
   BOTTOM    // 下装
@@ -208,9 +214,13 @@ model ClothingItem {
   updatedAt             DateTime             @updatedAt
 
 
+  /// analyzing：正在分析；completed：分析已写入；failed：失败，可再次上传重试
+  status          ClothingItemStatus @default(completed)
+
   userId          String
   user            User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, imageUrl])
   @@index([userId])
 }
 

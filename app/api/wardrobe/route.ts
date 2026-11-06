@@ -6,10 +6,12 @@ import {
   wardrobeAnalysisUpdateData,
 } from '@/server/services/analyzeWardrobeItem';
 import {
+  claimWardrobeUpload,
   clothingItemHasTextEmbedding,
   clothingItemHasVisualEmbedding,
+  completeWardrobeAnalysis,
   deleteWardrobeItems,
-  findWardrobeItemByImageUrl,
+  failWardrobeAnalysis,
   persistTextEmbedding,
   persistVisualEmbedding,
 } from '@/server/services/wardrobeService';
@@ -26,7 +28,7 @@ export async function GET(req: Request) {
     console.log(`[API /api/wardrobe] GET request for userId: ${userId}`);
 
     const clothingItems = await prismadb.clothingItem.findMany({
-      where: { userId },
+      where: { userId, status: 'completed' },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -99,37 +101,40 @@ export async function POST(req: Request) {
 
     console.log(`[API /api/wardrobe] Received request for userId: ${userId}, imageUrl: ${imageUrl}`);
 
-    let item = await findWardrobeItemByImageUrl(userId, imageUrl);
+    const claim = await claimWardrobeUpload(userId, imageUrl);
+    if (claim.action === 'wait') {
+      return NextResponse.json({ error: '这张图片正在分析，请稍后重试' }, { status: 409 });
+    }
+
+    let item = claim.item;
     const steps: WardrobeStepStatus = {
-      analysis: item ? 'skipped' : 'pending',
+      analysis: claim.action === 'completed' ? 'skipped' : 'pending',
       textEmbedding: 'pending',
       visualEmbedding: 'pending',
     };
     timer.mark('lookup_existing');
 
-    if (!item) {
+    if (claim.action === 'analyze') {
       console.log('[API /api/wardrobe] Calling LLM for analysis...', {
         model: AGENT_MODELS.wardrobeAnalysis,
       });
-      let analysis;
       try {
-        analysis = await analyzeWardrobeImage(imageUrl);
+        const analysis = await analyzeWardrobeImage(imageUrl);
+        item = await completeWardrobeAnalysis(item.id, wardrobeAnalysisUpdateData(analysis));
+        steps.analysis = 'done';
+        timer.mark('llm_analysis');
+        timer.mark('db_write');
       } catch (error) {
         console.error('[API /api/wardrobe] Analysis failed:', error);
+        await failWardrobeAnalysis(item.id);
+        if (is429Error(error)) {
+          return NextResponse.json(
+            { error: 'AI 服务请求过于频繁，请稍后再试', code: 'RATE_LIMIT', steps: { ...steps, analysis: 'failed' } },
+            { status: 429 }
+          );
+        }
         return failStep(timer, steps, 'analysis', 'AI 分析结果异常，请重试', 502);
       }
-      timer.mark('llm_analysis');
-
-      console.log('[API /api/wardrobe] Storing new clothing item to database...');
-      item = await prismadb.clothingItem.create({
-        data: {
-          userId,
-          imageUrl,
-          ...wardrobeAnalysisUpdateData(analysis),
-        },
-      });
-      steps.analysis = 'done';
-      timer.mark('db_write');
     }
 
     if (await clothingItemHasTextEmbedding(item.id)) {

@@ -1,9 +1,14 @@
-import prismadb from '@/server/db';
 import { llmGenerate } from '@/server/services/llm/client';
 import { extractJsonText } from '@/server/services/llm/convert';
 import { AGENT_MODELS } from '@/server/config/models';
 import { urlToGenerativePart } from '@/server/utils/image';
-import { persistTextEmbedding, persistVisualEmbedding } from '@/server/services/wardrobeService';
+import {
+  claimWardrobeItemAnalysis,
+  completeWardrobeAnalysis,
+  persistTextEmbedding,
+  persistVisualEmbedding,
+  releaseWardrobeItemAnalysis,
+} from '@/server/services/wardrobeService';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import {
   normalizeWardrobeAnalysis,
@@ -56,17 +61,15 @@ export function wardrobeAnalysisUpdateData(analysis: NormalizedWardrobeAnalysis)
 
 /** 用原图重分析已有单品，并重建文本向量和图片向量。 */
 export async function reanalyzeWardrobeItem(itemId: string) {
-  const existing = await prismadb.clothingItem.findUnique({ where: { id: itemId } });
-  if (!existing) {
-    throw new Error('Item not found');
+  const claim = await claimWardrobeItemAnalysis(itemId);
+  try {
+    const analysis = await analyzeWardrobeImage(claim.item.imageUrl);
+    const item = await completeWardrobeAnalysis(itemId, wardrobeAnalysisUpdateData(analysis));
+    await persistTextEmbedding(itemId);
+    await persistVisualEmbedding(itemId);
+    return item;
+  } catch (error) {
+    await releaseWardrobeItemAnalysis(itemId, claim.previousStatus);
+    throw error;
   }
-
-  const analysis = await analyzeWardrobeImage(existing.imageUrl);
-  const item = await prismadb.clothingItem.update({
-    where: { id: itemId },
-    data: wardrobeAnalysisUpdateData(analysis),
-  });
-  await persistTextEmbedding(itemId);
-  await persistVisualEmbedding(itemId);
-  return item;
 }
