@@ -58,7 +58,16 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         if (!active) return;
-        redirectUnlessGuestAllowed();
+        // 查库瞬态失败：再试一次；仍失败则只对非访客页跳登录，不伪造首页未登录
+        void ensureSession({ bust: true })
+          .then((snapshot) => {
+            if (!active) return;
+            if (!snapshot.authenticated) redirectUnlessGuestAllowed();
+          })
+          .catch(() => {
+            if (!active) return;
+            redirectUnlessGuestAllowed();
+          });
       });
     return () => {
       active = false;

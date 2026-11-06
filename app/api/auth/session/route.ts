@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME, verifySessionToken } from '@/server/auth/session';
 import { sessionIdentityStore } from '@/server/auth/sessionIdentityStore';
 
-/** 登录态探针：永不 401，前端据此决定是否跳登录页 */
+/** 登录态探针：token 无效才返回 authenticated:false；查库失败用 503，避免误判退出 */
 export async function GET(req: NextRequest) {
   const totalStart = Date.now();
 
@@ -71,11 +71,17 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[AUTH_SESSION] identity lookup failed:', error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error && 'type' in error
+          ? `ErrorEvent:${String((error as { type?: string }).type)}`
+          : String(error);
+    console.error('[AUTH_SESSION] identity lookup failed:', message, error);
     console.log(
       '[AUTH_SESSION_TIMING]',
       JSON.stringify({
-        authenticated: false,
+        authenticated: null,
         reason: 'lookup_error',
         verifyMs,
         lookupMs: Date.now() - lookupStart,
@@ -83,6 +89,9 @@ export async function GET(req: NextRequest) {
         totalMs: Date.now() - totalStart,
       })
     );
-    return NextResponse.json({ authenticated: false });
+    return NextResponse.json(
+      { error: '登录态校验暂时失败', code: 'SESSION_LOOKUP_FAILED' },
+      { status: 503 }
+    );
   }
 }

@@ -22,11 +22,16 @@ type SessionStore = SessionSnapshot & {
 /** 并发 ensureSession 共用同一飞行中请求 */
 let inflight: Promise<SessionSnapshot> | null = null;
 
-async function loadSessionFromNetwork(): Promise<SessionSnapshot> {
+async function loadSessionFromNetwork(attempt = 0): Promise<SessionSnapshot> {
   const res = await fetch(withBasePath('/api/auth/session'), {
     credentials: 'same-origin',
     cache: 'no-store',
   });
+  // Neon 瞬态失败：503 重试一次，勿当成未登录
+  if (res.status === 503 && attempt < 1) {
+    await new Promise((r) => setTimeout(r, 400));
+    return loadSessionFromNetwork(attempt + 1);
+  }
   if (!res.ok) {
     throw new Error(`session ${res.status}`);
   }
@@ -62,7 +67,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         return snapshot;
       })
       .catch((error) => {
-        set({ ready: true, authenticated: false, user: undefined });
+        // 瞬态失败不伪造「未登录」，避免 cookie 仍有效时被踢成访客
         throw error;
       })
       .finally(() => {
