@@ -11,9 +11,9 @@ import {
 } from '@/server/utils/userProfileVisual';
 import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { mergeChatProfileForPersistence } from '@/server/utils/profileMetadata';
+import { updateUserProfileData } from '@/server/utils/profileWrite';
 import { extractConfirmedWardrobeId, type GatekeeperIntent } from '../intent';
 import prismadb from 'server/db';
-import { Prisma } from '@prisma/client';
 import { userProfileSchema, UserProfileResult, UserProfileAuditContext } from './schema';
 import { USER_PROFILE_SYSTEM_INSTRUCTION } from './prompts';
 
@@ -138,9 +138,9 @@ export function profileFromDbRecord(dbProfile: Record<string, unknown>): UserPro
 }
 
 /** 跳过 LLM 时直接从 DB 加载档案（仍剥离未验证外形） */
-export async function loadUserProfileFromDb(clientId: string): Promise<UserProfileResult> {
-  const client = await prismadb.clientProfile.findUnique({ where: { id: clientId } });
-  const dbProfile = (client?.profileData as Record<string, unknown>) || {};
+export async function loadUserProfileFromDb(userId: string): Promise<UserProfileResult> {
+  const user = await prismadb.user.findUnique({ where: { id: userId }, select: { profileData: true } });
+  const dbProfile = (user?.profileData as Record<string, unknown>) || {};
   return profileFromDbRecord(dbProfile);
 }
 
@@ -166,16 +166,16 @@ export function buildUserProfileFallback(): UserProfileResult {
 export async function callUserProfileAgent(
   history: Content[],
   currentInput: Part[],
-  clientId?: string,
+  userId?: string,
   auditContext?: UserProfileAuditContext
 ): Promise<UserProfileResult> {
   console.log('[USER_PROFILE_AGENT] Analyzing user profile from text...');
 
   let dbProfile: Record<string, unknown> = {};
-  if (clientId) {
+  if (userId) {
     try {
-      const client = await prismadb.clientProfile.findUnique({ where: { id: clientId } });
-      dbProfile = (client?.profileData as Record<string, unknown>) || {};
+      const user = await prismadb.user.findUnique({ where: { id: userId }, select: { profileData: true } });
+      dbProfile = (user?.profileData as Record<string, unknown>) || {};
       console.log('[USER_PROFILE_AGENT] Successfully loaded existing profile from DB.');
     } catch (dbError) {
       console.warn('[USER_PROFILE_AGENT] Failed to load profile from DB, proceeding with empty profile:', dbError);
@@ -250,18 +250,17 @@ ${currentMessageText || '（无文字）'}
       l1,
     });
 
-    if (clientId) {
+    if (userId) {
       console.log('[USER_PROFILE_AGENT] Triggering async DB persistence...');
-      const profileToPersist = mergeChatProfileForPersistence(result, dbProfile);
-      prismadb.clientProfile.upsert({
-        where: { id: clientId },
-        update: { profileData: profileToPersist as Prisma.InputJsonValue },
-        create: { id: clientId, profileData: profileToPersist as Prisma.InputJsonValue },
-      }).then(() => {
-        console.log('[USER_PROFILE_AGENT] Successfully persisted profile to DB.');
-      }).catch(e => {
-        console.error('[USER_PROFILE_AGENT] Failed to persist profile to DB:', e);
-      });
+      void updateUserProfileData(userId, (fresh) =>
+        mergeChatProfileForPersistence(result, fresh)
+      )
+        .then(() => {
+          console.log('[USER_PROFILE_AGENT] Successfully persisted profile to DB.');
+        })
+        .catch((e) => {
+          console.error('[USER_PROFILE_AGENT] Failed to persist profile to DB:', e);
+        });
     }
 
     return result;

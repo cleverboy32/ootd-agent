@@ -46,7 +46,7 @@ const WARDROBE_PAIRING_INTENT = normalizeGatekeeperIntent({
 // 模拟 RAG 已通过 resolveRagRefs 还原真实 ID 后传入（测试时跳过真实 RAG）
 function buildMockRagCache(): Map<string, ClothingItem> {
   const base = {
-    clientProfileId: 'test-user',
+    userId: 'test-user',
     season: ['spring', 'summer'] as string[],
     material: ['cotton'] as string[],
     tags: ['casual', 'minimalist'] as string[],

@@ -37,7 +37,6 @@ export async function POST(req: NextRequest) {
       data: {
         username,
         passwordHash,
-        clientProfile: { create: {} },
       },
     });
 

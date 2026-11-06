@@ -50,7 +50,7 @@ function toCandidate(item: {
  * Resolve a user-described wardrobe item to a concrete ClothingItem id.
  */
 export async function resolveWardrobeAnchor(
-  clientId: string,
+  userId: string,
   summary: string,
   slot?: AnchorSlot | '',
   /** Gatekeeper LLM 直接生成的精简检索词，优先使用 */
@@ -59,7 +59,7 @@ export async function resolveWardrobeAnchor(
   weather?: string
 ): Promise<WardrobeResolverResult> {
   const query = (llmSearchQuery?.trim() || summary.trim());
-  if (!query || !clientId) {
+  if (!query || !userId) {
     return { status: 'not_found' };
   }
   if (llmSearchQuery?.trim() && llmSearchQuery.trim() !== summary.trim()) {
@@ -88,7 +88,7 @@ export async function resolveWardrobeAnchor(
   };
   const rawResults = await searchWardrobeItemsByText(
     query,
-    clientId,
+    userId,
     MAX_CANDIDATES + 1,
     mainCategory,
     searchOptions
@@ -96,7 +96,7 @@ export async function resolveWardrobeAnchor(
 
   let results = rawResults;
   if (results.length === 0 && mainCategory) {
-    results = await searchWardrobeItemsByText(query, clientId, MAX_CANDIDATES + 1, undefined, searchOptions);
+    results = await searchWardrobeItemsByText(query, userId, MAX_CANDIDATES + 1, undefined, searchOptions);
   }
 
   const { matched, rejected } = filterItemsByQueryColor(query, results);

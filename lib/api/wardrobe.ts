@@ -1,4 +1,4 @@
-import { getClientId, withBasePath } from '@/lib/utils';
+import { withBasePath } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 
 const API_BASE = '/api';
@@ -17,7 +17,7 @@ export const getWardrobeItem = async (itemId: string): Promise<WardrobeItemData>
 export const reanalyzeWardrobeItem = async (itemId: string): Promise<Record<string, unknown>> => {
   const response = await fetch(withBasePath(`${API_BASE}/wardrobe/${itemId}`), {
     method: 'POST',
-    headers: { 'X-Client-ID': getClientId() },
+    credentials: 'same-origin',
   });
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({ error: `HTTP error! Status: ${response.status}` }));
@@ -34,9 +34,9 @@ export const deleteWardrobeItem = async (itemId: string): Promise<{ deletedCount
 export const deleteWardrobeItems = async (itemIds: string[]): Promise<{ deletedCount: number }> => {
   const response = await fetch(withBasePath('/api/wardrobe'), {
     method: 'DELETE',
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'X-Client-ID': getClientId(),
     },
     body: JSON.stringify({ ids: itemIds }),
   });

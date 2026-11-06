@@ -117,7 +117,7 @@ export async function searchWardrobeItemsByText(
             FROM
               "ClothingItem"
             WHERE
-              "clientProfileId" = ${userId}
+              "userId" = ${userId}
               AND "textEmbedding" IS NOT NULL
               AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
               AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
@@ -144,7 +144,7 @@ export async function searchWardrobeItemsByText(
               FROM
                 "ClothingItem"
               WHERE
-                "clientProfileId" = ${userId}
+                "userId" = ${userId}
                 AND "textEmbedding" IS NOT NULL
                 AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
               ORDER BY
@@ -169,7 +169,7 @@ export async function searchWardrobeItemsByText(
                 FROM
                   "ClothingItem"
                 WHERE
-                  "clientProfileId" = ${userId}
+                  "userId" = ${userId}
                   AND "textEmbedding" IS NOT NULL
                   AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
                   AND ("tempMax" IS NULL OR "tempMax" >= ${temperatureCelsius})
@@ -194,7 +194,7 @@ export async function searchWardrobeItemsByText(
                 FROM
                   "ClothingItem"
                 WHERE
-                  "clientProfileId" = ${userId} AND "textEmbedding" IS NOT NULL
+                  "userId" = ${userId} AND "textEmbedding" IS NOT NULL
                 ORDER BY
                   "textEmbedding" <=> ${vectorQueryString}::vector
                 LIMIT ${limit};
@@ -229,7 +229,7 @@ export async function getWardrobeItemDetails(itemId: string) {
         id: true,
         subCategory: true,
         imageUrl: true,
-        clientProfileId: true,
+        userId: true,
       },
     });
     return item;
@@ -239,23 +239,23 @@ export async function getWardrobeItemDetails(itemId: string) {
   }
 }
 
-export async function deleteWardrobeItems(itemIds: string[], clientId: string): Promise<number> {
+export async function deleteWardrobeItems(itemIds: string[], userId: string): Promise<number> {
   const uniqueIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
   if (uniqueIds.length === 0) return 0;
 
   const result = await prismadb.clothingItem.deleteMany({
     where: {
       id: { in: uniqueIds },
-      clientProfileId: clientId,
+      userId: userId,
     },
   });
 
   return result.count;
 }
 
-export async function findWardrobeItemByImageUrl(clientId: string, imageUrl: string) {
+export async function findWardrobeItemByImageUrl(userId: string, imageUrl: string) {
   return prismadb.clothingItem.findFirst({
-    where: { clientProfileId: clientId, imageUrl },
+    where: { userId: userId, imageUrl },
     orderBy: { createdAt: 'desc' },
   });
 }

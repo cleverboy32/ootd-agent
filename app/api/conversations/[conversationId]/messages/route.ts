@@ -18,9 +18,9 @@ type RouteParams = {
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
-  const clientId = req.headers.get('x-client-id');
+  const userId = req.headers.get('x-user-id');
 
-  if (!conversationId || !clientId) {
+  if (!conversationId || !userId) {
     return NextResponse.json(
       { error: 'Conversation ID and Client ID are required' },
       { status: 400 }
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const rowsDesc = await prismadb.message.findMany({
       where: {
         conversationId,
-        conversation: { clientId },
+        conversation: { userId: userId },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
@@ -58,9 +58,9 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const { conversationId } = await params;
-  const clientId = req.headers.get('x-client-id');
+  const userId = req.headers.get('x-user-id');
 
-  if (!conversationId || !clientId) {
+  if (!conversationId || !userId) {
     return NextResponse.json(
       { error: 'Conversation ID and Client ID are required' },
       { status: 400 }
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   try {
     const ownedConversation = await prismadb.conversation.findFirst({
-      where: { id: conversationId, clientId },
+      where: { id: conversationId, userId: userId },
       select: { id: true },
     });
     if (!ownedConversation) {

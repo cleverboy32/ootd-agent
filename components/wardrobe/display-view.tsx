@@ -5,7 +5,7 @@ import type { ClothingItem } from '@prisma/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WardrobeGrid } from '@/components/wardrobe/wardrobe-grid';
 import { Button } from '@/components/ui/button';
-import { getClientId, withBasePath } from '@/lib/utils';
+import { withBasePath } from '@/lib/utils';
 import { deleteWardrobeItem, deleteWardrobeItems, reanalyzeWardrobeItem } from '@/lib/api/wardrobe';
 import { useAccess } from '@/components/access/AccessProvider';
 import { useOnboarding } from '@/hooks/useOnboarding';
@@ -21,13 +21,8 @@ const categories = [
 ] as const;
 
 async function requestWardrobeItems(): Promise<{ items: ClothingItem[] } | { error: string }> {
-  const currentClientId = getClientId();
-  if (!currentClientId) {
-    return { error: '无法获取客户端ID，请刷新页面重试' };
-  }
-
   try {
-    const response = await fetch(withBasePath('/api/wardrobe'), { headers: { 'X-Client-ID': currentClientId } });
+    const response = await fetch(withBasePath('/api/wardrobe'), { credentials: 'same-origin' });
     if (!response.ok) throw new Error('获取衣橱物品失败。');
     const data: ClothingItem[] = await response.json();
     return { items: data };

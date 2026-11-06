@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import prismadb from '@/server/db';
+import { updateUserProfileData } from '@/server/utils/profileWrite';
 
 /**
- * 当前登录用户档案（ClientProfile）。
- * 身份只认 proxy 注入的 session：x-user-id + x-client-id（= user.clientProfileId）。
+ * 当前登录用户档案。身份只认 proxy 注入的 x-user-id。
  */
 
 function mergeProfileData(
@@ -25,52 +25,51 @@ function mergeProfileData(
   return merged;
 }
 
-function requireProfileIdentity(req: NextRequest):
-  | { clientId: string; userId: string }
-  | NextResponse {
-  const clientId = req.headers.get('x-client-id')?.trim();
+function requireUserId(req: NextRequest): string | NextResponse {
   const userId = req.headers.get('x-user-id')?.trim();
-  if (!clientId || !userId) {
+  if (!userId) {
     return NextResponse.json(
       { error: '请先登录', code: 'UNAUTHENTICATED' },
       { status: 401 }
     );
   }
-  return { clientId, userId };
+  return userId;
 }
 
 export async function GET(req: NextRequest) {
-  const identity = requireProfileIdentity(req);
-  if (identity instanceof NextResponse) return identity;
-  const { clientId } = identity;
+  const userId = requireUserId(req);
+  if (userId instanceof NextResponse) return userId;
 
   try {
-    const clientProfile = await prismadb.clientProfile.findUnique({
-      where: { id: clientId },
+    const user = await prismadb.user.findUnique({
+      where: { id: userId },
+      select: { id: true, profileData: true },
     });
 
     const cacheHeaders = {
       'Cache-Control': 'private, max-age=60',
     };
 
-    if (!clientProfile) {
+    if (!user) {
       return NextResponse.json(
-        { id: clientId, profileData: {} },
+        { id: userId, profileData: {} },
         { headers: cacheHeaders }
       );
     }
 
-    return NextResponse.json(clientProfile, { headers: cacheHeaders });
+    return NextResponse.json(
+      { id: user.id, profileData: user.profileData },
+      { headers: cacheHeaders }
+    );
   } catch (error) {
-    console.error(`[PROFILE_GET] clientId=${clientId}`, error);
+    console.error(`[PROFILE_GET] userId=${userId}`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  const identity = requireProfileIdentity(req);
-  if (identity instanceof NextResponse) return identity;
-  const { clientId } = identity;
+  const userId = requireUserId(req);
+  if (userId instanceof NextResponse) return userId;
 
   try {
     const body = await req.json();
@@ -78,28 +77,16 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'A valid JSON object is required' }, { status: 400 });
     }
 
-    const client = await prismadb.clientProfile.upsert({
-      where: { id: clientId },
-      update: {},
-      create: {
-        id: clientId,
-        profileData: {},
-      },
-    });
+    const written = await updateUserProfileData(userId, (current) =>
+      mergeProfileData(current as Prisma.JsonObject, body as Prisma.JsonObject)
+    );
+    if (written.status === 'missing') {
+      return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
+    }
 
-    const currentProfile = (client.profileData as Prisma.JsonObject) || {};
-    const updatedProfileData = mergeProfileData(currentProfile, body as Prisma.JsonObject);
-
-    const updatedClient = await prismadb.clientProfile.update({
-      where: { id: clientId },
-      data: {
-        profileData: updatedProfileData,
-      },
-    });
-
-    return NextResponse.json(updatedClient);
+    return NextResponse.json({ id: userId, profileData: written.profileData });
   } catch (error) {
-    console.error(`[PROFILE_PATCH] clientId=${clientId}`, error);
+    console.error(`[PROFILE_PATCH] userId=${userId}`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

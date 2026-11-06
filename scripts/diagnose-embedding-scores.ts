@@ -23,11 +23,11 @@ import {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main() {
-  const clientId = process.env.OWNER_CLIENT_ID?.trim();
-  if (!clientId) throw new Error('OWNER_CLIENT_ID is required');
+  const userId = process.env.OWNER_USER_ID?.trim() || process.env.OWNER_CLIENT_ID?.trim();
+  if (!userId) throw new Error('OWNER_USER_ID is required');
 
   const items = await prismadb.clothingItem.findMany({
-    where: { clientProfileId: clientId },
+    where: { userId },
     take: 8,
     orderBy: { createdAt: 'desc' },
   });

@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@prisma/client';
-import prismadb from '@/server/db';
 import {
   analyzeVisualProfileFromImage,
   portraitRejectionMessage,
@@ -10,13 +8,14 @@ import {
   isClientOwnedUploadUrl,
   mergeVisualAnalysisIntoProfile,
 } from '@/server/utils/profileMetadata';
+import { updateUserProfileData } from '@/server/utils/profileWrite';
 import { profileFromDbRecord } from '@/server/agents/user-profile';
 import { normalizeVisualFeaturesForZh } from '@/lib/hairColorDisplay';
 
 export async function POST(req: NextRequest) {
-  const clientId = req.headers.get('X-Client-ID');
-  if (!clientId) {
-    return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+  const userId = req.headers.get('x-user-id');
+  if (!userId) {
+    return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
   }
 
   const startMs = Date.now();
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 });
     }
 
-    if (!isClientOwnedUploadUrl(imageUrl, clientId)) {
+    if (!isClientOwnedUploadUrl(imageUrl, userId)) {
       return NextResponse.json({ error: 'Invalid image URL' }, { status: 403 });
     }
 
@@ -38,7 +37,7 @@ export async function POST(req: NextRequest) {
     if (!visualResult.is_valid_portrait) {
       void logVisualProfileAudit({
         timestamp: new Date().toISOString(),
-        clientId,
+        clientId: userId,
         imageUrl,
         durationMs: Date.now() - startMs,
         success: false,
@@ -50,27 +49,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const client = await prismadb.clientProfile.upsert({
-      where: { id: clientId },
-      update: {},
-      create: { id: clientId, profileData: {} },
-    });
-
-    const existingProfile = (client.profileData as Record<string, unknown>) || {};
     const normalizedVisual = {
       ...visualResult,
       visual_features: normalizeVisualFeaturesForZh(visualResult.visual_features),
     };
-    const mergedProfile = mergeVisualAnalysisIntoProfile(existingProfile, normalizedVisual, imageUrl);
-
-    const updatedClient = await prismadb.clientProfile.update({
-      where: { id: clientId },
-      data: { profileData: mergedProfile as Prisma.InputJsonValue },
-    });
+    const written = await updateUserProfileData(userId, (existingProfile) =>
+      mergeVisualAnalysisIntoProfile(existingProfile, normalizedVisual, imageUrl)
+    );
+    if (written.status === 'missing') {
+      return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
+    }
+    const mergedProfile = written.profileData;
 
     void logVisualProfileAudit({
       timestamp: new Date().toISOString(),
-      clientId,
+      clientId: userId,
       imageUrl,
       durationMs: Date.now() - startMs,
       success: true,
@@ -83,9 +76,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const profileData = profileFromDbRecord(
-      (updatedClient.profileData as Record<string, unknown>) || {}
-    );
+    const profileData = profileFromDbRecord(mergedProfile);
 
     return NextResponse.json({
       profileData: {
@@ -99,11 +90,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[VISUAL_PROFILE_API] ClientID: ${clientId}`, error);
+    console.error(`[VISUAL_PROFILE_API] ClientID: ${userId}`, error);
 
     void logVisualProfileAudit({
       timestamp: new Date().toISOString(),
-      clientId,
+      clientId: userId,
       imageUrl: '',
       durationMs: Date.now() - startMs,
       success: false,

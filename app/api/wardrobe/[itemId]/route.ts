@@ -9,9 +9,9 @@ export async function GET(
 ) {
   const { itemId } = await params;
   // 我们从请求头中获取客户端 ID，这是 API 的标准做法
-  const clientId = req.headers.get('x-client-id');
+  const userId = req.headers.get('x-user-id');
 
-  if (!clientId) {
+  if (!userId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
   }
 
@@ -28,7 +28,7 @@ export async function GET(
 
     // --- 关键安全检查 ---
     // 为防止信息泄露，如果物品不属于当前用户，我们同样返回 404
-    if (item.clientProfileId !== clientId) {
+    if (item.userId !== userId) {
       return NextResponse.json({ error: 'Item not found' }, { status: 404 });
     }
     
@@ -59,13 +59,13 @@ export async function POST(
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   const { itemId } = await params;
-  const clientId = req.headers.get('x-client-id');
-  if (!clientId || !itemId) {
+  const userId = req.headers.get('x-user-id');
+  if (!userId || !itemId) {
     return NextResponse.json({ error: 'Client ID and item ID are required' }, { status: 400 });
   }
 
   const existing = await getWardrobeItemDetails(itemId);
-  if (!existing || existing.clientProfileId !== clientId) {
+  if (!existing || existing.userId !== userId) {
     return NextResponse.json({ error: 'Item not found' }, { status: 404 });
   }
 
@@ -83,9 +83,9 @@ export async function DELETE(
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   const { itemId } = await params;
-  const clientId = req.headers.get('x-client-id');
+  const userId = req.headers.get('x-user-id');
 
-  if (!clientId) {
+  if (!userId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
   }
 
@@ -94,7 +94,7 @@ export async function DELETE(
   }
 
   try {
-    const deletedCount = await deleteWardrobeItems([itemId], clientId);
+    const deletedCount = await deleteWardrobeItems([itemId], userId);
     if (deletedCount === 0) {
       return NextResponse.json({ error: 'Item not found' }, { status: 404 });
     }

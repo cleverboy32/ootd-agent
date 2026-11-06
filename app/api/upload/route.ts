@@ -20,8 +20,8 @@ function extensionForMime(mimeType: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const clientId = req.headers.get('x-client-id');
-  if (!clientId) {
+  const userId = req.headers.get('x-user-id');
+  if (!userId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
   }
 
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const safe = await ensureLlmSafeImageBuffer(rawBuffer, file.type);
     const convertMs = Date.now() - convertStartedAt;
 
-    const relativeKey = `user-uploads/${clientId}/${uuidv4()}.${extensionForMime(safe.mimeType)}`;
+    const relativeKey = `user-uploads/${userId}/${uuidv4()}.${extensionForMime(safe.mimeType)}`;
     const cosStartedAt = Date.now();
     const publicUrl = await uploadObjectToCOS(safe.buffer, safe.mimeType, relativeKey);
     const cosMs = Date.now() - cosStartedAt;

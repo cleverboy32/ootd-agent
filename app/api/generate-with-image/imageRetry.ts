@@ -1,4 +1,4 @@
-import { ClothingItem, Prisma } from '@prisma/client';
+import { ClothingItem } from '@prisma/client';
 import prismadb from '@/server/db';
 import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
 import { callVisualDirectorAgent } from '@/server/agents/visual/director';
@@ -28,6 +28,7 @@ import {
   extractTextContent,
   patchMessageImageResult,
 } from '@/server/utils/messageContent';
+import { updateMessageContent } from '@/server/utils/messageWrite';
 
 export async function runOutfitImageGeneration(
   outfit: StylistOutfit,
@@ -131,13 +132,13 @@ export function createImageRetryStream(
   conversationId: string,
   messageId: string,
   retryOutfitId: string,
-  clientId?: string
+  userId?: string
 ): ReadableStream {
   const trace = new RequestTrace({
     kind: RequestAuditKind.ImageRetry,
     conversationId,
     messageId,
-    clientId,
+    clientId: userId,
     route: RequestAuditRoute.ImageRetry,
   });
 
@@ -158,7 +159,7 @@ export function createImageRetryStream(
       const imageMap = new Map<string, string>();
       const failedImageIds = new Set<string>();
       let ragItemCount = 0;
-      let userId: string | undefined;
+      let resolvedUserId: string | undefined;
 
       try {
         const message = await prismadb.message.findUnique({ where: { id: messageId } });
@@ -184,22 +185,25 @@ export function createImageRetryStream(
 
         const imageStartedAt = Date.now();
         let portraitImageUrl: string | undefined;
-        if (clientId) {
-          const client = await prismadb.clientProfile.findUnique({ where: { id: clientId } });
+        if (userId) {
+          const client = await prismadb.user.findUnique({
+            where: { id: userId },
+            select: { profileData: true },
+          });
           const dbProfile = (client?.profileData as Record<string, unknown>) || {};
-          portraitImageUrl = readFullBodyImageUrl(dbProfile, clientId);
+          portraitImageUrl = readFullBodyImageUrl(dbProfile, userId);
         }
 
         const { resolveUserIdByClientId, getCreditBalance } = await import(
           '@/server/billing/credits'
         );
         const { creditCostPerImage } = await import('@/server/config/credits');
-        userId = (await resolveUserIdByClientId(clientId)) ?? undefined;
-        if (userId) trace.setUserId(userId);
+        resolvedUserId = (await resolveUserIdByClientId(userId)) ?? undefined;
+        if (resolvedUserId) trace.setUserId(resolvedUserId);
         const creditsRequiredIds = new Set<string>();
         let skipForCredits = false;
-        if (userId) {
-          const balance = await getCreditBalance(userId);
+        if (resolvedUserId) {
+          const balance = await getCreditBalance(resolvedUserId);
           if (balance < creditCostPerImage()) {
             skipForCredits = true;
           }
@@ -220,32 +224,26 @@ export function createImageRetryStream(
           undefined,
           portraitImageUrl,
           abortController.signal,
-          { userId, creditsRequiredIds, skipForCredits }
+          { userId: resolvedUserId, creditsRequiredIds, skipForCredits }
         );
         trace.markStage('imageGen', Date.now() - imageStartedAt);
 
         if (imageMap.has(retryOutfitId)) {
           const url = imageMap.get(retryOutfitId)!;
-          const updatedContent = patchMessageImageResult(message.content, retryOutfitId, url);
-          await prismadb.message.update({
-            where: { id: messageId },
-            data: { content: updatedContent as Prisma.InputJsonValue },
-          });
+          await updateMessageContent(messageId, (fresh) =>
+            patchMessageImageResult(fresh, retryOutfitId, url)
+          );
         } else {
-          const existingStates = extractImageStates(message.content);
           const nextState = creditsRequiredIds.has(retryOutfitId)
             ? 'credits_required'
             : 'failed';
-          await prismadb.message.update({
-            where: { id: messageId },
-            data: {
-              content: buildPersistedMessageContent({
-                text: extractTextContent(message.content),
-                stylistCache,
-                imageStates: { ...existingStates, [retryOutfitId]: nextState },
-              }) as Prisma.InputJsonValue,
-            },
-          });
+          await updateMessageContent(messageId, (fresh) =>
+            buildPersistedMessageContent({
+              text: extractTextContent(fresh),
+              stylistCache: extractStylistCache(fresh) ?? stylistCache,
+              imageStates: { ...extractImageStates(fresh), [retryOutfitId]: nextState },
+            })
+          );
         }
 
         sendEvent(controller, 'stream_end', { message: '图片重试完成' });
@@ -279,7 +277,7 @@ export function createImageRetryStream(
               ragItemCount,
             },
           }),
-          { userId }
+          { userId: resolvedUserId }
         );
         resolveDone();
         unregisterInFlight(inFlightId);

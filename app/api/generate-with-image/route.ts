@@ -35,8 +35,8 @@ export async function POST(req: NextRequest) {
     );
     const imageUrl = imageUrls[0];
 
-    const clientId = req.headers.get('X-Client-ID');
-    if (!clientId) {
+    const userId = req.headers.get('x-user-id');
+    if (!userId) {
       return new Response(JSON.stringify({ error: 'Client ID is required' }), { status: 400 });
     }
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
         where: {
           id: messageId,
           conversationId,
-          conversation: { clientId },
+          conversation: { userId: userId },
         },
         select: { id: true },
       });
@@ -59,11 +59,11 @@ export async function POST(req: NextRequest) {
         return new Response(JSON.stringify({ error: 'Message not found' }), { status: 404 });
       }
       console.log(`[API_ROUTE] Image retry: message=${messageId} outfit=${retryOutfitId}`);
-      const stream = createImageRetryStream(conversationId, messageId, retryOutfitId, clientId);
+      const stream = createImageRetryStream(conversationId, messageId, retryOutfitId, userId);
       return new Response(stream, { headers: SSE_HEADERS });
     }
 
-    console.log(`[API_ROUTE] POST request received. Conv ID: ${conversationId}, Client ID: ${clientId}`);
+    console.log(`[API_ROUTE] POST request received. Conv ID: ${conversationId}, Client ID: ${userId}`);
 
     if (!text && !imageUrl) {
       return new Response(JSON.stringify({ error: "Text or image URL is required" }), { status: 400 });
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     if (conversationId) {
       const ownedConversation = await prismadb.conversation.findFirst({
-        where: { id: conversationId, clientId },
+        where: { id: conversationId, userId: userId },
         select: { id: true },
       });
       if (!ownedConversation) {
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
       initialParts.push({ text });
     }
 
-    const readableStream = createMultiAgentStream(initialParts, clientId, conversationId, messageId, {
+    const readableStream = createMultiAgentStream(initialParts, userId, conversationId, messageId, {
       clientIp: resolveClientIp(req),
       currentImageUrl: imageUrl || undefined,
       currentImageUrls: imageUrls,

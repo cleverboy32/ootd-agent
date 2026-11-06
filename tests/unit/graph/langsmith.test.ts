@@ -16,7 +16,7 @@ function stubRuntime(overrides: Partial<OutfitRuntime> = {}): OutfitRuntime {
     ragCache: new Map(),
     initialParts: [],
     conversationId: 'conv-1',
-    clientId: 'client-1',
+    userId: 'client-1',
     profileLocationPromise: Promise.resolve(undefined),
     trace: {} as OutfitRuntime['trace'],
     abortSignal: abortController.signal,
@@ -53,7 +53,7 @@ describe('langsmith helpers', () => {
       runtime,
       pipeline: 'outfit_fresh',
       conversationId: 'conv-1',
-      clientId: 'client-1',
+      userId: 'client-1',
     });
     assert.equal(cfg.runName, 'outfit_fresh');
     assert.deepEqual(cfg.tags, ['ootd-agent', 'outfit-pipeline', 'outfit_fresh']);

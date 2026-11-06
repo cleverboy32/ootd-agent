@@ -12,7 +12,6 @@ export interface SessionIdentity {
   id: string;
   username: string;
   sessionVersion: number;
-  clientProfileId: string;
   hasSecurityQuestions: boolean;
 }
 

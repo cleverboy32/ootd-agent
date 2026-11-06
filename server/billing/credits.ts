@@ -1,3 +1,11 @@
+/**
+ * 积分账本与兑换。
+ *
+ * 并发策略（本文件仅有的「锁」相关逻辑）：
+ * - 扣费 debitCredits：条件 UPDATE（余额够才改），无行锁，靠 affected rows 判成败
+ * - 兑换 redeemCreditCode：对 CreditRedeemCode 行 SELECT FOR UPDATE，串行化同一码的并发兑换
+ * - 赠送 grant*：事务 + increment；signup 另用流水去重，无 FOR UPDATE
+ */
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import prismadb from '@/server/db';
@@ -37,16 +45,20 @@ export async function getCreditBalance(userId: string): Promise<number> {
   return user?.creditBalance ?? 0;
 }
 
-export async function resolveUserIdByClientId(clientId: string | undefined): Promise<string | null> {
-  if (!clientId?.trim()) return null;
-  const profile = await prismadb.clientProfile.findUnique({
-    where: { id: clientId },
-    select: { user: { select: { id: true } } },
+/** 身份已是 userId。确认用户仍存在后返回 id。 */
+export async function resolveUserIdByClientId(userId: string | undefined): Promise<string | null> {
+  if (!userId?.trim()) return null;
+  const user = await prismadb.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
   });
-  return profile?.user?.id ?? null;
+  return user?.id ?? null;
 }
 
-/** 注册赠送；已有 signup_grant 流水则跳过（防重复）。 */
+/**
+ * 注册赠送。
+ * 用 ledger 是否已有 signup_grant 做幂等（非行锁）；极端双开注册仍可能竞态，可接受。
+ */
 export async function grantSignupCredits(userId: string): Promise<number> {
   const amount = creditSignupGrant();
   if (amount <= 0) return 0;
@@ -64,6 +76,7 @@ export async function grantSignupCredits(userId: string): Promise<number> {
       return user?.creditBalance ?? 0;
     }
 
+    // Postgres increment 单语句原子，无需 FOR UPDATE
     await tx.user.update({
       where: { id: userId },
       data: { creditBalance: { increment: amount } },
@@ -83,6 +96,7 @@ export async function grantSignupCredits(userId: string): Promise<number> {
   });
 }
 
+/** 通用加额：事务内 increment + 记流水。无行锁。 */
 export async function grantCredits(options: {
   userId: string;
   amount: number;
@@ -93,13 +107,19 @@ export async function grantCredits(options: {
   if (amount <= 0) throw new Error('grant amount must be positive');
 
   return prismadb.$transaction(async (tx) => {
+
+    // 增加积分余额
     await tx.user.update({
       where: { id: userId },
       data: { creditBalance: { increment: amount } },
     });
+
+    // 记录流水
     await tx.creditLedger.create({
       data: { userId, delta: amount, reason, meta },
     });
+
+    // 获取更新后的积分余额
     const user = await tx.user.findUnique({
       where: { id: userId },
       select: { creditBalance: true },
@@ -110,7 +130,10 @@ export async function grantCredits(options: {
 
 /**
  * 原子扣积分。余额不足抛 InsufficientCreditsError。
- * 使用条件 UPDATE，多实例下不会扣成负数。
+ *
+ * 不用 SELECT FOR UPDATE：一条条件 UPDATE 同时完成「读余额 + 扣减」。
+ * WHERE creditBalance >= amount 保证多实例并发也不会扣成负数；
+ * affected rows !== 1 即视为余额不足（含用户不存在）。
  */
 export async function debitCredits(options: {
   userId: string;
@@ -124,6 +147,7 @@ export async function debitCredits(options: {
   if (amount <= 0) throw new Error('debit amount must be positive');
 
   return prismadb.$transaction(async (tx) => {
+    //  UPDATE 锁
     const updated = await tx.$executeRaw`
       UPDATE "User"
       SET "creditBalance" = "creditBalance" - ${amount}
@@ -164,7 +188,13 @@ export async function debitImageGeneration(options: {
   });
 }
 
-/** 兑换码：锁码行 → 校验 → 加额 → 记流水 */
+/**
+ * 兑换码。
+ *
+ * 流程：事务内 FOR UPDATE 锁码行 → 校验过期/次数 → usedCount++ → 用户加额 → 记流水。
+ * 必须先锁码行：否则两请求同时读到 usedCount < maxUses 会超兑。
+ * 用户余额用 increment（单语句原子）；码侧靠行锁串行。
+ */
 export async function redeemCreditCode(userId: string, rawCode: string): Promise<{
   balance: number;
   creditsAdded: number;
@@ -176,6 +206,7 @@ export async function redeemCreditCode(userId: string, rawCode: string): Promise
   const codeHash = hashRedeemCode(code);
 
   return prismadb.$transaction(async (tx) => {
+    // 行锁：同码并发兑换会在此排队，直到本事务提交/回滚
     const rows = await tx.$queryRaw<
       Array<{
         id: string;

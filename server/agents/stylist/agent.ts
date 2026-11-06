@@ -448,7 +448,7 @@ export async function callStylistTurn(
   intent: GatekeeperIntent,
   profile: UserProfileResult,
   initialParts: Part[],
-  clientId?: string,
+  userId?: string,
   ragCache?: Map<string, ClothingItem>,
   conversationId?: string,
   options: StylistAgentOptions = {}
@@ -490,7 +490,7 @@ export async function callStylistTurn(
     activeIntent,
     profile,
     initialParts,
-    clientId,
+    userId,
     ragCache,
     conversationId,
     { ...options, uploadGarmentParts }
@@ -506,7 +506,7 @@ export async function callStylistAgent(
   intent: GatekeeperIntent,
   profile: UserProfileResult,
   initialParts: Part[],
-  clientId?: string,
+  userId?: string,
   ragCache?: Map<string, ClothingItem>,
   conversationId?: string,
   options: StylistAgentOptions = {}
@@ -577,7 +577,7 @@ export async function callStylistAgent(
     messageId: options.messageId,
   });
   const skillBlock = buildSkillBlocks(skillNames);
-  if (clientId && ragCache) {
+  if (userId && ragCache) {
     try {
       console.log(
         `[STYLIST_AGENT] Plan→Retrieve${isRevision ? ' (revision slots)' : ''}...`
@@ -595,7 +595,7 @@ export async function callStylistAgent(
         newItemDiversityBlock
       );
       outfitPlan = planned.plan;
-      const searchResults = await performRagSearch(planned.queries, clientId, ragCache, {
+      const searchResults = await performRagSearch(planned.queries, userId, ragCache, {
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
         conversationId,
         userMessage,

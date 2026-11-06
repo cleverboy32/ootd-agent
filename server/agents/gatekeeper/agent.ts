@@ -36,7 +36,7 @@ export type { WeatherLookup, ProfileUpdate } from './schema';
 export interface GatekeeperContext {
   clientIp?: string;
   profileLocation?: string;
-  clientId?: string;
+  userId?: string;
   sessionItems?: SessionPurchaseItem[];
   currentImageUrl?: string;
   currentImageUrls?: string[];
@@ -191,12 +191,12 @@ export async function callGatekeeperAgent(
     let wardrobeResolver;
     if (
       intent.request_type === 'wardrobe_pairing' &&
-      ctx.clientId &&
+      ctx.userId &&
       intent.anchor_item_summary.trim() &&
       !intent.anchor_wardrobe_id?.trim()
     ) {
       wardrobeResolver = await resolveWardrobeAnchor(
-        ctx.clientId,
+        ctx.userId,
         intent.anchor_item_summary,
         intent.anchor_slot || undefined,
         intent.wardrobe_search_query,

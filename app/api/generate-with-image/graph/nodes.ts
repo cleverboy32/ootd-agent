@@ -106,11 +106,14 @@ async function executeParallelAgents(
   }
 
   let portraitImageUrl = state.fullBodyImageUrl;
-  if (portraitImageUrl === undefined && runtime.clientId) {
+  if (portraitImageUrl === undefined && runtime.userId) {
     try {
-      const client = await prismadb.clientProfile.findUnique({ where: { id: runtime.clientId } });
+      const client = await prismadb.user.findUnique({
+        where: { id: runtime.userId },
+        select: { profileData: true },
+      });
       const dbProfile = (client?.profileData as Record<string, unknown>) || {};
-      portraitImageUrl = readFullBodyImageUrl(dbProfile, runtime.clientId) ?? '';
+      portraitImageUrl = readFullBodyImageUrl(dbProfile, runtime.userId) ?? '';
     } catch (e) {
       console.warn('[ORCHESTRATOR:LANGGRAPH] Failed to load full-body photo:', e);
       portraitImageUrl = '';
@@ -256,7 +259,7 @@ export async function gatekeeperNode(
   const gatekeeperCtx: GatekeeperContext = {
     clientIp: runtime.clientIp,
     profileLocation: await runtime.profileLocationPromise,
-    clientId: runtime.clientId,
+    userId: runtime.userId,
     sessionItems: state.sessionItems,
     currentImageUrl: runtime.currentImageUrl,
     currentImageUrls: runtime.currentImageUrls,
@@ -292,7 +295,7 @@ export async function gatekeeperNode(
 
   // 仅 Gate 判定 city_role=home（常住所在地）时写入档案；travel 旅游目的地不覆盖
   if (intent.city?.trim() && intent.city_role === 'home') {
-    await persistProfileLocation(runtime.clientId, intent.city);
+    await persistProfileLocation(runtime.userId, intent.city);
   }
 
   // 档案增量：Gate 抽出 patch，异步写库，不阻塞后续 Stylist
@@ -302,12 +305,12 @@ export async function gatekeeperNode(
     .join('\n');
   const profileUpdate = gatekeeperResult.profile_update;
   if (
-    runtime.clientId &&
+    runtime.userId &&
     profileUpdate &&
     shouldApplyGateProfileUpdate(intent, profileUpdate, currentUserText)
   ) {
     console.log('[ORCHESTRATOR:LANGGRAPH] Scheduling async profile_update persist');
-    scheduleProfileUpdatePersist(runtime.clientId, profileUpdate.patch);
+    scheduleProfileUpdatePersist(runtime.userId, profileUpdate.patch);
   }
 
   return {
@@ -325,8 +328,8 @@ export async function styleAdvicePathNode(
   const intent = state.intent ?? state.gatekeeperResult?.extracted_intent;
   if (!intent) throw new Error('intent missing in styleAdvicePath');
 
-  const adviceProfile = runtime.clientId
-    ? await loadUserProfileFromDb(runtime.clientId)
+  const adviceProfile = runtime.userId
+    ? await loadUserProfileFromDb(runtime.userId)
     : buildUserProfileFallback();
 
   sendEvent(runtime.controller, 'progress', {
@@ -423,10 +426,10 @@ export async function loadProfileNode(
   }
 
   const anchorWardrobeId = intent.anchor_wardrobe_id?.trim();
-  if (anchorWardrobeId && runtime.clientId) {
+  if (anchorWardrobeId && runtime.userId) {
     try {
       const anchorItem = await prismadb.clothingItem.findFirst({
-        where: { id: anchorWardrobeId, clientProfileId: runtime.clientId },
+        where: { id: anchorWardrobeId, userId: runtime.userId },
       });
       if (anchorItem) runtime.ragCache.set(anchorItem.id, anchorItem);
     } catch (e) {
@@ -438,11 +441,14 @@ export async function loadProfileNode(
   let userProfile;
   let fullBodyImageUrl: string | undefined;
   try {
-    if (runtime.clientId) {
-      const client = await prismadb.clientProfile.findUnique({ where: { id: runtime.clientId } });
+    if (runtime.userId) {
+      const client = await prismadb.user.findUnique({
+        where: { id: runtime.userId },
+        select: { profileData: true },
+      });
       const dbProfile = (client?.profileData as Record<string, unknown>) || {};
       userProfile = profileFromDbRecord(dbProfile);
-      fullBodyImageUrl = readFullBodyImageUrl(dbProfile, runtime.clientId);
+      fullBodyImageUrl = readFullBodyImageUrl(dbProfile, runtime.userId);
     } else {
       userProfile = buildUserProfileFallback();
     }
@@ -510,7 +516,7 @@ export async function stylistNode(
       intent,
       userProfile,
       runtime.initialParts,
-      runtime.clientId,
+      runtime.userId,
       runtime.ragCache,
       runtime.conversationId,
       {

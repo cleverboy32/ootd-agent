@@ -10,30 +10,7 @@ generator client {
   output   = "../../node_modules/.prisma/client"
 }
 
-// 1. 新建 ClientProfile 模型来存储与客户端相关的提取信息
-model ClientProfile {
-  id            String    @id @default(cuid()) // 使用 cuid() 生成唯一的 ID，或者直接使用传入的 clientId
-  // 这里我们假设 id 就是 clientId。如果 clientId 是外部传入的，可能不需要 @default(cuid())
-  // 让我重新考虑一下 id 的策略。如果 clientId 是外部唯一标识，那么就直接用 clientId
-  // 而不是 cuid()。如果 clientId 是随机生成的，那么 ClientProfile.id 也可以是随机生成然后与 clientId 关联。
-
-  // 好的，为了与您前端的 `clientId` 保持一致，我们将 `ClientProfile.id` 直接设置为 `clientId`。
-  // 这意味着当您的前端生成一个 `clientId` 后，这个 `clientId` 将直接作为 `ClientProfile` 的主键。
-  // 这样，`ClientProfile` 模型的 `id` 字段将直接和你的前端 `clientId` 对应起来。
-  // 但是，如果 `clientId` 理论上可能不存在或者需要一个统一的生成方式，
-  // 更好的做法是让 `ClientProfile.id` 保持 `@id @default(cuid())`，
-  // 然后添加一个 `externalClientId String @unique` 字段来存储前端的 `clientId`。
-  // 为了简化，我们暂时让 ClientProfile.id = clientId。
-
-  profileData   Json      @default("{}") // 使用 JSON 字段，可以灵活存储任何提取出的信息
-  conversations Conversation[] // 一个客户可以有多个会话
-  clothingItems ClothingItem[] // 新增与 ClothingItem 的关联
-  user          User?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-// 用户账号（自建用户名+密码体系，见 design/features/2026-10-10-user-auth.md）
+// 用户账号。档案、会话、衣橱直接挂在 User 上。
 model User {
   id                  String       @id @default(cuid())
   username            String       @unique // 存小写
@@ -45,8 +22,10 @@ model User {
   sessionVersion      Int          @default(0)
   /// 探索次数余额（缓存；以 CreditLedger 为准）
   creditBalance       Int          @default(0)
-  clientProfileId     String       @unique
-  clientProfile       ClientProfile @relation(fields: [clientProfileId], references: [id])
+  /// 身高、风格、视觉分析等档案 JSON
+  profileData         Json         @default("{}")
+  conversations       Conversation[]
+  clothingItems       ClothingItem[]
   savedOutfits        SavedOutfit[]
   creditLedger        CreditLedger[]
   usageEvents         UsageEvent[]
@@ -156,13 +135,11 @@ model Conversation {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  // 2. 将 Conversation.clientId 字段与 ClientProfile 建立关联
-  clientId  String
-  client    ClientProfile @relation(fields: [clientId], references: [id]) // 外键关联到 ClientProfile.id
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  summaries Summary[] 
-  // 3. 确保 clientId 字段上有索引
-  @@index([clientId])
+  summaries Summary[]
+  @@index([userId])
 }
 
 model Message {
@@ -231,10 +208,9 @@ model ClothingItem {
   updatedAt             DateTime             @updatedAt
 
 
-  // 建立与 ClientProfile 的关联
-  clientProfileId String
-  clientProfile   ClientProfile @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([clientProfileId])
+  @@index([userId])
 }
 

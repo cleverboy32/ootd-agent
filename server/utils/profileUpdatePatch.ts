@@ -6,7 +6,7 @@ import {
   type ProfileUpdatePatch,
 } from '@/server/agents/gatekeeper/schema';
 import { preserveProfileMetadata } from '@/server/utils/profileMetadata';
-import type { Prisma } from '@prisma/client';
+import { updateUserProfileData } from '@/server/utils/profileWrite';
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -130,24 +130,19 @@ export function mergeProfileUpdatePatch(
 
 /** 异步合并写库；失败只打日志，不阻塞搭配 */
 export function scheduleProfileUpdatePersist(
-  clientId: string,
+  userId: string,
   patch: ProfileUpdatePatch
 ): void {
   void (async () => {
     try {
-      const { default: prismadb } = await import('server/db');
-      const client = await prismadb.clientProfile.findUnique({ where: { id: clientId } });
-      const dbProfile = (client?.profileData as Record<string, unknown>) || {};
-      const { next, changed } = mergeProfileUpdatePatch(dbProfile, patch);
-      if (!changed) {
-        console.log('[PROFILE_UPDATE] No-op merge (unchanged)');
+      const written = await updateUserProfileData(userId, (dbProfile) => {
+        const { next, changed } = mergeProfileUpdatePatch(dbProfile, patch);
+        return changed ? next : null;
+      });
+      if (written.status !== 'updated') {
+        console.log('[PROFILE_UPDATE] No-op merge (unchanged or missing user)');
         return;
       }
-      await prismadb.clientProfile.upsert({
-        where: { id: clientId },
-        update: { profileData: next as Prisma.InputJsonValue },
-        create: { id: clientId, profileData: next as Prisma.InputJsonValue },
-      });
       console.log('[PROFILE_UPDATE] Async persist ok:', {
         name: patch.name || undefined,
         height: patch.height || undefined,

@@ -18,15 +18,15 @@ import { toUserFacingUploadError } from '@/lib/upload-errors';
 
 export async function GET(req: Request) {
   try {
-    const clientId = req.headers.get('X-Client-ID');
-    if (!clientId) {
-      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    const userId = req.headers.get('x-user-id');
+    if (!userId) {
+      return NextResponse.json({ error: '请先登录' }, { status: 400 });
     }
 
-    console.log(`[API /api/wardrobe] GET request for clientId: ${clientId}`);
+    console.log(`[API /api/wardrobe] GET request for userId: ${userId}`);
 
     const clothingItems = await prismadb.clothingItem.findMany({
-      where: { clientProfileId: clientId },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -87,9 +87,9 @@ function isRateLimitResponse(error: unknown, steps: WardrobeStepStatus, item: { 
 export async function POST(req: Request) {
   const timer = createStepTimer();
   try {
-    const clientId = req.headers.get('X-Client-ID');
-    if (!clientId) {
-      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    const userId = req.headers.get('x-user-id');
+    if (!userId) {
+      return NextResponse.json({ error: '请先登录' }, { status: 400 });
     }
 
     const { imageUrl } = await req.json();
@@ -97,9 +97,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'imageUrl is required in the request body' }, { status: 400 });
     }
 
-    console.log(`[API /api/wardrobe] Received request for clientId: ${clientId}, imageUrl: ${imageUrl}`);
+    console.log(`[API /api/wardrobe] Received request for userId: ${userId}, imageUrl: ${imageUrl}`);
 
-    let item = await findWardrobeItemByImageUrl(clientId, imageUrl);
+    let item = await findWardrobeItemByImageUrl(userId, imageUrl);
     const steps: WardrobeStepStatus = {
       analysis: item ? 'skipped' : 'pending',
       textEmbedding: 'pending',
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
       console.log('[API /api/wardrobe] Storing new clothing item to database...');
       item = await prismadb.clothingItem.create({
         data: {
-          clientProfileId: clientId,
+          userId,
           imageUrl,
           ...wardrobeAnalysisUpdateData(analysis),
         },
@@ -211,9 +211,9 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const clientId = req.headers.get('X-Client-ID');
-    if (!clientId) {
-      return NextResponse.json({ error: 'X-Client-ID header is required' }, { status: 400 });
+    const userId = req.headers.get('x-user-id');
+    if (!userId) {
+      return NextResponse.json({ error: '请先登录' }, { status: 400 });
     }
 
     const body = (await req.json()) as { ids?: string[] };
@@ -223,7 +223,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'ids array is required' }, { status: 400 });
     }
 
-    const deletedCount = await deleteWardrobeItems(ids, clientId);
+    const deletedCount = await deleteWardrobeItems(ids, userId);
     return NextResponse.json({ deletedCount }, { status: 200 });
   } catch (error) {
     console.error('Error in DELETE /api/wardrobe:', error);

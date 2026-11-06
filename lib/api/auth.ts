@@ -1,6 +1,6 @@
 /**
  * 认证 API 客户端（/api/auth/*）。
- * 不走 apiClient：auth 接口不需要 X-Client-ID 头，401 也不触发登录页跳转。
+ * 不走 apiClient：auth 接口靠 session cookie，401 也不触发登录页跳转。
  * session 走 zustand（store/session），避免各模块重复打 /api/auth/session。
  */
 import { withBasePath } from '@/lib/utils';

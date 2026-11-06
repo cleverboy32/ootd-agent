@@ -64,6 +64,12 @@ describe('COS storage', () => {
     assert.equal(isClientOwnedUploadUrl(owned, 'client-1'), true);
     assert.equal(isClientOwnedUploadUrl(owned, 'client-2'), false);
     assert.equal(
+      isClientOwnedUploadUrl(owned, 'cmv3mqdxe0001bqs8bc5nsmmx'),
+      false
+    );
+    const legacyOwned = owned.replace('client-1', '5265a6b5-32f4-48ab-8b57-8117616034be');
+    assert.equal(isClientOwnedUploadUrl(legacyOwned, 'cmv3mqdxe0001bqs8bc5nsmmx'), true);
+    assert.equal(
       isClientOwnedUploadUrl(
         'https://attacker.example/shows/user-uploads/client-1/photo.jpg',
         'client-1'

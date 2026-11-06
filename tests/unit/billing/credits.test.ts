@@ -34,7 +34,6 @@ describe('credits debit / redeem concurrency', { skip: !hasDb }, () => {
       data: {
         username,
         passwordHash: 'test:not-a-real-hash',
-        clientProfile: { create: {} },
       },
     });
     return user.id;

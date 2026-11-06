@@ -6,18 +6,18 @@ const API_BASE = '/api';
 
 /**
  * Fetches all conversations for the current client.
- * clientId is automatically handled by apiClient.
+ * 身份由 session cookie 交给 proxy，再写入 x-user-id。
  * @returns A promise that resolves to an array of conversations.
  */
 export const getConversations = async (): Promise<Conversation[]> => {
   // 2. 使用 apiClient.get，不再需要手动处理 response 和 error
-  // 注意：我们还需要修改后端的 GET /api/conversations 接口，让它从请求头读取 clientId
+  // 会话列表按 proxy 注入的 x-user-id 取当前用户。
   return apiClient.get(`${API_BASE}/conversations`);
 };
 
 /**
  * Creates a new conversation.
- * clientId is automatically handled by apiClient.
+ * 身份由 session cookie 交给 proxy，再写入 x-user-id。
  * @param title The title of the new conversation.
  * @param firstMessage Optional first user message, persisted in the same request.
  * @returns A promise that resolves to the newly created conversation.

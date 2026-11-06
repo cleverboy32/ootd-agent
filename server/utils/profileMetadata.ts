@@ -1,6 +1,7 @@
 import type { UserProfileResult } from '@/server/agents/user-profile';
 import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
+import { legacyUploadPrefixFor } from '@/server/auth/legacyUploadPrefix';
 import { buildCosObjectKey, getCosPublicUrl } from '@/server/services/cos';
 
 export const PROFILE_METADATA_KEYS = [
@@ -55,12 +56,11 @@ export function mergeChatProfileForPersistence(
   };
 }
 
-/** 校验上传 URL 属于当前 client 的 COS 路径，防 SSRF */
-export function isClientOwnedUploadUrl(imageUrl: string, clientId: string): boolean {
+function uploadPrefixMatches(imageUrl: string, ownerId: string): boolean {
   try {
     const url = new URL(imageUrl);
     const expectedPrefixUrl = new URL(
-      `${getCosPublicUrl(buildCosObjectKey(`user-uploads/${clientId}`))}/`
+      `${getCosPublicUrl(buildCosObjectKey(`user-uploads/${ownerId}`))}/`
     );
     return (
       url.protocol === 'https:' &&
@@ -72,14 +72,21 @@ export function isClientOwnedUploadUrl(imageUrl: string, clientId: string): bool
   }
 }
 
+/** 校验上传 URL 属于当前用户的 COS 路径，或 3 个老目录之一。防 SSRF。 */
+export function isClientOwnedUploadUrl(imageUrl: string, userId: string): boolean {
+  if (uploadPrefixMatches(imageUrl, userId)) return true;
+  const legacy = legacyUploadPrefixFor(userId);
+  return legacy ? uploadPrefixMatches(imageUrl, legacy) : false;
+}
+
 /** 仅已通过全身照校验、且 URL 属于该用户时，才把照片交给出图。 */
 export function readFullBodyImageUrl(
   dbProfile: Record<string, unknown>,
-  clientId: string
+  userId: string
 ): string | undefined {
   if (dbProfile.full_body_verified !== true) return undefined;
   const url = typeof dbProfile.selfie_image_url === 'string' ? dbProfile.selfie_image_url.trim() : '';
-  if (!url || !isClientOwnedUploadUrl(url, clientId)) return undefined;
+  if (!url || !isClientOwnedUploadUrl(url, userId)) return undefined;
   return url;
 }
 

@@ -18,7 +18,6 @@ export interface OutfitRuntime {
   creditsRequiredIds: Set<string>;
   ragCache: Map<string, ClothingItem>;
   initialParts: Part[];
-  clientId?: string;
   /** 登录用户 id */
   userId?: string;
   conversationId?: string;

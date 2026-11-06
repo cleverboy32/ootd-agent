@@ -69,12 +69,12 @@ export async function findPreviousAnchorImageUrl(
   return undefined;
 }
 
-export async function getProfileLocation(clientId?: string): Promise<string | undefined> {
-  if (!clientId) return undefined;
+export async function getProfileLocation(userId?: string): Promise<string | undefined> {
+  if (!userId) return undefined;
 
   try {
-    const profile = await prismadb.clientProfile.findUnique({
-      where: { id: clientId },
+    const profile = await prismadb.user.findUnique({
+      where: { id: userId },
       select: { profileData: true },
     });
     if (!profile?.profileData || typeof profile.profileData !== 'object') return undefined;
@@ -89,27 +89,16 @@ export async function getProfileLocation(clientId?: string): Promise<string | un
 
 /** Gate 抽出有效城市后写入 profileData.location，供后续轮次天气门闸复用 */
 export async function persistProfileLocation(
-  clientId: string | undefined,
+  userId: string | undefined,
   city: string | undefined
 ): Promise<void> {
-  if (!clientId || !city?.trim()) return;
+  if (!userId || !city?.trim()) return;
 
   try {
-    const existing = await prismadb.clientProfile.findUnique({
-      where: { id: clientId },
-      select: { profileData: true },
-    });
-    const current =
-      existing?.profileData && typeof existing.profileData === 'object'
-        ? (existing.profileData as Record<string, unknown>)
-        : {};
-    const { next, changed } = mergeLocationIntoProfileData(current, city);
-    if (!changed) return;
-
-    await prismadb.clientProfile.upsert({
-      where: { id: clientId },
-      update: { profileData: next as Prisma.InputJsonValue },
-      create: { id: clientId, profileData: next as Prisma.InputJsonValue },
+    const { updateUserProfileData } = await import('@/server/utils/profileWrite');
+    await updateUserProfileData(userId, (current) => {
+      const { next, changed } = mergeLocationIntoProfileData(current, city);
+      return changed ? next : null;
     });
     console.log(`[ORCHESTRATOR] profile location saved: ${city.trim()}`);
   } catch (error) {

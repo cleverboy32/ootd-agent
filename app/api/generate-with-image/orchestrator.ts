@@ -44,7 +44,6 @@ export interface MultiAgentStreamOptions {
 function createRuntime(params: {
   controller: ReadableStreamDefaultController;
   initialParts: Part[];
-  clientId?: string;
   userId?: string;
   conversationId?: string;
   messageId?: string;
@@ -83,7 +82,6 @@ function createRuntime(params: {
     creditsRequiredIds,
     ragCache,
     initialParts: params.initialParts,
-    clientId: params.clientId,
     userId: params.userId,
     conversationId: params.conversationId,
     clientIp: params.clientIp,
@@ -133,7 +131,7 @@ function createRuntime(params: {
 
 export function createMultiAgentStream(
   initialParts: Part[],
-  clientId?: string,
+  userId?: string,
   conversationId?: string,
   messageId?: string,
   options: MultiAgentStreamOptions = {}
@@ -141,8 +139,7 @@ export function createMultiAgentStream(
   const trace = new RequestTrace({
     kind: RequestAuditKind.Generate,
     conversationId,
-    messageId,
-    clientId,
+    clientId: userId,
   });
 
   const abortController = new AbortController();
@@ -160,15 +157,14 @@ export function createMultiAgentStream(
       logLangSmithStatusOnce();
 
       const { resolveUserIdByClientId } = await import('@/server/billing/credits');
-      const userId = (await resolveUserIdByClientId(clientId)) ?? undefined;
-      if (userId) trace.setUserId(userId);
+      const resolvedUserId = (await resolveUserIdByClientId(userId)) ?? undefined;
+      if (resolvedUserId) trace.setUserId(resolvedUserId);
 
-      const profileLocationPromise = getProfileLocation(clientId);
+      const profileLocationPromise = getProfileLocation(userId);
       const { runtime, getSnapshot } = createRuntime({
         controller,
         initialParts,
-        clientId,
-        userId,
+        userId: resolvedUserId,
         conversationId,
         messageId,
         clientIp: options.clientIp,
@@ -224,7 +220,7 @@ export function createMultiAgentStream(
               runtime,
               pipeline: 'outfit_cache',
               conversationId,
-              clientId,
+              userId,
               messageId: runtime.getMessageId(),
             })
           );
@@ -240,7 +236,7 @@ export function createMultiAgentStream(
               runtime,
               pipeline: 'outfit_fresh',
               conversationId,
-              clientId,
+              userId,
               messageId: runtime.getMessageId(),
             })
           );

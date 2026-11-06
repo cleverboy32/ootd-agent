@@ -15,7 +15,6 @@ export async function loadSessionIdentity(userId: string): Promise<SessionIdenti
       id: true,
       username: true,
       sessionVersion: true,
-      clientProfileId: true,
       securityQuestions: true,
     },
   });
@@ -24,7 +23,6 @@ export async function loadSessionIdentity(userId: string): Promise<SessionIdenti
     id: row.id,
     username: row.username,
     sessionVersion: row.sessionVersion,
-    clientProfileId: row.clientProfileId,
     hasSecurityQuestions:
       Array.isArray(row.securityQuestions) && row.securityQuestions.length > 0,
   };

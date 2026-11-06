@@ -4,21 +4,21 @@ import type { MessageContentPart } from '@/lib/types';
 
 /**
  * Handles GET requests to fetch conversations for a specific client.
- * Expects a `clientId` as a URL search parameter.
+ * Expects a `userId` as a URL search parameter.
  * @param req The Next.js request object.
  * @returns A JSON response with the list of conversations or an error.
  */
 export async function GET(req: NextRequest) {
-  const clientId = req.headers.get('X-Client-ID');
+  const userId = req.headers.get('x-user-id');
 
-  if (!clientId) {
+  if (!userId) {
     return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
   }
 
   try {
     const conversations = await prismadb.conversation.findMany({
       where: {
-        clientId: clientId,
+        userId: userId,
       },
       orderBy: {
         updatedAt: 'desc', // Show most recently updated conversations first
@@ -47,9 +47,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as CreateConversationBody;
     const { title, firstMessage } = body;
-    const clientId = req.headers.get('X-Client-ID');
+    const userId = req.headers.get('x-user-id');
 
-    if (!clientId) {
+    if (!userId) {
       return NextResponse.json({ error: 'Client ID is required' }, { status: 400 });
     }
 
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     const newConversation = await prismadb.conversation.create({
       data: {
         title,
-        clientId,
+        userId: userId,
         ...(firstMessage && {
           messages: {
             create: {

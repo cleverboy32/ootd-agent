@@ -32,7 +32,6 @@ const alice: SessionIdentity = {
   id: 'u1',
   username: 'alice',
   sessionVersion: 0,
-  clientProfileId: 'p1',
   hasSecurityQuestions: false,
 };
 
@@ -103,14 +102,12 @@ describe('createSessionIdentityCache', () => {
           id: 'u2',
           username: 'bob',
           sessionVersion: 0,
-          clientProfileId: 'p2',
           hasSecurityQuestions: false,
         },
         u3: {
           id: 'u3',
           username: 'carol',
           sessionVersion: 0,
-          clientProfileId: 'p3',
           hasSecurityQuestions: true,
         },
       },

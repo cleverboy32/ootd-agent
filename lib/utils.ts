@@ -22,14 +22,6 @@ export function stripBasePath(pathname: string): string {
 /** Local public asset; must include basePath for next/image optimizer behind subpath deploy. */
 export const LOGO_SRC = withBasePath("/logo.png");
 
-export function getClientId(): string {
-  const ownerClientId = process.env.NEXT_PUBLIC_OWNER_CLIENT_ID?.trim();
-  if (!ownerClientId) {
-    throw new Error('NEXT_PUBLIC_OWNER_CLIENT_ID is missing.');
-  }
-  return ownerClientId;
-}
-
 /**
  * Uploads a file through the BFF; the server writes to COS server-side (no browser CORS).
  */
@@ -40,9 +32,6 @@ export async function uploadFileToCOS(file: File): Promise<string> {
   const response = await fetch(withBasePath('/api/upload'), {
     method: 'POST',
     credentials: 'same-origin',
-    headers: {
-      'X-Client-ID': getClientId(),
-    },
     body: formData,
   });
 
@@ -91,11 +80,11 @@ export const streamResponse = async (
   handlers: StreamHandlers
 ) => {
   try {
-    const clientId = getClientId();
     const res = await fetch(withBasePath("/api/generate-with-image"), {
       method: "POST",
-      headers: { 'Content-Type': 'application/json', 'X-Client-ID': clientId },
-      body: JSON.stringify(payload), // payload 现在可能包含 messageId
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok || !res.body) {

@@ -1,4 +1,4 @@
-import { uploadFileToCOS, getClientId, withBasePath } from '@/lib/utils';
+import { uploadFileToCOS, withBasePath } from '@/lib/utils';
 import { toUserFacingUploadError } from '@/lib/upload-errors';
 
 // Helper function for simulated delay
@@ -60,10 +60,10 @@ export async function executeAnalysis(
   }
 
   // Real analysis for non-test URLs
-  const clientId = getClientId();
   const analyzeResponse = await fetch(withBasePath('/api/wardrobe'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Client-ID': clientId },
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageUrl }),
   });
 

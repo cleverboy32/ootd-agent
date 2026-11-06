@@ -15,7 +15,7 @@ export const MOCK_WARDROBE_ITEMS = [
     silhouette: ['regular'],
     createdAt: '2026-08-31T00:00:00.000Z',
     updatedAt: '2026-08-31T00:00:00.000Z',
-    clientProfileId: 'e2e-client',
+    userId: 'e2e-user',
   },
   {
     id: 'e2e-item-bottom',
@@ -33,7 +33,7 @@ export const MOCK_WARDROBE_ITEMS = [
     silhouette: ['wide-leg'],
     createdAt: '2026-08-31T00:00:00.000Z',
     updatedAt: '2026-08-31T00:00:00.000Z',
-    clientProfileId: 'e2e-client',
+    userId: 'e2e-user',
   },
 ];
 

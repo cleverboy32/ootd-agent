@@ -13,7 +13,7 @@ function unauthorized(): NextResponse {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  // auth 路由只认 cookie/session，不读 x-client-id
+  // auth 路由只认 cookie/session，不读身份 header
   if (pathname.startsWith('/api/auth/')) {
     return NextResponse.next();
   }
@@ -21,23 +21,23 @@ export async function proxy(req: NextRequest) {
   const payload = await verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!payload) return unauthorized();
 
-  let user: { id: string; clientProfileId: string } | null;
+  let userId: string | null;
   try {
     const { identity } = await sessionIdentityStore.resolve(
       payload.userId,
       payload.sessionVersion
     );
-    user = identity;
+    userId = identity?.id ?? null;
   } catch (error) {
     console.error('[PROXY] user lookup failed:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-  if (!user) return unauthorized();
+  if (!userId) return unauthorized();
 
   // 覆写客户端自报 header，身份只能来自 session
   const headers = new Headers(req.headers);
-  headers.set('x-client-id', user.clientProfileId);
-  headers.set('x-user-id', user.id);
+  headers.delete('x-client-id');
+  headers.set('x-user-id', userId);
   headers.set('x-access-mode', 'user');
   return NextResponse.next({ request: { headers } });
 }

@@ -1,20 +1,11 @@
 import { isGuestAllowedPath } from '@/lib/guestAccess';
-import { getClientId, stripBasePath, withBasePath } from '@/lib/utils';
+import { stripBasePath, withBasePath } from '@/lib/utils';
 
 /**
- * A base fetch wrapper that sends the configured owner id as a routing hint.
- * The server proxy always overwrites this header and remains the identity authority.
- * @param url The request URL.
- * @param options The standard `fetch` options object.
- * @returns A Promise that resolves to the fetch Response.
+ * Fetch wrapper. Identity comes from the session cookie; proxy injects x-user-id.
  */
 async function fetchWithClient(url: string, options: RequestInit = {}): Promise<Response> {
-
-  const clientId = getClientId();
-
-  // 2. Create new headers
   const headers = new Headers(options.headers);
-  headers.set('X-Client-ID', clientId);
   
   // Set Content-Type for JSON bodies if not already set
   if (options.body && typeof options.body === 'string') {

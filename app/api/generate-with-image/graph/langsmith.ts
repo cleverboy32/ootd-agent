@@ -49,10 +49,10 @@ export function buildPipelineInvokeConfig(params: {
   runtime: OutfitRuntime;
   pipeline: 'outfit_fresh' | 'outfit_cache';
   conversationId?: string;
-  clientId?: string;
+  userId?: string;
   messageId?: string;
 }): RunnableConfig {
-  const { runtime, pipeline, conversationId, clientId, messageId } = params;
+  const { runtime, pipeline, conversationId, userId, messageId } = params;
   const resolvedMessageId = messageId ?? runtime.getMessageId();
 
   return {
@@ -62,7 +62,7 @@ export function buildPipelineInvokeConfig(params: {
     tags: ['ootd-agent', 'outfit-pipeline', pipeline],
     metadata: {
       conversationId: conversationId ?? runtime.conversationId,
-      clientId: clientId ?? runtime.clientId,
+      clientId: userId ?? runtime.userId,
       messageId: resolvedMessageId,
       pipeline,
     },

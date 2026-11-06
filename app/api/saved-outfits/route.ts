@@ -107,9 +107,9 @@ export async function POST(req: NextRequest) {
 
     const message = await prismadb.message.findUnique({
       where: { id: sourceMessageId },
-      include: { conversation: { select: { clientId: true } } },
+      include: { conversation: { select: { userId: true } } },
     });
-    if (!message || message.conversation.clientId !== user.clientProfileId) {
+    if (!message || message.conversation.userId !== user.id) {
       return NextResponse.json({ error: '消息不存在', code: 'NOT_FOUND' }, { status: 404 });
     }
 
