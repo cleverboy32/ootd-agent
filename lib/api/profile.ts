@@ -73,15 +73,30 @@ export function profileRequestPath(userId: string | null): string {
   return `/api/profile?u=${encodeURIComponent(userId)}`;
 }
 
-/** 档案 GET：走 getCached（服务端需 Cache-Control）；写后 bust:true */
+/** 对话可能异步写档；打脏后下一次 fetchProfile 会 bust，平时仍走 force-cache 秒开 */
+let profileCacheDirty = false;
+
+export function markProfileCacheDirty(): void {
+  profileCacheDirty = true;
+}
+
+function consumeProfileCacheDirty(): boolean {
+  if (!profileCacheDirty) return false;
+  profileCacheDirty = false;
+  return true;
+}
+
+/** 档案 GET：默认 getCached 秒开；写后 / 打脏后 bust:true */
 export async function fetchProfile(options?: { bust?: boolean }): Promise<ProfileData> {
   const store = useSessionStore.getState();
   const session = store.ready
     ? { authenticated: store.authenticated, user: store.user }
     : await store.ensureSession().catch(() => null);
   const userId = session?.authenticated && session.user ? session.user.id : null;
+  const dirty = consumeProfileCacheDirty();
+  const shouldBust = options?.bust === true || dirty;
   const res = (await apiClient.getCached(profileRequestPath(userId), {
-    bust: options?.bust,
+    bust: shouldBust,
   })) as ProfileResponse;
   return normalizeProfileData(res.profileData);
 }
@@ -92,6 +107,7 @@ export async function analyzeVisualProfile(imageUrl: string): Promise<ProfileDat
   })) as { profileData: Partial<ProfileData> };
   const normalized = normalizeProfileData(res.profileData);
   // 写成功后把 GET 缓存刷成最新，避免返回档案页读到旧 force-cache
+  profileCacheDirty = false;
   void fetchProfile({ bust: true }).catch(() => undefined);
   return normalized;
 }

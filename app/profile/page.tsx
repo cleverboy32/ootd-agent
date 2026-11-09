@@ -26,6 +26,7 @@ export default function ProfilePage() {
   }, [loading, profile]);
 
   useEffect(() => {
+    // dirty 时 fetchProfile 会自动 bust；平时走 getCached
     fetchProfile()
       .then((data) => {
         setProfile(data);
@@ -42,7 +43,7 @@ export default function ProfilePage() {
     if (isRetry) setRetrying(true);
     setError('');
     try {
-      const data = await fetchProfile({ bust: true });
+      const data = await fetchProfile({ bust: isRetry });
       setProfile(data);
     } catch (err) {
       setError(getFriendlyErrorMessage(err, '加载档案失败，请稍后重试'));

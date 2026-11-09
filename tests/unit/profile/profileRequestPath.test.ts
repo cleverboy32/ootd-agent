@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { profileRequestPath } from '@/lib/api/profile';
+import {
+  markProfileCacheDirty,
+  profileRequestPath,
+} from '@/lib/api/profile';
 
 describe('profileRequestPath', () => {
   it('登录用户的缓存地址带上用户 id', () => {
@@ -10,5 +13,12 @@ describe('profileRequestPath', () => {
 
   it('没有登录用户时用裸 /api/profile', () => {
     assert.equal(profileRequestPath(null), '/api/profile');
+  });
+});
+
+describe('markProfileCacheDirty', () => {
+  it('可重复调用不抛错', () => {
+    markProfileCacheDirty();
+    markProfileCacheDirty();
   });
 });

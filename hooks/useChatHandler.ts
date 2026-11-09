@@ -7,6 +7,7 @@ import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
 import { Message, MessageContentPart } from '@/lib/types';
 import { useAccess } from '@/components/access/AccessProvider';
 import { useOnboardingStore } from '@/store/onboarding';
+import { markProfileCacheDirty } from '@/lib/api/profile';
 
 export const useChatHandler = () => {
   const { canInvokeAI } = useAccess();
@@ -257,6 +258,8 @@ export const useChatHandler = () => {
             };
           }));
         }
+        // Gate 可能异步写档；打脏后进「我的档案」会 bust 一次，平时仍 force-cache
+        markProfileCacheDirty();
         setWaitReply(false);
       },
     };
@@ -382,6 +385,7 @@ export const useChatHandler = () => {
         }));
       },
       onStreamEnd: (finalMessage?: Message) => {
+        markProfileCacheDirty();
         setWaitReply(false);
         if (!currentAiMessageId) return;
         if (finalMessage) {
