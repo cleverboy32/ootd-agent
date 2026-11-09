@@ -14,6 +14,8 @@ type HydrateOptions = { force?: boolean };
 
 type OnboardingStore = {
   ready: boolean;
+  /** 当前 hydrate 对应的用户；切号时强制重拉 */
+  userId: string | null;
   step: OnboardingStep;
   progress: OnboardingProgress;
   hydrate: (hasConversations: boolean, options?: HydrateOptions) => Promise<void>;
@@ -26,6 +28,7 @@ let hydrateInFlight: Promise<void> | null = null;
 
 export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   ready: false,
+  userId: null,
   step: 'done',
   progress: {
     hasWardrobe: false,
@@ -35,38 +38,53 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
 
   hydrate: async (hasConversations, options) => {
     const force = options?.force === true;
-    const { ready, progress } = get();
+    const { ready, progress, userId: hydratedUserId } = get();
 
-    if (ready && !force) {
+    const session = useSessionStore.getState();
+    const authenticated = session.ready
+      ? session.authenticated
+      : (await session.ensureSession().catch(() => null))?.authenticated === true;
+    const userId = authenticated ? useSessionStore.getState().user?.id?.trim() || null : null;
+
+    if (ready && !force && hydratedUserId === userId) {
       if (progress.hasConversations === hasConversations) return;
+      if (!userId) {
+        set({
+          progress: { ...progress, hasConversations },
+          step: 'done',
+        });
+        return;
+      }
       const nextProgress = { ...progress, hasConversations };
       set({
         progress: nextProgress,
-        step: resolveOnboardingStep(nextProgress),
+        step: resolveOnboardingStep(userId, nextProgress),
       });
       return;
     }
 
-    if (hydrateInFlight && !force) {
+    if (hydrateInFlight && !force && hydratedUserId === userId) {
       await hydrateInFlight;
       const after = get();
-      if (after.progress.hasConversations !== hasConversations) {
+      if (after.userId === userId && after.progress.hasConversations !== hasConversations) {
+        if (!userId) {
+          set({
+            progress: { ...after.progress, hasConversations },
+            step: 'done',
+          });
+          return;
+        }
         const nextProgress = { ...after.progress, hasConversations };
         set({
           progress: nextProgress,
-          step: resolveOnboardingStep(nextProgress),
+          step: resolveOnboardingStep(userId, nextProgress),
         });
       }
       return;
     }
 
     const run = (async () => {
-      const session = useSessionStore.getState();
-      const authenticated = session.ready
-        ? session.authenticated
-        : (await session.ensureSession().catch(() => null))?.authenticated === true;
-
-      if (!authenticated) {
+      if (!authenticated || !userId) {
         const guestProgress: OnboardingProgress = {
           hasWardrobe: false,
           hasFullBody: false,
@@ -74,6 +92,7 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
         };
         set({
           ready: true,
+          userId: null,
           progress: guestProgress,
           step: 'done',
         });
@@ -92,8 +111,9 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
       };
       set({
         ready: true,
+        userId,
         progress: nextProgress,
-        step: resolveOnboardingStep(nextProgress),
+        step: resolveOnboardingStep(userId, nextProgress),
       });
     })();
 
@@ -104,14 +124,17 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   },
 
   dismiss: (hasConversations) => {
-    const { step, progress } = get();
+    const { step, progress, userId } = get();
+    if (!userId) return;
     const nextProgress = { ...progress, hasConversations };
-    const next = dismissOnboardingStep(step, nextProgress);
+    const next = dismissOnboardingStep(userId, step, nextProgress);
     set({ step: next, progress: nextProgress });
   },
 
   completeChat: () => {
-    completeChatOnboarding();
+    const { userId } = get();
+    if (!userId) return;
+    completeChatOnboarding(userId);
     set({ step: 'done' });
   },
 }));
