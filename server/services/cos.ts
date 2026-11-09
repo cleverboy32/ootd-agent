@@ -78,7 +78,24 @@ function enqueueUpload<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const parts = [
+      record.code,
+      record.Message ?? record.message,
+      record.statusCode != null ? `status=${record.statusCode}` : null,
+      record.error != null ? getErrorMessage(record.error) : null,
+    ].filter((part) => part != null && String(part).trim() !== '');
+    if (parts.length > 0) return parts.map(String).join(' | ');
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return Object.prototype.toString.call(error);
+    }
+  }
+  return String(error);
 }
 
 export async function uploadObjectToCOS(
