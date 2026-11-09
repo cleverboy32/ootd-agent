@@ -729,6 +729,26 @@ describe('coerceWardrobeBrowseIntent', () => {
 });
 
 describe('finalizeGatekeeperResult — wardrobe_pairing', () => {
+  it('completes when user confirms wardrobe id even if anchor_slot is empty', () => {
+    const result = finalizeGatekeeperResult({
+      extracted_intent: normalizeGatekeeperIntent({
+        request_type: 'wardrobe_pairing',
+        occasion: '日常百搭',
+        style_preference: '清冷雅致的新中式',
+        special_requests: '用确认的衣橱单品作锚点搭配',
+        anchor_item_summary: '用户确认选择的衣橱单品',
+        anchor_slot: '',
+        anchor_wardrobe_id: 'cmth8c0it000x72s8ttg3acl6',
+      }),
+      modelIsComplete: true,
+      currentMessageText: '确认选择这件单品（id=cmth8c0it000x72s8ttg3acl6）',
+    });
+
+    assert.equal(result.is_complete, true);
+    assert.equal(result.extracted_intent.anchor_wardrobe_id, 'cmth8c0it000x72s8ttg3acl6');
+    assert.deepEqual(result.followup_questions, []);
+  });
+
   it('returns wardrobe_candidates when resolver is ambiguous', () => {
     const result = finalizeGatekeeperResult({
       extracted_intent: normalizeGatekeeperIntent({

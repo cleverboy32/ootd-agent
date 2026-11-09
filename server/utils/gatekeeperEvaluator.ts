@@ -240,7 +240,7 @@ export function evaluateGatekeeperOutput(
       issues.push({
         code: 'WARDROBE_PAIRING_INCOMPLETE_ANCHOR',
         severity: 'error',
-        message: 'wardrobe_pairing marked complete but anchor_wardrobe_id or anchor_slot is missing',
+        message: 'wardrobe_pairing marked complete but anchor_wardrobe_id is missing',
       });
     }
     if (!result.is_complete && !hasReply && !hasFollowupQuestions && !result.wardrobe_candidates?.length) {

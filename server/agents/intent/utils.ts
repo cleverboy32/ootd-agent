@@ -667,12 +667,9 @@ export function isPurchasePairingAnchorReady(intent: GatekeeperIntent): boolean 
   return Boolean(intent.anchor_item_summary.trim()) && Boolean(intent.anchor_slot);
 }
 
+/** 有衣橱单品 id 即可放行；slot 可后续从单品补，确认选择时常为空。 */
 export function isWardrobePairingAnchorReady(intent: GatekeeperIntent): boolean {
-  return (
-    isWardrobePairingIntent(intent) &&
-    Boolean(intent.anchor_wardrobe_id?.trim()) &&
-    Boolean(intent.anchor_slot)
-  );
+  return isWardrobePairingIntent(intent) && Boolean(intent.anchor_wardrobe_id?.trim());
 }
 
 const WARDROBE_BROWSE_PATTERN =
