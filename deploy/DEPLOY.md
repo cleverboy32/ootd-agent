@@ -150,7 +150,7 @@ nginx -t && nginx -s reload
 | `IMAGE_VENDOR` |  | 如 `ark` / `minimax` |
 | `ARK_API_KEY` | ✅* | 火山方舟生图（`IMAGE_VENDOR=ark` 时） |
 | `EMBEDDING_VENDOR` |  | 如 `bytedance` |
-| `AMAP_WEB_SERVICE_KEY` | ✅ | 高德天气 Web 服务 Key（实时气温查询） |
+| `UAPI_API_KEY` | 可选 | UApiPro 天气 Key（`https://uapis.cn`；免费层可不配） |
 | `NODE_ENV` |  | 生产设为 `production` |
 
 \* 按实际选用的 LLM / 生图 / 向量供应商配置，详见 `design/openai_compatible_llm.md`。
@@ -292,9 +292,9 @@ pnpm 严格隔离下 Prisma 运行时依赖未提升。仓库已在 `package.jso
 
 ### 10.5 天气查不到 / 回复说「没拿到温度」
 
-1. 确认 `.env` 已配置 `AMAP_WEB_SERVICE_KEY`（高德开放平台 Web 服务）。
+1. 天气走 UApiPro：`GET https://uapis.cn/api/v1/misc/weather`；可选配置 `UAPI_API_KEY`（免费层可不配）。
 2. 修改 `.env` 后必须带环境变量重启：`pm2 restart ootd-agent --update-env`。
-3. 日志出现 `[AMAP_WEATHER] AMAP_WEB_SERVICE_KEY not configured` 即 key 未生效。
+3. 日志前缀为 `[UAPI_WEATHER]`；有 key 时请求带 `Authorization: Bearer`。
 4. 若日志已有 `[WEATHER] Result: ...` 但回复仍说没温度，属 Gatekeeper 在 enrich 前写了话术——已服务端用实况覆盖（见 `buildWeatherAwareClarifyReply`）。
 
 ### 10.6 SSE 进度条不显示 / `Controller is already closed`
