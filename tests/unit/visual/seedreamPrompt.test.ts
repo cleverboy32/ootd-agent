@@ -633,6 +633,41 @@ describe('buildSeedreamImagePrompt', () => {
     assert.doesNotMatch(prompt, /完整扣合的一体式整袍/);
   });
 
+  it('无外套的开衫误标 inner_top + collar_only 时不得吞掉上装描述', () => {
+    const cardiganOnly: StylistOutfit = {
+      id: 'outfit_1',
+      overall_concept: '路径=短款裤装',
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '暖米色短款V领针织开衫',
+          layer: 'inner_top',
+          reason: '主上装',
+          description:
+            '暖米色针织开衫，V领，长袖，袖口落至手腕，衣长止于高腰裤腰线上方约3厘米，修身但不紧绷。',
+        },
+        {
+          id: 'new_item',
+          name: '炭灰色高腰直筒西装裤',
+          layer: 'bottom',
+          reason: '下装',
+          description: '炭灰色高腰直筒西装裤，裤长至脚面。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立',
+        outfit_details: '开衫配西裤',
+        background: '室内',
+        inner_visibility: 'collar_only',
+      },
+    };
+    assert.equal(shouldCoverInner(cardiganOnly), false);
+    const prompt = buildSeedreamImagePrompt(cardiganOnly, undefined, [PERSON_REFERENCE_LABEL], null);
+    assert.match(prompt, /暖米色针织开衫|暖米色短款V领针织开衫/);
+    assert.match(prompt, /炭灰色高腰直筒西装裤/);
+    assert.doesNotMatch(prompt, /硬性禁止：禁止内搭在肚腹/);
+  });
+
   it('inner_visibility=open：内搭单独成行，不加覆盖硬禁', () => {
     const openCoat: StylistOutfit = {
       id: 'outfit_1',

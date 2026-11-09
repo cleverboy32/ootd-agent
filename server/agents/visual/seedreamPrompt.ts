@@ -133,24 +133,23 @@ export function resolveInnerVisibility(outfit: StylistOutfit): 'collar_only' | '
   return hasClosedRobe ? 'collar_only' : 'open';
 }
 
-/** collar_only 且存在内搭层 → 走覆盖规则 */
+/** collar_only + 确有内搭 + 确有可罩住的外层（外套/袍/上装）→ 走覆盖规则 */
 export function shouldCoverInner(outfit: StylistOutfit): boolean {
   if (resolveInnerVisibility(outfit) !== 'collar_only') return false;
-  return outfit.selected_items.some((item) => isInnerLayer(item.layer));
+  if (!outfit.selected_items.some((item) => isInnerLayer(item.layer))) return false;
+  return Boolean(findCoverHostItem(outfit));
 }
 
-/** 覆盖宿主：优先整袍，其次 outerwear，再次非内搭 top */
+/** 覆盖宿主：优先整袍，其次 outerwear；不再用 top/dress 冒充外层，避免误吞主上装 */
 function findCoverHostItem(
   outfit: StylistOutfit
 ): StylistOutfit['selected_items'][number] | undefined {
   const candidates = outfit.selected_items.filter((item) => !isInnerLayer(item.layer));
   return (
     candidates.find((item) => isClosedRobeGarment(item.name, item.description ?? '')) ??
-    candidates.find((item) => layerKey(item.layer) === 'outerwear' || layerKey(item.layer).includes('outer')) ??
-    candidates.find((item) => {
-      const key = layerKey(item.layer);
-      return key === 'top' || key === 'dress';
-    })
+    candidates.find(
+      (item) => layerKey(item.layer) === 'outerwear' || layerKey(item.layer).includes('outer')
+    )
   );
 }
 
