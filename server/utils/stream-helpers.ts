@@ -25,6 +25,39 @@ export function sendEvent(controller: ReadableStreamDefaultController, eventName
 }
 
 /**
+ * Keep an SSE response alive while upstream work is silent (e.g. long Stylist LLM calls).
+ * Returns a stop() that clears the interval; also stops when `signal` aborts.
+ */
+export function startSseHeartbeat(
+  controller: ReadableStreamDefaultController,
+  signal: AbortSignal,
+  intervalMs = 15_000
+): () => void {
+  const tick = () => {
+    if (signal.aborted || controller.desiredSize === null) {
+      stop();
+      return;
+    }
+    sendEvent(controller, 'ping', { ts: Date.now() });
+  };
+
+  const timer = setInterval(tick, intervalMs);
+
+  const onAbort = () => stop();
+  signal.addEventListener('abort', onAbort, { once: true });
+
+  let stopped = false;
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+
+  return stop;
+}
+
+/**
  * 安全地完成并关闭数据流。
  * @param controller - ReadableStream 的控制器。
  * @param pendingImageTasks - 等待完成的后台图片生成任务列表。

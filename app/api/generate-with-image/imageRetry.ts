@@ -1,6 +1,6 @@
 import { ClothingItem } from '@prisma/client';
 import prismadb from '@/server/db';
-import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
+import { sendEvent, handleStreamError, startSseHeartbeat } from '@/server/utils/stream-helpers';
 import { callVisualDirectorAgent } from '@/server/agents/visual/director';
 import { AnchorItemImageData } from '@/server/agents/intent';
 import { StylistOutfit } from '@/server/agents/stylist';
@@ -152,6 +152,7 @@ export function createImageRetryStream(
 
   return new ReadableStream({
     async start(controller) {
+      const stopHeartbeat = startSseHeartbeat(controller, abortController.signal);
       await runWithRequestTrace(trace, async () => {
       console.log(`[ORCHESTRATOR] --- 单图重试: message=${messageId} outfit=${retryOutfitId} ---`);
 
@@ -281,6 +282,7 @@ export function createImageRetryStream(
         );
         resolveDone();
         unregisterInFlight(inFlightId);
+        stopHeartbeat();
       }
       });
     },

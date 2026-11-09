@@ -1,20 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { AccessProvider } from "@/components/access/AccessProvider";
 import { AuthBootOverlay } from "@/components/auth/AuthBootOverlay";
 import { AuthModalProvider } from "@/components/auth/AuthModalProvider";
 import { SavedOutfitsBootstrap } from "@/components/collect/SavedOutfitsBootstrap";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Fashion AI - 你的专属时尚搭配助手",
@@ -26,10 +15,17 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // System stacks — avoids Google Fonts fetch during build on offline hosts.
+  const fontStyle = {
+    ['--font-geist-sans' as string]: 'ui-sans-serif, system-ui, sans-serif',
+    ['--font-geist-mono' as string]: 'ui-monospace, monospace',
+  };
+
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className="h-full antialiased"
+      style={fontStyle}
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AccessProvider>

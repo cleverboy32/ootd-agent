@@ -155,6 +155,9 @@ export const streamResponse = async (
             case 'progress':
               handlers.onProgress?.(data);
               break;
+            case 'ping':
+              // Keep-alive from server; ignore.
+              break;
             case 'error':
               handlers.onError(data.message);
               break;

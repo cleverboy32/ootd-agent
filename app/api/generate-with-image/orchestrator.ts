@@ -1,6 +1,6 @@
 import { Part } from '@google/genai';
 import { ClothingItem } from '@prisma/client';
-import { sendEvent, handleStreamError } from '@/server/utils/stream-helpers';
+import { sendEvent, handleStreamError, startSseHeartbeat } from '@/server/utils/stream-helpers';
 import type { UserProfileResult } from '@/server/agents/user-profile';
 import type { StylistResult } from '@/server/agents/stylist';
 import type { GatekeeperIntent } from '@/server/agents/intent';
@@ -152,6 +152,7 @@ export function createMultiAgentStream(
 
   return new ReadableStream({
     async start(controller) {
+      const stopHeartbeat = startSseHeartbeat(controller, abortController.signal);
       await runWithRequestTrace(trace, async () => {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
       logLangSmithStatusOnce();
@@ -342,6 +343,7 @@ export function createMultiAgentStream(
 
         resolveDone();
         unregisterInFlight(inFlightId);
+        stopHeartbeat();
       }
       });
     },
