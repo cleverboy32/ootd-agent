@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { Heart, LogOut, Shirt, Sparkles, UserCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,13 +24,6 @@ export function ChatHeader() {
   const [loggingOut, setLoggingOut] = useState(false);
   const needsFullBody = onboardingReady && !onboardingProgress.hasFullBody;
   const [loginPromoDismissedLocal, setLoginPromoDismissedLocal] = useState(false);
-  const profileAnchorRef = useRef<HTMLDivElement>(null);
-  const [fullBodyPos, setFullBodyPos] = useState<{
-    top: number;
-    left: number;
-    placeRight: boolean;
-  } | null>(null);
-  const portalReady = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const loginPromoStoredDismissed = useSyncExternalStore(
     emptySubscribe,
     readLoginPromoDismissed,
@@ -46,26 +38,6 @@ export function ChatHeader() {
     !authenticated &&
     !loginPromoStoredDismissed &&
     !loginPromoDismissedLocal;
-
-  useLayoutEffect(() => {
-    if (!showFullBodyGuide) return;
-    const update = () => {
-      const rect = profileAnchorRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const bubbleWidth = 176;
-      const gap = 8;
-      const spaceRight = window.innerWidth - rect.right - gap;
-      const placeRight = spaceRight >= bubbleWidth;
-      setFullBodyPos({
-        top: rect.top + rect.height / 2,
-        left: placeRight ? rect.right + gap : rect.left - gap - bubbleWidth,
-        placeRight,
-      });
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [showFullBodyGuide]);
 
   async function onLogout() {
     setLoggingOut(true);
@@ -108,7 +80,7 @@ export function ChatHeader() {
               )}
             </div>
 
-            <div ref={profileAnchorRef} className="relative group">
+            <div className="relative group">
               <Button
                 variant="ghost"
                 className={`relative flex items-center gap-2 ${needsFullBody ? 'pr-4' : ''}`}
@@ -124,23 +96,17 @@ export function ChatHeader() {
                   />
                 )}
               </Button>
-              {portalReady &&
-                showFullBodyGuide &&
-                fullBodyPos &&
-                createPortal(
-                  <div
-                    className="pointer-events-auto fixed z-[100] -translate-y-1/2"
-                    style={{ top: fullBodyPos.top, left: fullBodyPos.left }}
-                  >
-                    <GuideBubble
-                      title="上传一张全身照"
-                      description="效果图会更像你"
-                      onDismiss={dismissOnboarding}
-                      arrow={fullBodyPos.placeRight ? 'left' : 'right'}
-                    />
-                  </div>,
-                  document.body
-                )}
+              {showFullBodyGuide && (
+                <div className="absolute right-0 top-full z-[60] mt-2">
+                  <GuideBubble
+                    title="上传一张全身照"
+                    description="效果图会更像你"
+                    onDismiss={dismissOnboarding}
+                    arrow="top"
+                    arrowAlign="end"
+                  />
+                </div>
+              )}
 
               <div
                 role="menu"
