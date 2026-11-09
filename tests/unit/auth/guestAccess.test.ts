@@ -10,6 +10,7 @@ describe('isGuestAllowedPath', () => {
   });
 
   it('rejects app pages that require session', () => {
+    assert.equal(isGuestAllowedPath('/home'), false);
     assert.equal(isGuestAllowedPath('/wardrobe'), false);
     assert.equal(isGuestAllowedPath('/profile'), false);
     assert.equal(isGuestAllowedPath('/settings/credits'), false);

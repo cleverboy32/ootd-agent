@@ -9,7 +9,7 @@ test.describe('navigation', () => {
     await mockWardrobeApi(page);
 
     await page.getByRole('link', { name: 'AI 搭配' }).click();
-    await expect(page).toHaveURL(/\/ootd\/?$/);
+    await expect(page).toHaveURL(/\/ootd\/home\/?$/);
     await expect(page.getByText('你好，我是你的专属时尚搭配助手')).toBeVisible();
   });
 

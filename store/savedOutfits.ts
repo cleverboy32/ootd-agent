@@ -8,10 +8,11 @@ import {
 import { useSessionStore } from '@/store/session';
 import { stripBasePath, withBasePath } from '@/lib/utils';
 
-function redirectToLogin(): void {
+function redirectToLanding(): void {
   if (typeof window === 'undefined') return;
-  const current = stripBasePath(window.location.pathname) + window.location.search;
-  window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
+  const path = stripBasePath(window.location.pathname);
+  if (path === '/' || path === '/login' || path.startsWith('/login/')) return;
+  window.location.href = withBasePath('/');
 }
 
 interface SavedOutfitsState {
@@ -76,7 +77,7 @@ export const useSavedOutfitsStore = create<SavedOutfitsState & SavedOutfitsActio
       }
     }
     if (!ok) {
-      redirectToLogin();
+      redirectToLanding();
       return;
     }
 

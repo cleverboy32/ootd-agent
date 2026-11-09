@@ -8,15 +8,19 @@ import { ensureLoggedIn, expectLoginPage, logoutViaApi } from '../helpers/live-e
 test.describe.configure({ mode: 'serial' });
 
 test.describe('live UI acceptance @live', () => {
-  test('[LIVE-U0] unauthenticated visit redirects to login', async ({ page }) => {
+  test('[LIVE-U0] unauthenticated visit stays on the marketing page', async ({ page }) => {
     await page.goto('/');
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.getByRole('heading', { name: '你好，我是你的专属时尚搭配助手' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '登录', exact: true })).toBeVisible();
+    await page.goto('/home');
     await expectLoginPage(page);
   });
 
   test('[LIVE-U1] home page renders greeting after login', async ({ page }) => {
     await ensureLoggedIn(page);
     await page.goto('/');
-    await expect(page.getByText('你好，我是你的专属时尚搭配助手')).toBeVisible();
+    await expect(page.getByPlaceholder('上传衣服照片，获取搭配建议...')).toBeEnabled();
   });
 
   test('[LIVE-U2] wardrobe page loads real wardrobe from API', async ({ page }) => {
@@ -47,13 +51,15 @@ test.describe('live UI acceptance @live', () => {
     await expect(page.getByRole('tab', { name: '上装' })).toBeVisible();
   });
 
-  test('[LIVE-A1] logout returns to login page', async ({ page }) => {
+  test('[LIVE-A1] logout returns to the marketing page', async ({ page }) => {
     await ensureLoggedIn(page);
     await page.goto('/');
     await expect(page.getByPlaceholder('上传衣服照片，获取搭配建议...')).toBeEnabled();
 
     await logoutViaApi(page);
     await page.goto('/');
+    await expect(page.getByRole('link', { name: '登录', exact: true })).toBeVisible();
+    await page.goto('/home');
     await expectLoginPage(page);
   });
 

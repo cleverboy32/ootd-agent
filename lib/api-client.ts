@@ -34,7 +34,7 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
   if (!response.ok) {
     // Try to parse the error body
     const errorBody = await response.json().catch(() => ({ message: `HTTP error! Status: ${response.status}` }));
-    // 未登录 401：访客允许页（首页）只抛错不跳转；其余页跳登录并记住来源
+    // 未登录 401：访客允许页只抛错不跳转；产品页回官网简介
     if (
       response.status === 401 &&
       errorBody?.code === 'UNAUTHENTICATED' &&
@@ -42,8 +42,7 @@ async function fetchWithClient(url: string, options: RequestInit = {}): Promise<
     ) {
       const path = stripBasePath(window.location.pathname);
       if (!isGuestAllowedPath(path)) {
-        const current = path + window.location.search;
-        window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
+        window.location.href = withBasePath('/');
       }
     }
     // Throw an error with more info for the upper layer to catch

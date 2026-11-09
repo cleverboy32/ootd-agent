@@ -26,20 +26,12 @@ interface AccessContextValue {
 
 const AccessContext = createContext<AccessContextValue | null>(null);
 
-function redirectToLogin(): void {
-  if (typeof window === "undefined") return;
-  const path = stripBasePath(window.location.pathname);
-  if (path.startsWith("/login")) return;
-  const current = path + window.location.search;
-  window.location.href = withBasePath(`/login?redirect=${encodeURIComponent(current)}`);
-}
-
-/** 未登录：仅首页/登录页可停留，其余跳登录 */
+/** 未登录：仅营销页和登录页可停留，产品页回官网简介 */
 function redirectUnlessGuestAllowed(): void {
   if (typeof window === "undefined") return;
   const path = stripBasePath(window.location.pathname);
   if (isGuestAllowedPath(path)) return;
-  redirectToLogin();
+  window.location.href = withBasePath("/");
 }
 
 export function AccessProvider({ children }: { children: ReactNode }) {
@@ -58,7 +50,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         if (!active) return;
-        // 查库瞬态失败：再试一次；仍失败则只对非访客页跳登录，不伪造首页未登录
+        // 查库瞬态失败：再试一次；仍失败则只对非访客页回官网，不伪造首页未登录
         void ensureSession({ bust: true })
           .then((snapshot) => {
             if (!active) return;
@@ -80,16 +72,8 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     } catch {
       clearSession();
     }
-    const path = stripBasePath(window.location.pathname);
-    // 首页允许访客：退出后留在首页并刷新为未登录态，不进 /login
-    if (isGuestAllowedPath(path) && path !== "/login" && !path.startsWith("/login/")) {
-      navigateWithAuthBoot(withBasePath("/"), "正在退出…");
-      return;
-    }
-    navigateWithAuthBoot(
-      withBasePath(`/login?redirect=${encodeURIComponent(path + window.location.search)}`),
-      "正在退出…"
-    );
+    // 退出后回到未登录营销页，不进登录表单
+    navigateWithAuthBoot(withBasePath("/"), "正在退出…");
   }, [clearSession]);
 
   const value = useMemo<AccessContextValue>(

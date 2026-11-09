@@ -31,6 +31,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns,
+    // src 经 withBasePath 后是 /ootd/...；landingSrc 带 ?v= 时必须省略 search
+    localPatterns: [
+      {
+        pathname: `${basePath}/landing/**`,
+      },
+      {
+        pathname: `${basePath}/**`,
+        search: '',
+      },
+    ],
   },
   async redirects() {
     if (process.env.NODE_ENV !== "development") return [];
