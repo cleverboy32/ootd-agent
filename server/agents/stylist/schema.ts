@@ -103,7 +103,11 @@ export const stylistSchema: Schema = {
               properties: {
                 id: { type: Type.STRING, description: '衣橱单品填真实 ID；用户待购锚定单品或 AI 推荐新品填 "new_item"' },
                 name: { type: Type.STRING, description: '单品名称' },
-                layer: { type: Type.STRING, description: '穿搭层级，如 inner_top (内搭上装), outerwear (外套), bottom (下装), shoes (鞋履), accessory (配饰)' },
+                layer: {
+                  type: Type.STRING,
+                  description:
+                    '穿搭层级，只能是：top（主上装：衬衫/T恤/开衫等独自可见的上装）| inner_top（内搭：外面还有外套罩着时的里层）| outerwear（外套）| bottom | dress | shoes | accessory。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。',
+                },
                 reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
                 description: {
                   type: Type.STRING,
@@ -123,7 +127,7 @@ export const stylistSchema: Schema = {
               inner_visibility: {
                 type: Type.STRING,
                 description:
-                  '内搭在画面中的可见程度，只能填 collar_only 或 open。外层罩住内搭、只需领缘暗示层次时填 collar_only；外层门襟打开、需要看清内搭前片或颜色层次时填 open。无内搭层时填 collar_only。',
+                  '内搭可见程度，只能填 collar_only 或 open。仅当 selected_items 里同时有 outerwear 与 inner_top 时有意义：外层扣合只露领缘填 collar_only；外层敞开要看清内搭前片填 open。没有外套或没有内搭时填 open。',
               },
             },
             required: ['model_pose', 'outfit_details', 'background', 'inner_visibility'],

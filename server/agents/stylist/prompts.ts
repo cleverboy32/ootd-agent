@@ -6,7 +6,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 1. 衣橱优先 (Wardrobe First)：
    - 你必须【优先】尝试使用用户衣橱 XML 列表 (<relevant_wardrobe_items>) 中的单品。这是最重要的规则。
    - 选用衣橱单品时，id 字段填该单品在 XML 中的 ref 值（如 item_0、item_1），禁止自行填写任何其他字符串。
-   - layer 必须与该条目的 mainCategory 一致。外套类（OUTERWEAR）的穿着角色是外套，禁止标成内搭，reason 里也不要把它写成内搭针织衫。
+   - layer 取值：top（主上装）| inner_top（被外套罩住的内搭）| outerwear | bottom | dress | shoes | accessory。衣橱单品 layer 须与 mainCategory 一致：TOP→top，OUTERWEAR→outerwear。外套禁止标成内搭。开衫/毛衣/衬衫若本套没有 outerwear，必须标 top，禁止标 inner_top。
    - 只有当衣橱单品不足以搭配出完美的方案时，你才可以推荐 1-2 件新品（ID 填 "new_item"），并在 reason 中注明。用户要买衣服或看新品时，这条和衣橱优先都不适用。
    - 整套重做或再次出方案时：允许继续用 new_item，但【禁止】与上一套/近期 new_item 同色同品类复读（如连续多轮都是藏青短风衣）。须换颜色或换品类轮廓；上下文若列出近期 new_item 黑名单，必须遵守。
    - 用户要买衣服或看新品时：整套都用 new_item，不要从衣橱 XML 里选任何单品。每件新品都填写 description。用户点名买冬季外套时，外套是大衣、棉服、羽绒服。有风格技能时，品类和要不要加外套按技能。
@@ -40,7 +40,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 - 为后续的绘图智能体提供画面构想，包含姿态、服装细节、背景。姿态/细节/背景全部使用中文。
 - outfit_details 只写已选单品的颜色、材质与廓形，必须与各件 description 一致。每件写清袖长、衣长、裙长或裤长的身体止点，让不懂时装行话的绘图模型也能照画；禁止只写「窄袖」「直筒」等行话。禁止写入清单之外的服装、配饰或装备；配饰的佩戴位置也只能落在已选单品上。
 - model_pose 只写姿态和神态，例如站立、行走、手的位置、视线。禁止写发色、发型、刘海、五官、脸型、年龄、身材、眼镜，也禁止写「年轻女性」这类人物设定。人物外形以参考图为准，这里不改人。
-- inner_visibility 必填 collar_only 或 open：外层罩住内搭、只需领缘暗示层次时填 collar_only；外层门襟打开、需要看清内搭前片或颜色层次时填 open；无内搭层时填 collar_only。
+- inner_visibility 必填 collar_only 或 open：仅当本套同时有 outerwear 与 inner_top 时选用——外层扣合只露领缘填 collar_only，外层敞开看清内搭填 open；没有外套或没有内搭时填 open。
 - 肤色和身材只用于选色与版型，写在 reason 里。禁止把它们写进 model_pose、outfit_details 或 background。
 `;
 

@@ -8,7 +8,10 @@ import { filterSkillsForWardrobeSearch, selectStylistOutfitSkillNames } from './
 import { selectStylistSkills } from './selectSkills';
 import { WardrobeSearchQuery, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
-import { alignStylistItemsWithWardrobe } from '@/server/utils/stylistItemAlign';
+import {
+  alignStylistItemsWithWardrobe,
+  normalizeOutfitGarmentLayers,
+} from '@/server/utils/stylistItemAlign';
 import {
   flattenOutfitPlanToQueries,
   type OutfitPlanResult,
@@ -147,14 +150,14 @@ function filterQueriesExcludingAnchorSlots(
 
 function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
   const map: Record<WardrobeSearchSlot, string> = {
-    top: 'inner_top',
+    top: 'top',
     bottom: 'bottom',
     dress: 'dress',
     shoes: 'shoes',
     outerwear: 'outerwear',
     accessory: 'accessory',
   };
-  return map[slot] ?? 'inner_top';
+  return map[slot] ?? 'top';
 }
 
 export type WardrobeSearchAuditContext = {
@@ -740,6 +743,8 @@ ${
     resolveRagRefs(parsed, ragIndexMap);
     if (ragCache && ragCache.size > 0) {
       alignStylistItemsWithWardrobe(parsed, ragCache);
+    } else {
+      normalizeOutfitGarmentLayers(parsed);
     }
     buildAndLogStylistSelection({
       result: parsed,

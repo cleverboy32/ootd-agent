@@ -75,7 +75,7 @@ export function reconcileAccessoryConcept(
 }
 
 const LAYER_BY_MAIN_CATEGORY: Record<string, string> = {
-  TOP: 'inner_top',
+  TOP: 'top',
   BOTTOM: 'bottom',
   ONE_PIECE: 'dress',
   FOOTWEAR: 'shoes',
@@ -87,6 +87,42 @@ const LAYER_BY_MAIN_CATEGORY: Record<string, string> = {
 export function layerForMainCategory(mainCategory?: string | null): string | undefined {
   if (!mainCategory?.trim()) return undefined;
   return LAYER_BY_MAIN_CATEGORY[mainCategory.trim().toUpperCase()];
+}
+
+function layerKey(layer: string): string {
+  return layer.trim().toLowerCase();
+}
+
+function isOuterwearLayer(layer: string): boolean {
+  const key = layerKey(layer);
+  return key === 'outerwear' || key.includes('outer');
+}
+
+function isInnerTopLayer(layer: string): boolean {
+  const key = layerKey(layer);
+  return key === 'inner_top' || key === 'inner' || key.includes('inner');
+}
+
+/**
+ * 纠正「没有外套却标成内搭」：开衫/衬衫等主上装应是 top。
+ * 无 outerwear 时 orphan inner_top → top，并把无意义的 collar_only 改成 open。
+ */
+export function normalizeOutfitGarmentLayers(result: StylistResult): void {
+  for (const outfit of result.outfits) {
+    const hasOuterwear = outfit.selected_items.some((item) => isOuterwearLayer(item.layer));
+    if (!hasOuterwear) {
+      for (const item of outfit.selected_items) {
+        if (!isInnerTopLayer(item.layer)) continue;
+        console.warn(
+          `[STYLIST] Coercing orphan layer ${item.layer} → top (${item.name.slice(0, 40)})`
+        );
+        item.layer = 'top';
+      }
+      if (outfit.visual_composition.inner_visibility === 'collar_only') {
+        outfit.visual_composition.inner_visibility = 'open';
+      }
+    }
+  }
 }
 
 /**
@@ -130,4 +166,5 @@ export function alignStylistItemsWithWardrobe(
       }
     }
   }
+  normalizeOutfitGarmentLayers(result);
 }

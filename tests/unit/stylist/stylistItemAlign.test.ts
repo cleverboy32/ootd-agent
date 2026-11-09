@@ -7,6 +7,7 @@ import {
 import {
   alignStylistItemsWithWardrobe,
   layerForMainCategory,
+  normalizeOutfitGarmentLayers,
   reconcileAccessoryOutfitDetails,
 } from '@/server/utils/stylistItemAlign';
 import type { StylistResult } from '@/server/agents/stylist/schema';
@@ -105,8 +106,84 @@ describe('alignStylistItemsWithWardrobe', () => {
 describe('layerForMainCategory', () => {
   it('maps outerwear and top to their outfit layers', () => {
     assert.equal(layerForMainCategory('OUTERWEAR'), 'outerwear');
-    assert.equal(layerForMainCategory('top'), 'inner_top');
+    assert.equal(layerForMainCategory('top'), 'top');
     assert.equal(layerForMainCategory(''), undefined);
+  });
+});
+
+describe('normalizeOutfitGarmentLayers', () => {
+  it('coerces orphan inner_top to top when outfit has no outerwear', () => {
+    const result: StylistResult = {
+      outfits: [
+        {
+          id: 'outfit_1',
+          overall_concept: '韩系短款开衫',
+          selected_items: [
+            {
+              id: 'new_item',
+              name: '暖米色短款V领针织开衫',
+              layer: 'inner_top',
+              reason: '主上装',
+              description: '暖米色针织开衫，V领，长袖。',
+            },
+            {
+              id: 'new_item',
+              name: '炭灰色高腰直筒西装裤',
+              layer: 'bottom',
+              reason: '下装',
+              description: '炭灰色西装裤。',
+            },
+          ],
+          visual_composition: {
+            model_pose: '站立',
+            outfit_details: '开衫配西裤',
+            background: '室内',
+            inner_visibility: 'collar_only',
+          },
+        },
+      ],
+    };
+
+    normalizeOutfitGarmentLayers(result);
+    assert.equal(result.outfits[0].selected_items[0].layer, 'top');
+    assert.equal(result.outfits[0].visual_composition.inner_visibility, 'open');
+  });
+
+  it('keeps inner_top when outerwear is present', () => {
+    const result: StylistResult = {
+      outfits: [
+        {
+          id: 'outfit_1',
+          overall_concept: '大衣叠穿',
+          selected_items: [
+            {
+              id: 'new_item',
+              name: '米白高领',
+              layer: 'inner_top',
+              reason: '内搭',
+              description: '米白高领。',
+            },
+            {
+              id: 'new_item',
+              name: '炭灰大衣',
+              layer: 'outerwear',
+              reason: '外套',
+              description: '炭灰大衣。',
+            },
+          ],
+          visual_composition: {
+            model_pose: '站立',
+            outfit_details: '大衣配高领',
+            background: '街头',
+            inner_visibility: 'collar_only',
+          },
+        },
+      ],
+    };
+
+    normalizeOutfitGarmentLayers(result);
+    assert.equal(result.outfits[0].selected_items[0].layer, 'inner_top');
+    assert.equal(result.outfits[0].visual_composition.inner_visibility, 'collar_only');
   });
 });
 
