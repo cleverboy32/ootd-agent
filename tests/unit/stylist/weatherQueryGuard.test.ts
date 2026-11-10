@@ -44,13 +44,31 @@ describe('applyWeatherQueryGuard', () => {
     assert.equal(changes.some((c) => c.slot === 'dress'), false);
   });
 
-  it('rewrites heavy outerwear in thin band', () => {
+  it('rewrites heavy outerwear in cool/mid band to mid-weight', () => {
     const { queries, changes } = applyWeatherQueryGuard(
       [{ slot: 'outerwear', query: '轻薄羽绒服' }],
       { weather, skillNames: skills, userMessage: '上班' }
     );
-    assert.equal(queries[0]?.query, '薄针织开衫');
+    assert.equal(queries[0]?.query, '摇粒绒外套');
     assert.ok(changes.some((c) => c.slot === 'outerwear'));
+  });
+
+  it('keeps mid-weight 薄棉服 in cool band', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '薄棉服 立领' }],
+      { weather, skillNames: skills, userMessage: '上班' }
+    );
+    assert.equal(queries[0]?.query, '薄棉服 立领');
+    assert.equal(changes.length, 0);
+  });
+
+  it('upgrades thin outer to mid-weight in cool band', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '薄针织开衫' }],
+      { weather, skillNames: skills, userMessage: '出门' }
+    );
+    assert.equal(queries[0]?.query, '摇粒绒外套');
+    assert.ok(changes.some((c) => c.slot === 'outerwear' && c.to === '摇粒绒外套'));
   });
 
   it('rewrites plain 大衣 (not only 厚大衣) in mild_cool 19℃', () => {
@@ -90,13 +108,29 @@ describe('applyWeatherQueryGuard', () => {
     assert.equal(changes.length, 0);
   });
 
-  it('appends thin outerwear when cool sandwich missing outer slot', () => {
+  it('appends mid outerwear when cool sandwich missing outer slot', () => {
     const { queries, changes } = applyWeatherQueryGuard(
       [
         { slot: 'top', query: '奶白色泡泡袖针织衫' },
         { slot: 'bottom', query: '米白色高腰直筒裤' },
       ],
       { weather, skillNames: skills, userMessage: '甜美' }
+    );
+    assert.ok(queries.some((q) => q.slot === 'outerwear' && q.query === '摇粒绒外套'));
+    assert.ok(changes.some((c) => c.slot === 'outerwear' && c.from === ''));
+  });
+
+  it('appends thin outerwear when mild_cool sandwich missing outer slot', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
+      [
+        { slot: 'top', query: '长袖衬衫' },
+        { slot: 'bottom', query: '直筒裤' },
+      ],
+      {
+        weather: '重庆城区，多云，19℃',
+        skillNames: skills,
+        userMessage: '通勤',
+      }
     );
     assert.ok(queries.some((q) => q.slot === 'outerwear' && q.query === '薄针织开衫'));
     assert.ok(changes.some((c) => c.slot === 'outerwear' && c.from === ''));

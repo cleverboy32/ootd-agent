@@ -29,6 +29,8 @@ describe('loadSkill', () => {
     const body = loadSkill('weather-dressing');
     assert.match(body, /## 温度档位/);
     assert.match(body, /## 修正项/);
+    assert.match(body, /中厚外套/);
+    assert.match(body, /凉 \| 13–17℃[\s\S]*?中厚/);
   });
 
   it('不存在的 skill 抛出含名称的错误', () => {
