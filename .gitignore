@@ -45,3 +45,12 @@ next-env.d.ts
 \n# local env files\n.env.local
 gcs-service-account.json
 server/node_modules
+
+# 比赛路演大文件（本地保留，勿进仓；历史已剔除）
+design/match/*.pptx
+design/match/assets/demo.mov
+design/match/assets/demo.mp4
+
+# 个人照片
+/you-in-my-mind.jpg
+/your-face-in-my-mind.jpg
