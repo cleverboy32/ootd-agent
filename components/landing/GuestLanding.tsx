@@ -179,7 +179,11 @@ export function GuestLanding({ signupGrant }: { signupGrant: number }) {
   const { openAuthModal } = useAuthModal();
 
   function openLogin() {
-    openAuthModal({ redirect: PRODUCT_HOME });
+    openAuthModal({ redirect: PRODUCT_HOME, panel: 'login' });
+  }
+
+  function openRegister() {
+    openAuthModal({ redirect: PRODUCT_HOME, panel: 'register' });
   }
 
   return (
@@ -236,7 +240,7 @@ export function GuestLanding({ signupGrant }: { signupGrant: number }) {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={openLogin}
+                onClick={openRegister}
                 className="rounded-full bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-[var(--gold)]/90"
               >
                 注册领积分，免费体验
@@ -432,10 +436,10 @@ export function GuestLanding({ signupGrant }: { signupGrant: number }) {
             </div>
             <button
               type="button"
-              onClick={openLogin}
+              onClick={openRegister}
               className="shrink-0 rounded-full bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-neutral-950 hover:bg-[var(--gold)]/90"
             >
-              立即登录领取积分
+              立即注册领取积分
             </button>
           </div>
         </section>
