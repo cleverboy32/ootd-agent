@@ -198,12 +198,17 @@ export function collectRecentWardrobeIds(
   return ids;
 }
 
+/**
+ * 仅在「整套重做」或「同会话再次要整套搭」时避重。
+ * 无 prior 指纹/名单时 build 会返回空串（首轮自然不触发）。
+ * feedback_revision 不走这里：用户在改指定槽，不是推倒重来。
+ */
 function shouldEmitDiversity(requestType: string): boolean {
   return requestType === 'outfit_redo' || requestType === 'wardrobe_outfit';
 }
 
 /**
- * outfit_redo / 再次出整套：禁止同形制分支+色系指纹复读；附 new_item 字面黑名单与衣橱冷却。
+ * outfit_redo / 反复 wardrobe_outfit：禁止同形制+色系指纹复读；附 new_item 黑名单与衣橱冷却。
  */
 export function buildNewItemDiversityBlock(
   requestType: string,
@@ -226,7 +231,7 @@ export function buildNewItemDiversityBlock(
   if (fingerprints.length > 0) {
     lines.push(
       `- 近期方案形制/色系指纹：${fingerprints.join(' ； ')}`,
-      '- 本轮【必须】换形制分支或主色块（overall_concept 写明新的「形制=」或「路径=」）；禁止同指纹微调。'
+      '- 本轮【必须】换关键槽品类轮廓或主色（至少换鞋/下装/外套之一的品类轮廓）；有风格技能时 overall_concept 写明新的「形制=」或「路径=」。禁止同指纹微调（如仍是乐福鞋+直筒裤只换邻色）。'
     );
   }
 

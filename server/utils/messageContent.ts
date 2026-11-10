@@ -42,6 +42,45 @@ export function extractStylistCache(content: unknown): StylistCacheNode | null {
   return (node as StylistCacheNode) ?? null;
 }
 
+const HISTORY_LAYER_ORDER = [
+  'top',
+  'inner_top',
+  'outerwear',
+  'bottom',
+  'dress',
+  'shoes',
+  'accessory',
+] as const;
+
+/** 把 stylist_cache 收成精简方案结构，供 history 替代文案散文（不含避重指令）。 */
+export function formatStylistResultForHistory(result: StylistResult): string {
+  const outfits = result.outfits ?? [];
+  if (outfits.length === 0) return '';
+
+  const lines: string[] = ['【上轮搭配方案】'];
+
+  for (const outfit of outfits) {
+    lines.push(`${outfit.id} | ${outfit.overall_concept?.trim() || '（无概念）'}`);
+    const items = [...(outfit.selected_items ?? [])].sort((a, b) => {
+      const ai = HISTORY_LAYER_ORDER.indexOf(
+        a.layer as (typeof HISTORY_LAYER_ORDER)[number]
+      );
+      const bi = HISTORY_LAYER_ORDER.indexOf(
+        b.layer as (typeof HISTORY_LAYER_ORDER)[number]
+      );
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    for (const item of items) {
+      const layer = item.layer?.trim() || '?';
+      const name = item.name?.trim() || '（未命名）';
+      const src = item.id === 'new_item' ? 'new' : 'wardrobe';
+      lines.push(`- ${layer}: ${name} (${src})`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function extractImageStates(content: unknown): Record<string, ImageState> {
   const node = asContentArray(content).find((p) => p.type === 'image_states') as
     | ImageStatesNode

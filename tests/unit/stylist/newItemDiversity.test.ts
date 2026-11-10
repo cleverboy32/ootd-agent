@@ -116,13 +116,28 @@ describe('buildNewItemDiversityBlock', () => {
     assert.match(block, /短打劲装/);
     assert.match(block, /藏青短风衣|藏青色短款风衣/);
     assert.match(block, /id-1/);
-    assert.match(block, /换形制分支/);
+    assert.match(block, /换关键槽品类轮廓|形制=/);
+  });
+
+  it('emits for wardrobe_outfit when prior fingerprints exist', () => {
+    const block = buildNewItemDiversityBlock('wardrobe_outfit', [], {
+      fingerprints: ['sil:乐福+直筒|col:米'],
+    });
+    assert.match(block, /方案多样性/);
+    assert.match(block, /乐福/);
   });
 
   it('skips empty labels and non-regen types', () => {
     assert.equal(buildNewItemDiversityBlock('outfit_redo', []), '');
+    assert.equal(buildNewItemDiversityBlock('wardrobe_outfit', []), '');
     assert.equal(
       buildNewItemDiversityBlock('clarify', ['outerwear: 藏青色短款风衣']),
+      ''
+    );
+    assert.equal(
+      buildNewItemDiversityBlock('feedback_revision', [], {
+        fingerprints: ['sil:乐福'],
+      }),
       ''
     );
   });

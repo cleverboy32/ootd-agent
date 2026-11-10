@@ -1,6 +1,9 @@
-import { Content, Part } from "@google/genai";
+import { Content, Part } from '@google/genai';
 import { Message } from '../types/message';
-
+import {
+  extractStylistCache,
+  formatStylistResultForHistory,
+} from './messageContent';
 
 export const CONTEXT_TOKEN_LIMIT = 500000; // 远低于模型1M上下文上限
 
@@ -30,13 +33,21 @@ export async function formatHistoryAsync(messages: Message[]): Promise<Content[]
     }
 
     const apiParts: Part[] = [];
+    const stylistCache = role === 'model' ? extractStylistCache(message.content) : null;
+    const outfitHistoryText = stylistCache
+      ? formatStylistResultForHistory(stylistCache.stylist_result)
+      : '';
 
-    // 2. 内容部分（Parts）转换：遍历消息中的每个内容部分
+    // 2. 内容部分（Parts）转换：有搭配 cache 时用精简方案结构替换文案散文
     for (const part of message.content) {
       if (part.type === 'text') {
+        if (outfitHistoryText) continue;
         if (typeof part.content === 'string' && part.content.length > 0) {
           apiParts.push({ text: part.content });
         }
+      } else if (part.type === 'stylist_cache') {
+        // 已在循环外抽出；此处跳过，避免重复
+        continue;
       } else if (part.type === 'wardrobe_candidates') {
         // Keep candidate ids in model history so verbal confirm can bind to the shown item.
         const ids = (part.items ?? [])
@@ -57,17 +68,18 @@ export async function formatHistoryAsync(messages: Message[]): Promise<Content[]
       }
     }
 
+    if (outfitHistoryText) {
+      apiParts.unshift({ text: outfitHistoryText });
+    }
+
     // 3. 只有在成功转换出内容部分后，才将该条消息添加到历史记录中
     if (apiParts.length > 0) {
       historyForAI.push({
-        role: role,
+        role,
         parts: apiParts,
       });
     }
   }
-
-  // 打印日志以供调试，检查转换后的结构是否正确
-  // console.log('[FORMAT_DEBUG] Formatted History:', JSON.stringify(historyForAI, null, 2));
 
   return historyForAI;
 }

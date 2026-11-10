@@ -507,8 +507,10 @@ export async function stylistNode(
         }
       }
     }
+    // outfit_redo：明确整套重做；wardrobe_outfit：同会话反复要搭（有 prior 才产生多样性块）
     const priorStylistResults =
-      intent.request_type === 'outfit_redo' && runtime.conversationId
+      runtime.conversationId &&
+      (intent.request_type === 'outfit_redo' || intent.request_type === 'wardrobe_outfit')
         ? await getPriorStylistResults(runtime.conversationId, messageId)
         : [];
     const turn = await callStylistTurn(
