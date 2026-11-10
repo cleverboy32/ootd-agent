@@ -82,10 +82,10 @@ export default function CreditsSettingsPage() {
   }
 
   return (
-    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+    <div className="grid h-dvh w-full overflow-hidden md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
       <AppSidebar activeSection="profile" />
-      <div className="flex flex-col">
-        <header className="flex h-14 items-center gap-2 border-b px-4 lg:h-15 lg:px-6">
+      <div className="flex min-h-0 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 lg:h-15 lg:px-6">
           <Link
             href="/"
             aria-label="返回"
@@ -96,7 +96,7 @@ export default function CreditsSettingsPage() {
           <h1 className="text-lg font-semibold">账单</h1>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
           <div className="w-full space-y-4">
             {loading ? (
               <div className="space-y-4">

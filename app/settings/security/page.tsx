@@ -354,11 +354,11 @@ export default function SecuritySettingsPage() {
   }, [ready, authenticated, user, router]);
 
   return (
-    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+    <div className="grid h-dvh w-full overflow-hidden md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
       <AppSidebar activeSection="profile" />
 
-      <div className="flex flex-col">
-        <header className="flex h-14 items-center gap-2 border-b px-4 lg:h-15 lg:px-6">
+      <div className="flex min-h-0 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 lg:h-15 lg:px-6">
           <Link
             href="/profile"
             aria-label="返回我的档案"
@@ -369,7 +369,7 @@ export default function SecuritySettingsPage() {
           <h1 className="text-lg font-semibold">安全中心</h1>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
           {loading ? (
             <div className="space-y-4 w-full">
               <Skeleton className="h-40 w-full rounded-xl" />

@@ -20,14 +20,14 @@ function WardrobePageInner() {
   const visibleView = canMutate ? activeView : 'display';
 
   return (
-    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+    <div className="grid h-dvh w-full overflow-hidden md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
       <AppSidebar
         activeSection="wardrobe"
         onSelectWardrobe={switchToDisplay}
       />
-      <div className="relative flex flex-col">
+      <div className="relative flex min-h-0 flex-col overflow-hidden">
         <MainHeader activeView={visibleView} onBackToDisplay={switchToDisplay} />
-        <main className="flex flex-1 flex-col overflow-y-auto">
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {visibleView === 'display' && (
             <div className="p-4 lg:p-6">
               <DisplayView onAddItems={switchToAdd} />
