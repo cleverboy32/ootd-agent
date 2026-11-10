@@ -69,6 +69,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
         setFetchError(result.error);
       } else {
         setItems(result.items);
+        // 有衣物时同步引导态；refresh 已稳定，但仍只在挂载拉一次，避免重复 force hydrate
         if (result.items.length > 0) void refreshOnboarding();
       }
       setIsLoading(false);
@@ -77,6 +78,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     return () => {
       active = false;
     };
+    // refreshOnboarding 经 useCallback 稳定；deps 故意不含 items，仅挂载拉取
   }, [refreshOnboarding]);
 
   const getFilteredItems = useCallback(

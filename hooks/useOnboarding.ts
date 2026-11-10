@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useChatStore } from '@/store/chat';
 import { useOnboardingStore } from '@/store/onboarding';
 import { useSessionStore } from '@/store/session';
@@ -21,12 +21,24 @@ export function useOnboarding() {
     void hydrate(hasConversations);
   }, [hasConversations, hydrate, sessionUserId]);
 
+  const dismiss = useCallback(
+    () => dismissStore(hasConversations),
+    [dismissStore, hasConversations]
+  );
+
+  // 必须稳定引用：DisplayView 等会把 refresh 放进 useEffect deps，
+  // 内联箭头每次 render 都变 → 拉衣橱 → force hydrate → 再 render → 死循环刷 /api/wardrobe
+  const refresh = useCallback(
+    () => hydrate(hasConversations, { force: true }),
+    [hasConversations, hydrate]
+  );
+
   return {
     ready,
     step,
     progress,
-    dismiss: () => dismissStore(hasConversations),
+    dismiss,
     completeChat,
-    refresh: () => hydrate(hasConversations, { force: true }),
+    refresh,
   };
 }
