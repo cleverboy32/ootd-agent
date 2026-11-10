@@ -1,5 +1,4 @@
 import type { UserProfileResult } from '@/server/agents/user-profile';
-import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { isVisualProfileVerified } from '@/server/utils/userProfileVisual';
 import { legacyUploadPrefixFor } from '@/server/auth/legacyUploadPrefix';
 import { buildCosObjectKey, getCosPublicUrl } from '@/server/services/cos';
@@ -10,7 +9,6 @@ export const PROFILE_METADATA_KEYS = [
   'selfie_image_url',
   'selfie_analyzed_at',
   'location',
-  'suited_style',
   'gender',
 ] as const;
 
@@ -102,13 +100,16 @@ export function mergeVisualAnalysisIntoProfile(
   imageUrl: string
 ): Record<string, unknown> {
   const gender = visualResult.gender?.trim();
+  const { suited_style: _dropPhotoStyle, ...restExisting } = existingProfile;
+  void _dropPhotoStyle;
+  void visualResult.suited_style;
   return {
-    ...existingProfile,
+    ...restExisting,
     // 新照片判断不出性别时保留旧值，避免被空值抹掉
     ...(gender ? { gender } : {}),
     skin_tone: visualResult.skin_tone,
     body_shape: visualResult.body_shape,
-    suited_style: canonicalSuitedStyle(visualResult.suited_style),
+    // 不再写入照片推断的 suited_style；风格看 personal_style / preferences
     visual_features: visualResult.visual_features,
     visual_profile_verified: true,
     full_body_verified: true,

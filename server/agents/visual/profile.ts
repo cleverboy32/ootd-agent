@@ -12,7 +12,7 @@ export interface VisualProfileResult {
   gender: string;
   skin_tone: string;
   body_shape: string;
-  /** 适合的风格，只取已有技能对应的一个词；不合格照片为空 */
+  /** @deprecated 不再由照片推断风格；恒为空，保留字段兼容落库 */
   suited_style: string;
   visual_features: {
     hair_color: string;
@@ -57,17 +57,16 @@ const visualProfileSchema: Schema = {
     skin_tone: {
       type: Type.STRING,
       description:
-        '肤色色调（冷/暖）及穿搭色彩建议。非人物照时填空字符串。',
+        '只写肤色客观说明：冷/暖/中性，深浅可带一句。禁止写适合穿什么色、忌什么色或任何搭配建议。非人物照时填空字符串。',
     },
     body_shape: {
       type: Type.STRING,
       description:
-        '身材类型（如沙漏型、梨型、矩形型等）及版型建议。非人物照时填空字符串。',
+        '只写身材客观说明：能判断时给出明确类型词（梨型、苹果型、沙漏型、矩形/匀称、倒三角等）及肩腰胯相对量感。禁止写穿搭、版型、下装选什么、色彩建议。拿不准就留空，不要写「偏×型且匀称」这类含糊句。非人物照时填空字符串。',
     },
     suited_style: {
       type: Type.STRING,
-      description:
-        '这个人适合的风格，只填一个词：新中式、老钱、汉服、潮酷、甜美、法式、韩系、极简、文艺、通勤。根据身形比例、肩腰量感和气质判断。照片里的家居服、拖鞋、随手穿的衣服不能当风格依据。国风/古风气质填「新中式」。对不上或不合格照片填空字符串。',
+      description: '已废弃：恒填空字符串。风格留给用户个人偏好与当轮点名，不由照片推断。',
     },
     visual_features: {
       type: Type.OBJECT,
@@ -106,10 +105,10 @@ const VISUAL_PROFILE_SYSTEM_INSTRUCTION = `
 
 【分析维度】
 0. 性别 (gender)：只填「男」或「女」。看面部特征、发型与整体气质综合判断；无法可靠判断或非人物照填空字符串。不要仅凭穿着判断（裙子不等于女性）。
-1. 肤色 (skin_tone)：判断冷/暖色调，给出适合的色彩建议。非人物照填空字符串。
-2. 身材 (body_shape)：能判断时写身材类型与版型建议。看不清就留空，不要因此判失败。
+1. 肤色 (skin_tone)：只写冷/暖/中性与深浅等客观说明。禁止写适合哪些颜色、忌哪些颜色、或任何穿搭色彩建议（搭配阶段再判断）。非人物照填空字符串。
+2. 身材 (body_shape)：只写客观体型。能判断时用明确类型词（梨型、苹果型、沙漏型、矩形/匀称、倒三角等），可补一句肩/腰/胯相对量感。禁止写穿搭建议、版型建议、下装选 A 字/直筒等。看不清或只是「略偏」就留空，不要写「偏×型且匀称」这类骑墙句；不要因此判失败。
 3. 外形特征 (visual_features)：发色、发型、眼镜等客观描述。
-4. 适合的风格 (suited_style)：只填一个词，新中式、老钱、汉服、潮酷、甜美、法式、韩系、极简、文艺、通勤。看身形比例、肩腰量感和气质，不看照片里正在穿的家居服、拖鞋或随手衣服。国风/古风气质填「新中式」。对不上就空着。不合格照片也空着。
+4. suited_style：恒填空字符串。不要根据照片推断适合风格；风格由用户个人偏好与当轮点名决定。
 
 【语言要求】
 所有面向用户的文字必须使用简体中文。
@@ -134,7 +133,10 @@ export async function analyzeVisualProfileFromImage(imageUrl: string): Promise<V
           {
             role: 'user',
             parts: [
-              { text: '请判断这张照片能否作为人物全身参考，分析外形特征，并判断适合的风格。不要根据照片里正在穿的衣服判断风格。' },
+              {
+                text:
+                  '请判断这张照片能否作为人物全身参考，并只做客观外形分析：肤色说明、身材类型说明、外形特征。肤色与身材不要写穿搭或色彩建议。suited_style 填空。不要根据照片推断适合风格。',
+              },
               imagePart,
             ],
           },
@@ -149,5 +151,8 @@ export async function analyzeVisualProfileFromImage(imageUrl: string): Promise<V
   }
 
   console.log('[VISUAL_PROFILE_AGENT] Raw response:', responseText);
-  return JSON.parse(responseText) as VisualProfileResult;
+  const parsed = JSON.parse(responseText) as VisualProfileResult;
+  // 风格不由照片推断；个人偏好留给档案 personal_style / preferences
+  parsed.suited_style = '';
+  return parsed;
 }

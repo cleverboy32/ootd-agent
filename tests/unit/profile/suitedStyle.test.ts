@@ -31,19 +31,20 @@ describe('canonicalSuitedStyle', () => {
 });
 
 describe('mergeVisualAnalysisIntoProfile', () => {
-  it('stores the judged style without treating the photo clothes as a style', () => {
+  it('does not store photo-inferred suited_style; keeps personal preferences', () => {
     const merged = mergeVisualAnalysisIntoProfile(
-      { personal_style: '日常休闲', preferences: ['常穿灰白'] },
+      { personal_style: '日常休闲', preferences: ['常穿灰白'], suited_style: '甜美' },
       {
         skin_tone: '冷调',
-        body_shape: '肩窄，比例偏长',
+        body_shape: '梨型',
         suited_style: '更接近韩系，不是照片里的家居服',
         visual_features: { hair_color: '黑色', detected_features: '气质偏安静' },
       },
       'https://example.com/portrait.jpg'
     );
-    assert.equal(merged.suited_style, '韩系');
+    assert.equal(merged.suited_style, undefined);
     assert.equal(merged.personal_style, '日常休闲');
+    assert.deepEqual(merged.preferences, ['常穿灰白']);
     assert.equal(merged.visual_profile_verified, true);
   });
 
@@ -60,24 +61,29 @@ describe('mergeVisualAnalysisIntoProfile', () => {
     );
     assert.equal(first.gender, '男');
 
-    const second = mergeVisualAnalysisIntoProfile(first, {
-      gender: '',
-      skin_tone: '冷调',
-      body_shape: '肩宽',
-      visual_features: { hair_color: '黑色', detected_features: '短发' },
-    }, 'https://example.com/portrait2.jpg');
+    const second = mergeVisualAnalysisIntoProfile(
+      first,
+      {
+        gender: '',
+        skin_tone: '冷调',
+        body_shape: '肩宽',
+        visual_features: { hair_color: '黑色', detected_features: '短发' },
+      },
+      'https://example.com/portrait2.jpg'
+    );
     assert.equal(second.gender, '男');
   });
 });
 
 describe('mergeChatProfileForPersistence', () => {
-  it('keeps the judged style when the chat profile agent does not write it', () => {
+  it('does not require suited_style from visual metadata', () => {
     const merged = mergeChatProfileForPersistence(chatResult, {
       visual_profile_verified: true,
-      suited_style: '韩系',
+      gender: '女',
     });
-    assert.equal(merged.suited_style, '韩系');
+    assert.equal(merged.suited_style, undefined);
     assert.equal(merged.personal_style, '日常休闲');
+    assert.equal(merged.gender, '女');
   });
 
   it('keeps photo gender when the chat profile agent does not write it', () => {

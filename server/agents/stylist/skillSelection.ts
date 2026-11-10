@@ -47,7 +47,9 @@ export type StylistSkillProfile = {
   gender?: string;
   /** 用户自己说过的风格；「日常休闲」是没填时的占位，不当成风格 */
   personal_style?: string;
-  /** 照片判断出的适合风格，只在这轮没点名风格时使用 */
+  /** 用户长期偏好（如常穿灰白）；风格选择优先看这个，而不是照片气质 */
+  preferences?: string[];
+  /** @deprecated 不再由照片写入；保留字段兼容旧档案 */
   suited_style?: string;
 };
 

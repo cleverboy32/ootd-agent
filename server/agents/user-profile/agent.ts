@@ -9,7 +9,6 @@ import {
   isVisualProfileVerified,
   readVerifiedVisualProfile,
 } from '@/server/utils/userProfileVisual';
-import { canonicalSuitedStyle } from '@/server/agents/stylist/skillSelection';
 import { mergeChatProfileForPersistence } from '@/server/utils/profileMetadata';
 import { updateUserProfileData } from '@/server/utils/profileWrite';
 import { extractConfirmedWardrobeId, type GatekeeperIntent } from '../intent';
@@ -129,11 +128,8 @@ export function profileFromDbRecord(dbProfile: Record<string, unknown>): UserPro
         ? dbProfile.personal_style
         : '日常休闲',
     ...visual,
-    suited_style: isVisualProfileVerified(dbProfile)
-      ? canonicalSuitedStyle(
-          typeof dbProfile.suited_style === 'string' ? dbProfile.suited_style : ''
-        )
-      : '',
+    // 风格不看照片 suited_style；交给 personal_style / preferences
+    suited_style: '',
   };
 }
 

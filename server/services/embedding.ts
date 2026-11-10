@@ -50,7 +50,7 @@ export function getTextSimilarityThresholds(): EmbeddingSimilarityThresholds {
   return {
     search: 0.48,
     slotWeak: 0.55,
-    slotAdequate: 0.62,
+    slotAdequate: 0.6,
     slotConfidenceGap: 0.04,
     resolveThreshold: 0.68,
     ambiguousMin: 0.55,
