@@ -81,5 +81,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   clearSession: () => {
     inflight = null;
     set({ ready: true, authenticated: false, user: undefined });
+    // 动态引入，避免 session ↔ wardrobe-items 循环依赖
+    void import('@/store/wardrobe-items-store').then(({ useWardrobeItemsStore }) => {
+      useWardrobeItemsStore.getState().reset();
+    });
   },
 }));

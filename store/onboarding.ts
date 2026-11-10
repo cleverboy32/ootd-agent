@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { apiClient } from '@/lib/api-client';
 import { fetchProfile } from '@/lib/api/profile';
 import { useSessionStore } from '@/store/session';
+import { useWardrobeItemsStore } from '@/store/wardrobe-items-store';
 import {
   completeChatOnboarding,
   dismissOnboardingStep,
@@ -19,6 +19,8 @@ type OnboardingStore = {
   step: OnboardingStep;
   progress: OnboardingProgress;
   hydrate: (hasConversations: boolean, options?: HydrateOptions) => Promise<void>;
+  /** 衣橱本地变更后同步 hasWardrobe，不打网 */
+  syncHasWardrobe: (hasConversations?: boolean) => void;
   dismiss: (hasConversations: boolean) => void;
   completeChat: () => void;
 };
@@ -55,7 +57,11 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
         });
         return;
       }
-      const nextProgress = { ...progress, hasConversations };
+      const nextProgress = {
+        ...progress,
+        hasConversations,
+        hasWardrobe: useWardrobeItemsStore.getState().items.length > 0 || progress.hasWardrobe,
+      };
       set({
         progress: nextProgress,
         step: resolveOnboardingStep(userId, nextProgress),
@@ -63,7 +69,7 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
       return;
     }
 
-    if (hydrateInFlight && !force && hydratedUserId === userId) {
+    if (!force && hydrateInFlight) {
       await hydrateInFlight;
       const after = get();
       if (after.userId === userId && after.progress.hasConversations !== hasConversations) {
@@ -83,7 +89,11 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
       return;
     }
 
-    const run = (async () => {
+    if (force && hydrateInFlight) {
+      await hydrateInFlight;
+    }
+
+    const request = (async () => {
       if (!authenticated || !userId) {
         const guestProgress: OnboardingProgress = {
           hasWardrobe: false,
@@ -99,13 +109,13 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
         return;
       }
 
-      const [wardrobe, profile] = await Promise.all([
-        apiClient.get('/api/wardrobe').catch(() => []),
+      const [, profile] = await Promise.all([
+        useWardrobeItemsStore.getState().ensureLoaded({ force }).catch(() => undefined),
         fetchProfile().catch(() => null),
       ]);
-      const items = Array.isArray(wardrobe) ? wardrobe : [];
+      const hasWardrobe = useWardrobeItemsStore.getState().items.length > 0;
       const nextProgress: OnboardingProgress = {
-        hasWardrobe: items.length > 0,
+        hasWardrobe,
         hasFullBody: profile?.full_body_verified === true,
         hasConversations,
       };
@@ -115,12 +125,35 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
         progress: nextProgress,
         step: resolveOnboardingStep(userId, nextProgress),
       });
-    })();
-
-    hydrateInFlight = run.finally(() => {
-      hydrateInFlight = null;
+    })().finally(() => {
+      if (hydrateInFlight === request) hydrateInFlight = null;
     });
-    await hydrateInFlight;
+
+    hydrateInFlight = request;
+    await request;
+  },
+
+  syncHasWardrobe: (hasConversations) => {
+    const { progress, userId, ready } = get();
+    if (!ready || !userId) return;
+    const hasWardrobe = useWardrobeItemsStore.getState().items.length > 0;
+    const nextConversations =
+      typeof hasConversations === 'boolean' ? hasConversations : progress.hasConversations;
+    if (
+      progress.hasWardrobe === hasWardrobe &&
+      progress.hasConversations === nextConversations
+    ) {
+      return;
+    }
+    const nextProgress: OnboardingProgress = {
+      ...progress,
+      hasWardrobe,
+      hasConversations: nextConversations,
+    };
+    set({
+      progress: nextProgress,
+      step: resolveOnboardingStep(userId, nextProgress),
+    });
   },
 
   dismiss: (hasConversations) => {

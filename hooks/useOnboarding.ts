@@ -26,19 +26,11 @@ export function useOnboarding() {
     [dismissStore, hasConversations]
   );
 
-  // 必须稳定引用：DisplayView 等会把 refresh 放进 useEffect deps，
-  // 内联箭头每次 render 都变 → 拉衣橱 → force hydrate → 再 render → 死循环刷 /api/wardrobe
-  const refresh = useCallback(
-    () => hydrate(hasConversations, { force: true }),
-    [hasConversations, hydrate]
-  );
-
   return {
     ready,
     step,
     progress,
     dismiss,
     completeChat,
-    refresh,
   };
 }

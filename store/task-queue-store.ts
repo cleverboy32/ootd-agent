@@ -133,10 +133,16 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
 
       } else if (type === 'analyze') {
         if (!fileData.publicUrl) throw new Error('Cannot analyze, public URL is missing.');
-        await executeAnalysis(fileData.publicUrl);
+        const analyzed = await executeAnalysis(fileData.publicUrl);
 
         // Analysis task succeeds: Set final status to 'success'
         updateFileStatus(fileId, { status: 'success' });
+        if (analyzed && typeof analyzed === 'object' && 'id' in analyzed) {
+          const { useWardrobeItemsStore } = await import('@/store/wardrobe-items-store');
+          const { useOnboardingStore } = await import('@/store/onboarding');
+          useWardrobeItemsStore.getState().upsert(analyzed as never);
+          useOnboardingStore.getState().syncHasWardrobe();
+        }
       }
     } catch (error: unknown) {
       console.error(`TaskRunner: Error processing ${type} for ${fileId}:`, error);

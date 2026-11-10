@@ -5,10 +5,10 @@ import type { ClothingItem } from '@prisma/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WardrobeGrid } from '@/components/wardrobe/wardrobe-grid';
 import { Button } from '@/components/ui/button';
-import { withBasePath } from '@/lib/utils';
 import { deleteWardrobeItem, deleteWardrobeItems, reanalyzeWardrobeItem } from '@/lib/api/wardrobe';
 import { useAccess } from '@/components/access/AccessProvider';
-import { useOnboarding } from '@/hooks/useOnboarding';
+import { useOnboardingStore } from '@/store/onboarding';
+import { useWardrobeItemsStore } from '@/store/wardrobe-items-store';
 
 const categories = [
   { value: 'all', label: '全部' },
@@ -20,66 +20,40 @@ const categories = [
   { value: 'ONE_PIECE', label: '连身' },
 ] as const;
 
-async function requestWardrobeItems(): Promise<{ items: ClothingItem[] } | { error: string }> {
-  try {
-    const response = await fetch(withBasePath('/api/wardrobe'), { credentials: 'same-origin' });
-    if (!response.ok) throw new Error('获取衣橱物品失败。');
-    const data: ClothingItem[] = await response.json();
-    return { items: data };
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    return { error: errorMessage };
-  }
-}
-
 interface DisplayViewProps {
   onAddItems?: () => void;
 }
 
 export function DisplayView({ onAddItems }: DisplayViewProps) {
   const { canMutate } = useAccess();
-  const { refresh: refreshOnboarding } = useOnboarding();
-  const [items, setItems] = useState<ClothingItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const items = useWardrobeItemsStore((s) => s.items);
+  const isLoading = useWardrobeItemsStore((s) => s.loading || (!s.loaded && !s.error));
+  const fetchError = useWardrobeItemsStore((s) => s.error);
+  const ensureLoaded = useWardrobeItemsStore((s) => s.ensureLoaded);
+  const upsert = useWardrobeItemsStore((s) => s.upsert);
+  const removeIds = useWardrobeItemsStore((s) => s.removeIds);
+  const syncHasWardrobe = useOnboardingStore((s) => s.syncHasWardrobe);
+
   const [activeTab, setActiveTab] = useState<string>('all');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
 
-  const fetchItems = useCallback(async () => {
-    setIsLoading(true);
-    setFetchError(null);
-    const result = await requestWardrobeItems();
-    if ('error' in result) {
-      setFetchError(result.error);
-    } else {
-      setItems(result.items);
-    }
-    setIsLoading(false);
-  }, []);
-
   useEffect(() => {
     let active = true;
-
-    void requestWardrobeItems().then((result) => {
-      if (!active) return;
-      if ('error' in result) {
-        setFetchError(result.error);
-      } else {
-        setItems(result.items);
-        // 有衣物时同步引导态；refresh 已稳定，但仍只在挂载拉一次，避免重复 force hydrate
-        if (result.items.length > 0) void refreshOnboarding();
-      }
-      setIsLoading(false);
-    });
-
+    void ensureLoaded()
+      .then(() => {
+        if (!active) return;
+        syncHasWardrobe();
+      })
+      .catch(() => {
+        // error 已写入 store
+      });
     return () => {
       active = false;
     };
-    // refreshOnboarding 经 useCallback 稳定；deps 故意不含 items，仅挂载拉取
-  }, [refreshOnboarding]);
+  }, [ensureLoaded, syncHasWardrobe]);
 
   const getFilteredItems = useCallback(
     (category: string) =>
@@ -106,9 +80,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     setSelectedIds(new Set(filtered.map((item) => item.id)));
   };
 
-  const removeItemsFromState = (ids: string[]) => {
-    const idSet = new Set(ids);
-    setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+  const clearSelected = (ids: string[]) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => next.delete(id));
@@ -124,7 +96,9 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     setIsDeleting(true);
     try {
       await deleteWardrobeItem(itemId);
-      removeItemsFromState([itemId]);
+      removeIds([itemId]);
+      clearSelected([itemId]);
+      syncHasWardrobe();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '删除失败';
       window.alert(message);
@@ -143,7 +117,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
       for (const id of selectedIds) {
         try {
           const updated = (await reanalyzeWardrobeItem(id)) as ClothingItem;
-          setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+          upsert(updated);
         } catch {
           failed.push(id);
         }
@@ -164,10 +138,12 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
     try {
       const ids = [...selectedIds];
       const { deletedCount } = await deleteWardrobeItems(ids);
-      removeItemsFromState(ids.slice(0, deletedCount));
+      removeIds(ids.slice(0, deletedCount));
+      clearSelected(ids);
       if (deletedCount < ids.length) {
-        await fetchItems();
+        await ensureLoaded({ force: true });
       }
+      syncHasWardrobe();
       exitSelectionMode();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '批量删除失败';
@@ -178,66 +154,75 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
   };
 
   const visibleCount = getFilteredItems(activeTab).length;
-  const allVisibleSelected = visibleCount > 0 && getFilteredItems(activeTab).every((item) => selectedIds.has(item.id));
+  const allVisibleSelected =
+    visibleCount > 0 && getFilteredItems(activeTab).every((item) => selectedIds.has(item.id));
 
   return (
     <div className="flex w-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">共 {items.length} 件衣物</p>
 
-        {canMutate && <div className="flex flex-wrap items-center gap-2">
-          {selectionMode ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isDeleting || isReanalyzing || visibleCount === 0}
-                onClick={allVisibleSelected ? () => setSelectedIds(new Set()) : handleSelectAllInTab}
-              >
-                {allVisibleSelected ? '取消全选' : '全选当前分类'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
-                onClick={handleReanalyzeSelected}
-              >
-                {isReanalyzing ? '分析中...' : `重新分析选中 (${selectedIds.size})`}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
-                onClick={handleDeleteSelected}
-              >
-                {isDeleting ? '删除中...' : `删除选中 (${selectedIds.size})`}
-              </Button>
-              <Button type="button" variant="ghost" size="sm" disabled={isDeleting || isReanalyzing} onClick={exitSelectionMode}>
-                完成
-              </Button>
-            </>
-          ) : (
-            <>
-              {onAddItems && (
-                <Button type="button" size="sm" onClick={onAddItems}>
-                  添加衣物
+        {canMutate && (
+          <div className="flex flex-wrap items-center gap-2">
+            {selectionMode ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isDeleting || isReanalyzing || visibleCount === 0}
+                  onClick={allVisibleSelected ? () => setSelectedIds(new Set()) : handleSelectAllInTab}
+                >
+                  {allVisibleSelected ? '取消全选' : '全选当前分类'}
                 </Button>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isLoading || items.length === 0}
-                onClick={() => setSelectionMode(true)}
-              >
-                批量管理
-              </Button>
-            </>
-          )}
-        </div>}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
+                  onClick={handleReanalyzeSelected}
+                >
+                  {isReanalyzing ? '分析中...' : `重新分析选中 (${selectedIds.size})`}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isDeleting || isReanalyzing || selectedIds.size === 0}
+                  onClick={handleDeleteSelected}
+                >
+                  {isDeleting ? '删除中...' : `删除选中 (${selectedIds.size})`}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isDeleting || isReanalyzing}
+                  onClick={exitSelectionMode}
+                >
+                  完成
+                </Button>
+              </>
+            ) : (
+              <>
+                {onAddItems && (
+                  <Button type="button" size="sm" onClick={onAddItems}>
+                    添加衣物
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoading || items.length === 0}
+                  onClick={() => setSelectionMode(true)}
+                >
+                  批量管理
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
