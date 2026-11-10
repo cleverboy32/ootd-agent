@@ -18,6 +18,8 @@ interface ChatState {
   messageCache: Record<string, CachedConversationMessages>;
   isLoading: boolean;
   isLoadingOlder: boolean;
+  /** 正在删除的会话 id；null 表示无删除中 */
+  deletingConversationId: string | null;
   waitReply: boolean;
   /**
    * 收藏深链定位中：头部插入更早消息时不要做 scrollTop 补偿，
@@ -71,6 +73,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   messageCache: {},
   isLoading: false,
   isLoadingOlder: false,
+  deletingConversationId: null,
   waitReply: false,
   deepLinkPin: false,
   
@@ -93,7 +96,9 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   },
 
   deleteConversation: async (conversationId) => {
+    if (get().deletingConversationId) return;
     const { conversations, activeConversationId, messageCache } = get();
+    set({ deletingConversationId: conversationId });
     try {
       await chatApi.deleteConversation(conversationId);
 
@@ -103,6 +108,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       const newState: Partial<ChatState> = {
         conversations: updatedConversations,
         messageCache: restCache,
+        deletingConversationId: null,
       };
 
       if (activeConversationId === conversationId) {
@@ -114,6 +120,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       set(newState);
     } catch (error) {
       console.error("Failed to delete conversation", error);
+      set({ deletingConversationId: null });
     }
   },
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Search, Plus, Trash2 } from "lucide-react";
+import { Search, Plus, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import React from "react";
@@ -10,10 +10,6 @@ import { useAccess } from "@/components/access/AccessProvider";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { LOGO_SRC } from "@/lib/utils";
 
-// The Conversation type is no longer needed here as it's managed by the store
-// import { Conversation } from "@/lib/types";
-
-// Update Props interface - remove props that are now managed by the store
 interface SidebarLeftProps {
   onNewChat: () => void;
 }
@@ -23,17 +19,21 @@ export function SidebarLeft({
 }: SidebarLeftProps) {
   const { ready: accessReady, authenticated, canMutate } = useAccess();
   const { openAuthModal } = useAuthModal();
-  // Get state and actions directly from the store
-  const { conversations, activeConversationId, setActiveConversationId, deleteConversation, isLoading } = useChatStore();
+  const {
+    conversations,
+    activeConversationId,
+    setActiveConversationId,
+    deleteConversation,
+    isLoading,
+    deletingConversationId,
+  } = useChatStore();
   const showGuestEmpty = accessReady && !authenticated;
+  const isDeleting = Boolean(deletingConversationId);
 
-  // Handler for the delete button click
   const handleDelete = (e: React.MouseEvent, conversationId: string) => {
-    e.stopPropagation(); // Prevents the click from also triggering the setActiveConversationId
-    // Optional: You could add a confirmation dialog here
-    // if (window.confirm('Are you sure you want to delete this chat?')) {
-      deleteConversation(conversationId);
-    // }
+    e.stopPropagation();
+    if (isDeleting) return;
+    void deleteConversation(conversationId);
   };
 
   return (
@@ -93,16 +93,22 @@ export function SidebarLeft({
               ))}
             </div>
           ) : conversations.length > 0 ? (
-            conversations.map((convo) => (
+            conversations.map((convo) => {
+              const deletingThis = deletingConversationId === convo.id;
+              return (
               <div
                 key={convo.id}
-                onClick={() => setActiveConversationId(convo.id)}
+                onClick={() => {
+                  if (isDeleting) return;
+                  void setActiveConversationId(convo.id);
+                }}
                 className={`group relative flex w-full items-center justify-between rounded-lg p-3 text-sm font-medium transition-colors cursor-pointer
                   ${
                     activeConversationId === convo.id
                       ? 'bg-accent text-accent-foreground'
                       : 'hover:bg-accent/50'
-                  }`
+                  }
+                  ${deletingThis ? 'opacity-60 pointer-events-none' : ''}`
                 }
               >
                 <span className="truncate pr-2">{convo.title}</span>
@@ -110,15 +116,28 @@ export function SidebarLeft({
                   <Button
                     variant="ghost"
                     size="icon"
+                    // 只 disabled 当前条：Button 自带 disabled:opacity-50，会把其它条的 opacity-0 顶掉
+                    disabled={deletingThis}
                     onClick={(e) => handleDelete(e, convo.id)}
-                    className="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                    className={`h-7 w-7 shrink-0 transition-opacity ${
+                      deletingThis
+                        ? 'opacity-100 disabled:opacity-100'
+                        : 'opacity-0 group-hover:opacity-100'
+                    }`}
                   >
-                    <Trash2 className="h-4 w-4" />
-                    <span className="sr-only">Delete Conversation</span>
+                    {deletingThis ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    <span className="sr-only">
+                      {deletingThis ? '删除中' : 'Delete Conversation'}
+                    </span>
                   </Button>
                 )}
               </div>
-            ))
+              );
+            })
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm pt-10">
               <p>还没有历史记录</p>
