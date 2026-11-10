@@ -394,25 +394,6 @@ export function applyTemperatureFilter<T extends { tempMin?: number | null; temp
   return results.filter((item) => itemFitsTemperature(item, temperatureCelsius));
 }
 
-/** 凉及更冷（≤17℃）：去掉「含夏且无冬」的单品（偏夏货），滤空不回退。 */
-const COOL_OR_COLDER_MAX_CELSIUS = 17;
-
-export function isSummerBiasedSeason(itemSeasons: string[]): boolean {
-  const normalized = normalizeItemSeasons(itemSeasons);
-  if (normalized.length === 0) return false;
-  return hasSummer(normalized) && !hasWinter(normalized);
-}
-
-export function filterCoolUnseasonalItems<T extends { season?: string[] }>(
-  results: T[],
-  temperatureCelsius: number | null
-): T[] {
-  if (temperatureCelsius === null || temperatureCelsius > COOL_OR_COLDER_MAX_CELSIUS) {
-    return results;
-  }
-  return results.filter((item) => !isSummerBiasedSeason(item.season ?? []));
-}
-
 /** 锚点候选：从 weather 文本解析温度后过滤；无温度则原样返回。 */
 export function filterAnchorCandidatesByWeather<
   T extends { tempMin?: number | null; tempMax?: number | null },

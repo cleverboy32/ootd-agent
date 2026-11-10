@@ -13,7 +13,6 @@ import {
   applyTemperatureFilter,
   buildSeasonFilterContext,
   expandedSearchLimit,
-  filterCoolUnseasonalItems,
   parseTemperatureCelsius,
 } from '@/server/utils/ragSeasonFilter';
 import {
@@ -138,17 +137,8 @@ async function runOneSlotSearch(
     );
   }
 
-  const beforeCool = categoryFiltered.length;
-  const coolFiltered = filterCoolUnseasonalItems(categoryFiltered, temperature);
-  if (coolFiltered.length !== beforeCool) {
-    console.log(
-      `[RAG_HANDLER] cool-unseasonal filter slot=${parsedSlot ?? '?'} ` +
-        `${temperature}℃: ${beforeCool} → ${coolFiltered.length}`
-    );
-  }
-
-  const beforeStyle = coolFiltered.length;
-  const searchResults = filterResultsByStyleSkill(coolFiltered, skillNames, parsedSlot);
+  const beforeStyle = categoryFiltered.length;
+  const searchResults = filterResultsByStyleSkill(categoryFiltered, skillNames, parsedSlot);
   if (searchResults.length !== beforeStyle) {
     console.log(
       `[RAG_HANDLER] style filter slot=${parsedSlot ?? '?'} ` +

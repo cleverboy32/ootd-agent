@@ -7,7 +7,6 @@ import {
   applyWeatherToDressingClimate,
   buildSeasonFilterContext,
   computeDressingClimate,
-  filterCoolUnseasonalItems,
   itemFitsTemperature,
   resolveDressingClimateForIntent,
   shouldExcludeBySeason,
@@ -447,44 +446,3 @@ describe('applyTemperatureFilter', () => {
   });
 });
 
-describe('filterCoolUnseasonalItems', () => {
-  it('16℃ 去掉含夏无冬的偏夏货，保留含冬或无夏', () => {
-    const results = [
-      item({
-        id: 'summerSkirt',
-        subCategory: '格纹不规则半身裙',
-        mainCategory: 'BOTTOM',
-        season: ['spring', 'summer', 'autumn'],
-      }),
-      item({
-        id: 'winterKnit',
-        subCategory: '针织翻领衬衫',
-        mainCategory: 'TOP',
-        season: ['spring', 'autumn', 'winter'],
-      }),
-      item({
-        id: 'allSeason',
-        subCategory: '圆环耳环',
-        mainCategory: 'ACCESSORY',
-        season: ['spring', 'summer', 'autumn', 'winter'],
-      }),
-    ];
-    const filtered = filterCoolUnseasonalItems(results, 16);
-    assert.deepEqual(
-      filtered.map((entry) => entry.id),
-      ['winterKnit', 'allSeason']
-    );
-  });
-
-  it('22℃ 舒适档不过滤偏夏货', () => {
-    const results = [
-      item({
-        id: 'summerSkirt',
-        subCategory: '半身裙',
-        mainCategory: 'BOTTOM',
-        season: ['spring', 'summer'],
-      }),
-    ];
-    assert.equal(filterCoolUnseasonalItems(results, 22).length, 1);
-  });
-});
