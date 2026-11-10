@@ -26,6 +26,10 @@ const prefix = basePath.slice(1);
 
 const nextConfig: NextConfig = {
   basePath,
+  // 小内存机器上 next build 内嵌 tsc 易 OOM；类型检查改走独立 `tsc --noEmit`
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
   },
