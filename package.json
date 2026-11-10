@@ -15,6 +15,7 @@
     "test:e2e:live": "dotenv -e .env -e .env.local -- env PW_LIVE=1 playwright test --project=live",
     "test:e2e:all": "pnpm test:e2e && pnpm test:e2e:live",
     "replay:rag-scores": "dotenv -e .env -e .env.local -- tsx scripts/replay-rag-search-scores.ts",
+    "compare:wardrobe-breadth": "dotenv -e .env -e .env.local -- tsx scripts/compare-wardrobe-query-breadth.ts",
     "reindex:wardrobe-embeddings": "dotenv -e .env -e .env.local -- tsx scripts/reindex-wardrobe-embeddings.ts",
     "reindex:wardrobe-text": "dotenv -e .env -e .env.local -- tsx scripts/reindex-wardrobe-text-embeddings.ts",
     "diagnose:embedding-scores": "dotenv -e .env -e .env.local -- tsx scripts/diagnose-embedding-scores.ts",
