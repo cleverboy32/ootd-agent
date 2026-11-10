@@ -59,6 +59,10 @@ import {
   collectRecentOutfitFingerprints,
   collectRecentWardrobeIds,
 } from './newItemDiversity';
+import {
+  buildOutfitPlanStrategyHint,
+  buildReconcileNoStyleStrategyHint,
+} from './strategyHint';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { stripHistoryImages } from '../gatekeeper/textInput';
 import {
@@ -96,7 +100,6 @@ export async function callStylistAdvice(
 - 性别: ${profile.gender || '未知'}
 - 肤色: ${profile.skin_tone || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
-- 适合的风格: ${profile.suited_style || '未判断'}
 - 可靠外形数据: ${hasVisualProfile ? '有（可做个性化建议）' : '无'}
 
 【用户咨询主题】
@@ -215,22 +218,12 @@ ${REVISION_SEARCH_ADDENDUM}
     : '';
 
   const hasStyleSkill = searchSkillNames.some((name) => name.startsWith('style-'));
-  const strategyHint = isRevision
-    ? `- 当前为【反馈微调】：只为 special_requests 要改的槽位写 slots，未改槽位不要写入 plan。`
-    : isPairing
-      ? `- 当前为【待购/衣橱锚定搭配】：只为互补槽位写 slots。已占用的槽位不要写。${
-          anchors.length === 1 && anchors[0].slot === 'accessory'
-            ? '锚定为配饰：必须包含 top、bottom、shoes。'
-            : ''
-        }${hasStyleSkill ? '\n- 已注入风格技能：互补槽位的 search_query 必须遵循该技能「检索」节。' : ''}`
-      : `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套），不要混裤装与连衣裙路线。
-${
-  hasStyleSkill
-    ? '- 已注入风格技能：有天气细则时先跟层次与厚薄；各槽 search_query 必须带该技能风格词并写清形态；禁止万能词。'
-    : '- 无风格技能时：query 可更宽，但仍写清品类轮廓；鞋不要无理由默认运动鞋。'
-}
-- 若场合需要点缀或用户提及配饰：加 accessory 槽。
-- target 与 search_query 必须同向；多套时每套该槽可不同 query（分开检索）。`;
+  const strategyHint = buildOutfitPlanStrategyHint({
+    mode: isRevision ? 'revision' : isPairing ? 'pairing' : 'outfit',
+    hasStyleSkill,
+    accessoryAnchorRequiresFullBase:
+      anchors.length === 1 && anchors[0].slot === 'accessory',
+  });
 
   const prompt = `
 【今日用户时尚档案】
@@ -239,7 +232,7 @@ ${
 - 肤色: ${profile.skin_tone || '未分析'}
 - 身材: ${profile.body_shape || '未分析'}
 - 个人风格: ${profile.personal_style || '未分析'}
-- 适合的风格: ${profile.suited_style || '未判断'}（用户这轮没点名风格时，按这个风格来搭）
+- 长期偏好: ${profile.preferences.join('、') || '未提供'}（用户这轮没点名风格时参考这些，不要用照片气质臆造风格）
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}
@@ -690,8 +683,8 @@ ${JSON.stringify(outfitPlan, null, 2)}
 - 肤色属性: ${profile.skin_tone || '未分析'}
 - 身材属性: ${profile.body_shape || '未分析'}
 - 个人风格定位: ${profile.personal_style || '未分析'}
-- 适合的风格: ${profile.suited_style || '未判断'}（用户这轮没点名风格时，按这个风格来搭）
-- 可靠外形数据: ${hasVisualProfile ? '有（肤色和身形用于选色和版型；适合的风格用于没点名风格时的造型。禁止把外形写进画面描述，禁止改人物外形）' : '无（禁止编造模特外形）'}
+- 长期偏好: ${profile.preferences.join('、') || '未提供'}（用户这轮没点名风格时参考这些，不要用照片气质臆造风格）
+- 可靠外形数据: ${hasVisualProfile ? '有（肤色和身形用于选色和版型。禁止把外形写进画面描述，禁止改人物外形）' : '无（禁止编造模特外形）'}
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}
@@ -699,7 +692,9 @@ ${JSON.stringify(outfitPlan, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
+${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}${buildReconcileNoStyleStrategyHint(
+  skillNames.some((name) => name.startsWith('style-'))
+)}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '按 Plan 分槽召回'})】
 ${
   wardrobeXml ||

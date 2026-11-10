@@ -23,7 +23,6 @@ import {
   isAthleticOccasion,
 } from '@/server/utils/ragMatchQuality';
 import { filterResultsByQueryCategory } from '@/server/utils/queryCategoryFilter';
-import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
 import { filterResultsByStyleSkill } from '@/server/utils/queryStyleFilter';
 import { ClothingItem } from '@prisma/client';
 import type { AnchorItemInfo, GatekeeperIntent } from '../intent';
@@ -109,7 +108,8 @@ async function runOneSlotSearch(
 ): Promise<WardrobeSearchResult[]> {
   const mainCategory = resolveMainCategoryForSlot(slot);
   const parsedSlot = parseWardrobeSearchSlot(slot);
-  const rawResults = await searchWardrobeItemsByText(query, userId, fetchLimit, mainCategory, {
+  const searchQuery = query;
+  const rawResults = await searchWardrobeItemsByText(searchQuery, userId, fetchLimit, mainCategory, {
     slot: parsedSlot,
     temperatureCelsius: temperature,
   });
@@ -128,27 +128,18 @@ async function runOneSlotSearch(
   const beforeCategory = athleticFiltered.length;
   const categoryFiltered = filterResultsByQueryCategory(
     athleticFiltered,
-    query,
+    searchQuery,
     parsedSlot
   );
   if (categoryFiltered.length !== beforeCategory) {
     console.log(
       `[RAG_HANDLER] query-category filter slot=${parsedSlot ?? '?'} ` +
-        `"${query}": ${beforeCategory} → ${categoryFiltered.length}`
+        `"${searchQuery}": ${beforeCategory} → ${categoryFiltered.length}`
     );
   }
 
-  const beforeColor = categoryFiltered.length;
-  const { matched: colorFiltered } = filterItemsByQueryColor(query, categoryFiltered);
-  if (colorFiltered.length !== beforeColor) {
-    console.log(
-      `[RAG_HANDLER] query-color filter slot=${parsedSlot ?? '?'} ` +
-        `"${query}": ${beforeColor} → ${colorFiltered.length}`
-    );
-  }
-
-  const beforeCool = colorFiltered.length;
-  const coolFiltered = filterCoolUnseasonalItems(colorFiltered, temperature);
+  const beforeCool = categoryFiltered.length;
+  const coolFiltered = filterCoolUnseasonalItems(categoryFiltered, temperature);
   if (coolFiltered.length !== beforeCool) {
     console.log(
       `[RAG_HANDLER] cool-unseasonal filter slot=${parsedSlot ?? '?'} ` +
@@ -324,10 +315,14 @@ export async function performRagSearch(
       })
     );
 
+    const hasStyleSkill = (logContext?.skillNames ?? []).some((name) =>
+      name.startsWith('style-')
+    );
     const slotAssessments = buildSlotMatchAssessments(
       perQueryResults,
       logContext?.intent,
-      logContext?.userMessage
+      logContext?.userMessage,
+      { promoteGrayWhenCoarse: !hasStyleSkill }
     );
     const slotSnapshots: RagSlotSnapshot[] = perQueryResults.map((row, idx) => {
       const assessment = slotAssessments[idx];

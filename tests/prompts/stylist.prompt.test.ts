@@ -378,7 +378,79 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     }
   });
 
-  it('正式录制场合 → query 按场合品类特制，鞋不默认运动鞋', async () => {
+  it('无风格技能 → Plan query 只到槽位大类+厚薄，不定细品类', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '上班通勤',
+      weather: '重庆，阴，15℃，西南风2级，湿度63%',
+      style_preference: '',
+      special_requests: '',
+      dressing_climate: 'mild',
+    });
+    const queries = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '今天上班穿啥',
+      null,
+      undefined,
+      [],
+      ['weather-dressing']
+    );
+    assert.ok(queries.length >= 3, `应有多槽位检索，实际: ${JSON.stringify(queries)}`);
+    const all = queries.map((entry) => entry.query).join(' ');
+    assert.match(all, /上装|上衣|下装|裤|裙|鞋|外套/);
+    assert.doesNotMatch(
+      all,
+      /乐福鞋|平底乐福|芭蕾鞋|玛丽珍|西装外套|薄风衣|直筒裤|高腰直筒|针织衫|阔腿裤/
+    );
+    const shoes = queries.filter((entry) => entry.slot === 'shoes').map((entry) => entry.query).join(' ');
+    if (shoes) {
+      assert.doesNotMatch(shoes, /运动鞋|乐福|芭蕾|玛丽珍|短靴|德训/);
+    }
+  });
+
+  it('有风格 vs 无风格：style-korean 仍可写形态向 query，不被收成纯大类', async () => {
+    const intent = normalizeGatekeeperIntent({
+      request_type: 'wardrobe_outfit',
+      occasion: '日常出门',
+      weather: '',
+      style_preference: '韩系',
+      special_requests: '',
+    });
+    const withStyle = await planWardrobeSearchQueries(
+      [],
+      intent,
+      EMPTY_PROFILE,
+      '今天想穿韩系一点',
+      null,
+      undefined,
+      [],
+      ['style-korean']
+    );
+    const noStyle = await planWardrobeSearchQueries(
+      [],
+      normalizeGatekeeperIntent({
+        request_type: 'wardrobe_outfit',
+        occasion: '日常出门',
+        weather: '',
+        style_preference: '',
+        special_requests: '',
+      }),
+      EMPTY_PROFILE,
+      '今天穿啥',
+      null,
+      undefined,
+      [],
+      []
+    );
+    const styleText = withStyle.map((entry) => entry.query).join(' ');
+    const plainText = noStyle.map((entry) => entry.query).join(' ');
+    assert.match(styleText, /短|高腰|阔腿|长裙|针织|衬衫/);
+    assert.doesNotMatch(plainText, /乐福鞋|西装外套|直筒裤|芭蕾鞋/);
+  });
+
+  it('无风格正式场合 → 粗槽检索，鞋不默认运动鞋，也不预设乐福鞋', async () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_outfit',
       occasion: '古典舞蹈课录制视频',
@@ -399,11 +471,11 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     );
     assert.ok(queries.length >= 3, `应有多槽位检索，实际: ${JSON.stringify(queries)}`);
     const all = queries.map((entry) => entry.query).join(' ');
-    assert.match(all, /衬衫|上衣|裙|裤|鞋/);
-    assert.match(all, /正式|单鞋|皮鞋|乐福|玛丽珍|半身裙|衬衫|正装/);
+    assert.match(all, /上装|上衣|下装|裙|裤|鞋|外套/);
+    assert.doesNotMatch(all, /乐福鞋|玛丽珍|西装外套|直筒裤/);
     const shoes = queries.filter((entry) => entry.slot === 'shoes').map((entry) => entry.query).join(' ');
     if (shoes) {
-      assert.doesNotMatch(shoes, /^(运动鞋|休闲运动鞋)$/);
+      assert.doesNotMatch(shoes, /运动鞋|乐福|玛丽珍/);
     }
   });
 

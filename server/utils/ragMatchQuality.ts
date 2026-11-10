@@ -72,10 +72,19 @@ export function isItemAthleticallyAppropriate(
   return true;
 }
 
+export type AssessSlotMatchOptions = {
+  /**
+   * 无 style-* 粗检索：query 只到大类时相似度系统性偏低。
+   * 灰区（≥ slotWeak 且 < slotAdequate）提升为 adequate，便于衣橱组搭。
+   */
+  promoteGrayWhenCoarse?: boolean;
+};
+
 export function assessSlotMatch(
   results: WardrobeSearchResult[],
   slot: WardrobeSearchSlot | string,
-  athletic: boolean
+  athletic: boolean,
+  options: AssessSlotMatchOptions = {}
 ): SlotMatchAssessment {
   const thresholds = getTextSimilarityThresholds();
 
@@ -143,6 +152,17 @@ export function assessSlotMatch(
     };
   }
 
+  // 无风格粗检索：灰区大类命中视为可用（否则粗 query 会系统性逼成整槽 new）
+  if (options.promoteGrayWhenCoarse) {
+    return {
+      slot,
+      status: 'adequate',
+      bestSimilarity: top.similarity,
+      bestSubCategory,
+      note: `粗检索灰区相似度 ${top.similarity.toFixed(2)}：无风格时按大类命中视为可用`,
+    };
+  }
+
   // 灰区（weak～adequate 之间）一律 weak：避免「分数凑合」被当成可硬选
   return {
     slot,
@@ -162,11 +182,12 @@ export function buildSlotMatchAssessments(
     results: WardrobeSearchResult[];
   }>,
   intent?: GatekeeperIntent,
-  userMessage?: string
+  userMessage?: string,
+  options: AssessSlotMatchOptions = {}
 ): SlotMatchAssessment[] {
   const athletic = isAthleticOccasion(intent, userMessage);
   return perQueryResults.map(({ slot, results }) =>
-    assessSlotMatch(results, slot ?? 'unknown', athletic)
+    assessSlotMatch(results, slot ?? 'unknown', athletic, options)
   );
 }
 

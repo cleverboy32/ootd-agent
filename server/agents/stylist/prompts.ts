@@ -60,14 +60,16 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 - 风格 skill 若给出「形制分支 / 轮廓路径」合法集合：每套【必须点名选恰好 1 支】，并写进 overall_concept（如「形制=长身交领袍」或「路径=短款裤装」）。
 - 出 1 套也要点名；禁止不写分支名却暗用 skill 里最熟的那一支。
 - 多套、或上下文标明近期已用过的分支/主色时：本套必须换支，禁止只换邻近色或同品类微调。
-- target 与 search_query 必须带出所选分支的关键形态词，便于检索与验货。
+- target 必须带出所选分支的关键形态词；search_query 只保留粗品类+轮廓，细节放 target。
 
 【核心原则】
 - 【天气管层次与厚薄】有天气穿衣细则时：决定要不要外套、上装袖长/厚度、外套薄或厚。**不**规定裙还是裤。
-- 【风格管形态】有 style-* 技能时：各槽 search_query【必须】带该风格词 + 区分度，并遵循技能「检索」节禁搜。禁止万能词（针织衫/薄外套/平底鞋）。
-- 无风格技能时：query 可更宽，但仍写清槽位品类轮廓；不要无理由默认运动鞋。
-- 颜色可写入；不要写春夏秋冬或体感词。
-- 禁止把场合原词硬塞进 query；转成衣橱可能有的品类说法。
+- 【风格管形态】有 style-* 技能时：形态与分支写进 overall_concept / target；search_query 仍保持粗检索（品类+轮廓），不要把完整细款名塞进 query。
+- 【无风格技能】本步只定槽位集合 + 天气厚薄，不定细品类初稿。overall_concept 写场合与层次。target / search_query 只写槽位大类与厚薄；裙/裤、具体鞋型、外套款名留给召回后根据衣橱组合。不要无理由默认运动鞋。
+- 有风格时 search_query【粗】：品类 + 必要轮廓。禁止具体色名、花色工艺、领型袖型堆砌、完整款式长名；颜色与细外观放 target。
+- 无风格时 search_query【更粗】：大类词 + 可选性别/厚薄；禁止细品类与细轮廓词堆砌。
+- 不要写春夏秋冬或体感词进 query。
+- 禁止把场合原词硬塞进 query。
 
 【槽位】
 - slot ∈ top | bottom | dress | shoes | outerwear | accessory
@@ -77,8 +79,8 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 - allow_new：衣橱可能没有时通常 true。
 
 【每槽字段】
-- target：该槽目标单品的中文描述（颜色+形态+品类+可见止点）。上装含袖长/衣长止点，下装含裙长或裤长止点；后续出图会照着画，禁止只写行话。
-- search_query：与 target 同品类主线、同颜色方向的短检索词（检索词可短，细节长度放在 target）。
+- target：有风格时写颜色+形态+品类+可见止点；无风格时只写槽位大类与厚薄（如上装袖长/外套薄厚），禁止预设细款名。
+- search_query：必须与 target 同向。有风格：粗品类+轮廓；无风格：槽位大类+厚薄。
 - 输出 outfits[].id 从 outfit_1 连续编号。
 `;
 
@@ -92,9 +94,10 @@ export const OUTFIT_RECONCILE_ADDENDUM = `
 
 1. 输出 outfits 的 id / 套数须与 Plan 一致（可删空套，不可无故新增方向完全不同的套）。
 2. 每一槽优先使用该套召回中适配的衣橱件（ref）；adequate 且验货通过时不要仅为「更理想」整槽改 new。
-3. new_item 时：name/description 必须兑现该槽 Plan 的 target / search_query 品类主线与颜色方向，并把袖长、衣长、裙长或裤长止点写进 description 与 outfit_details，供出图一致。禁止 silent 把「直筒裤」改成「A字裙」、把「薄风衣」改成无关摇粒绒。若衣橱只有冲突品类、必须改主线，须在 reason 写明「Plan 原为 X，因衣橱/约束改为 Y」，并同步改写视觉描述。
-4. item 上的 outfits / slots 属性表示该件服务哪些方案与槽；选衣橱件时优先匹配当前 outfit id。
-5. 同槽更优衣橱替换允许；跨品类乱跳禁止（除非按第 3 条显式改写）。
+3. 有风格技能时：new_item 须兑现该槽 Plan 的 target / search_query 品类主线与颜色方向，并把袖长、衣长、裙长或裤长止点写进 description 与 outfit_details。禁止 silent 跨品类乱跳；若衣橱冲突必须改主线，须在 reason 写明并同步改写视觉描述。
+4. 无风格技能时：Plan 多半只有槽位大类+厚薄。你应根据衣橱召回组合出适合本轮场合的一套；adequate 大类可用必须用衣橱，不以「未兑现细款」为由改 new。细品类与具体轮廓由你按衣橱与场合落地到 name/description。
+5. item 上的 outfits / slots 属性表示该件服务哪些方案与槽；选衣橱件时优先匹配当前 outfit id。
+6. 同槽更优衣橱替换允许；有风格时跨品类乱跳禁止（除非按第 3 条显式改写）。无风格时允许在同槽大类内按衣橱实况选型。
 `;
 
 export const PURCHASE_PAIRING_SEARCH_ADDENDUM = `

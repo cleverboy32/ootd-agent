@@ -95,6 +95,20 @@ describe('assessSlotMatch (ByteDance/Doubao thresholds)', () => {
     assert.match(assessment.note, /灰区/);
   });
 
+  it('无风格粗检索：灰区提升为 adequate', () => {
+    const assessment = assessSlotMatch(
+      [
+        item({ id: 'c1', subCategory: 'Knit Shirt', similarity: 0.57 }),
+        item({ id: 'c2', subCategory: 'Plaid Shirt', similarity: 0.52 }),
+      ],
+      'top',
+      false,
+      { promoteGrayWhenCoarse: true }
+    );
+    assert.equal(assessment.status, 'adequate');
+    assert.match(assessment.note, /粗检索灰区/);
+  });
+
   it('回放 2026-10-14 晚餐：上衣/鞋灰区分数 → weak', () => {
     const top = assessSlotMatch(
       [

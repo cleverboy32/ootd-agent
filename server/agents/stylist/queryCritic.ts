@@ -25,7 +25,7 @@ const queryCriticSchema: Schema = {
 const QUERY_CRITIC_INSTRUCTION = `你是衣橱检索 query 审核员。只判断 query 列表是否贴合场合、天气档与已注入风格技能的「检索」约束，不要改写 query，不要评价衣橱有没有货。
 
 【通过标准】
-- 若条目带 target：search_query（列表里的 query 字段）须与 target 同品类主线与颜色方向，禁止明显脱节（如 target 直筒裤、query 半身裙）。
+- 若条目带 target：search_query（列表里的 query 字段）须与 target 同品类主线；query 应偏粗（品类+轮廓），禁止明显脱节（如 target 直筒裤、query 半身裙）。
 - 有天气文本与天气技能时：只审层次与厚薄（该有外套时是否有 outerwear；薄档不应出现羽绒棉服；冷档不应只有无厚度的薄开衫）。裙或裤不算天气违规。
 - 有风格技能时：各槽 query 应有形态区分度，不应只有「针织衫」「薄外套」「平底鞋」等万能词；且不应明显违背风格「检索」节禁搜。
 - 场合正式或特殊：不应无理由退回纯休闲默认（例如无理由只搜运动鞋）；应能看出正式度或活动所需品类。

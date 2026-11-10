@@ -183,7 +183,7 @@ export const outfitPlanSearchSchema: Schema = {
           overall_concept: {
             type: Type.STRING,
             description:
-              '本套设计核心概念（中文）。有风格技能合法分支时须点名，如「形制=长身交领袍」或「路径=短款裤装」，并简述气质。',
+              '本套设计核心概念（中文）。有风格技能合法分支时须点名并简述气质；无风格技能时只写场合与层次厚薄，不定细品类初稿。',
           },
           slots: {
             type: Type.ARRAY,
@@ -198,11 +198,12 @@ export const outfitPlanSearchSchema: Schema = {
                 target: {
                   type: Type.STRING,
                   description:
-                    '该槽目标单品描述（颜色+形态+品类+可见止点），供后续确认与出图兑现。上装含袖长/衣长止点，下装含裙长或裤长止点；禁止只写行话不写落到身体哪一段。',
+                    '该槽目标描述。有风格技能：颜色+形态+品类+可见止点。无风格技能：只写槽位大类与天气厚薄，禁止预设细款名；细品类留给召回后按衣橱组合。',
                 },
                 search_query: {
                   type: Type.STRING,
-                  description: '中文向量检索词，必须与 target 同向（同品类主线与颜色方向）。',
+                  description:
+                    '向量检索词，须与 target 同向。有风格技能：粗品类+轮廓。无风格技能：槽位大类+厚薄（可带性别），禁止细品类与细轮廓堆砌。禁止具体色名与完整细款名。',
                 },
                 allow_new: {
                   type: Type.BOOLEAN,
