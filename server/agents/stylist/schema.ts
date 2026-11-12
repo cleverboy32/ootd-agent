@@ -80,6 +80,13 @@ export interface StylistAgentOptions {
   priorStylistResults?: StylistResult[];
   /** 已识别的上传单品图，附在选品调用里。 */
   uploadGarmentParts?: import('@google/genai').Part[];
+  /**
+   * 评测用：跳过用户衣橱 RAG，把固定候选集直接注入 Prompt。
+   * 见 server/agents/stylist/evalWardrobe.ts
+   */
+  evalWardrobeItems?: import('./evalWardrobe').EvalWardrobeItem[];
+  /** 评测用：强制注入 skill 名单（经 normalizeStylistSkillNames） */
+  skillOverride?: string[];
 }
 
 export const stylistSchema: Schema = {

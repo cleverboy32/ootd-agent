@@ -6,6 +6,9 @@ import {
 } from '@/server/agents/intent';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
+
+export { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
 
 export type ClothingSeason = 'spring' | 'summer' | 'autumn' | 'winter';
 
@@ -48,11 +51,6 @@ function hasWinter(seasons: ClothingSeason[]): boolean {
 
 function hasSummer(seasons: ClothingSeason[]): boolean {
   return seasons.includes('summer');
-}
-
-export function parseTemperatureCelsius(weather: string): number | null {
-  const match = weather.match(/(-?\d+)\s*(?:°\s*c|℃)/i);
-  return match ? Number.parseInt(match[1], 10) : null;
 }
 
 export function inferClimateFromWeather(weather: string): DressingClimate | '' {

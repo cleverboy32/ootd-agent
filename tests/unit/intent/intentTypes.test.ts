@@ -197,26 +197,15 @@ describe('correctAnchorSlot', () => {
 });
 
 describe('correctDressingClimate', () => {
-  it('fills cold from winter coat anchor when Gatekeeper left empty', () => {
+  it('clears dressing_climate (field deprecated; thickness uses weather ℃)', () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_pairing',
       anchor_item_summary: '冬季灰色长毛呢外套',
       anchor_slot: 'outerwear',
-      dressing_climate: '',
-    });
-    const fixed = correctDressingClimate(intent);
-    assert.equal(fixed.dressing_climate, 'cold');
-  });
-
-  it('corrects warm to cold when anchor is winter coat', () => {
-    const intent = normalizeGatekeeperIntent({
-      request_type: 'wardrobe_pairing',
-      anchor_item_summary: '灰色长毛呢外套',
-      anchor_slot: 'outerwear',
       dressing_climate: 'warm',
     });
     const fixed = correctDressingClimate(intent);
-    assert.equal(fixed.dressing_climate, 'cold');
+    assert.equal(fixed.dressing_climate, '');
   });
 });
 

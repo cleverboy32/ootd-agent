@@ -4,8 +4,15 @@ import { AGENT_MODELS } from '@/server/config/models';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
-import { filterSkillsForWardrobeSearch, selectStylistOutfitSkillNames } from './skillSelection';
+import {
+  ensureWeatherDressingSkill,
+  filterSkillsForWardrobeSearch,
+  normalizeStylistSkillNames,
+  selectStylistOutfitSkillNames,
+} from './skillSelection';
+import { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
 import { selectStylistSkills } from './selectSkills';
+import { formatEvalWardrobeToXml } from './evalWardrobe';
 import { WardrobeSearchQuery, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
 import {
@@ -567,13 +574,43 @@ export async function callStylistAgent(
   let slotSnapshots: StylistSelectionSlotSnapshot[] = [];
   let outfitPlan: OutfitPlanResult | null = null;
   const userMessage = extractUserMessage(initialParts);
-  const skillNames = await selectStylistSkills(intent, userMessage, profile, {
-    signal: options.signal,
-    conversationId,
-    messageId: options.messageId,
-  });
+  const selectedSkills =
+    options.skillOverride && options.skillOverride.length > 0
+      ? normalizeStylistSkillNames(options.skillOverride)
+      : await selectStylistSkills(intent, userMessage, profile, {
+          signal: options.signal,
+          conversationId,
+          messageId: options.messageId,
+        });
+  const skillNames = ensureWeatherDressingSkill(
+    selectedSkills,
+    intent.weather || '',
+    (weather) => parseTemperatureCelsius(weather) !== null
+  );
   const skillBlock = buildSkillBlocks(skillNames);
-  if (userId && ragCache) {
+  if (options.evalWardrobeItems && options.evalWardrobeItems.length > 0) {
+    console.log(
+      `[STYLIST_AGENT] Eval wardrobe inject: ${options.evalWardrobeItems.length} items (skip RAG)`
+    );
+    const formatted = formatEvalWardrobeToXml(options.evalWardrobeItems);
+    wardrobeXml = formatted.xml;
+    ragIndexMap = formatted.indexMap;
+    if (ragCache) {
+      for (const item of options.evalWardrobeItems) {
+        if (ragCache.has(item.id)) continue;
+        ragCache.set(item.id, {
+          id: item.id,
+          imageUrl: item.imageUrl ?? '',
+          mainCategory: item.mainCategory as ClothingItem['mainCategory'],
+          subCategory: item.subCategory,
+          description: item.description ?? null,
+          colors: item.colors ?? [],
+          season: item.season ?? [],
+          tags: item.tags ?? [],
+        } as ClothingItem);
+      }
+    }
+  } else if (userId && ragCache) {
     try {
       console.log(
         `[STYLIST_AGENT] Plan→Retrieve${isRevision ? ' (revision slots)' : ''}...`

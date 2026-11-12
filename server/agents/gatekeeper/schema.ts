@@ -126,8 +126,7 @@ export const gatekeeperSchema: Schema = {
         },
         dressing_climate: {
           type: Type.STRING,
-          description:
-            '留空字符串。穿衣气候由服务端在查完天气后根据温度与锚点单品自动计算，禁止 Gatekeeper 自行填写。',
+          description: '留空字符串。穿衣厚薄只认 weather 温度，本字段已停用。',
         },
       },
       required: [

@@ -80,17 +80,26 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
 
 【天气与城市（不参与放行，但由你决策是否查询）】
 - 不要因缺少天气或温度信息而拦截用户。
-- 若用户主动提到天气/温度，提取到 extracted_intent.weather；若主动提到城市，提取到 extracted_intent.city。
+- 若用户主动提到城市，提取到 extracted_intent.city。
 - city_role【关键】：有 city 时必须判定角色——home=用户常住/所在城市（回答系统追问所在地、或明确说「我在/我家在/我住在」某城）；travel=旅游/出差/短期出行目的地（去某城玩、出差、度假等）。city 为空则 city_role 填空字符串。系统仅在 city_role=home 时把城市写入用户档案；travel 只用于本轮天气，禁止标成 home。
 - 由你判断本轮是否需要实时天气，并填写 weather_lookup：
   - weather_lookup.needed 只看「本轮回复是否依赖实时天气」，与 request_type 无关：
     - 用户主动询问天气、气温或冷暖（含询问出行目的地的天气）→ true，无论 request_type 判为什么；
     - 用户问的是今天、明天或某次出行怎么穿，wardrobe_outfit / feedback_revision 要出穿搭 → true；
     - 用户指代「这个天气/今天」且要判断适不适合穿某品类（出穿搭或衣橱检索）→ true；
-    - 用户在为还没到的季节买衣服或准备衣橱（冬天要来了、冬季穿搭、入手夏装）→ false。special_requests 记下目标季节和想买的新品，禁止用今天的温度改写该季节；
+    - 用户在为还没到的季节买衣服或准备衣橱（冬天要来了、冬季穿搭、入手夏装）→ false。special_requests 记下目标季节和想买的新品；weather 填【目标季节】代表温度范围，禁止用今天的温度改写该季节；
     - 其余与天气无关的请求 → false；用户已自述当前天气/温度时 → false，但须把该温度写入 extracted_intent.weather，禁止只写进 special_requests。
   - weather_lookup.city：只填用户明确提到、且本轮要查的城市（如出行目的地）；未提及则留空字符串，系统会依次用用户档案中的常住城市、IP 兜底，【禁止】自行猜测城市。
-- 系统会在你返回后据 weather_lookup 串行查询并补全天气结果，你无需填写查询结果本身。
+- 系统会在你返回后据 weather_lookup 串行查询并补全天气结果；needed=true 时 weather 可暂留空，由查询回填。
+
+【weather 必含可解析温度（搭配相关时）】
+- 出穿搭 / 衣橱检索 / 待购搭配 / 微调 / 重做等需要穿衣温度时，extracted_intent.weather【必须】含可解析的摄氏度（如 18℃ 或 约15-20℃）。禁止写「未知天气」「晴」等无数字占位。
+- 填写优先级：
+  1. 用户自述温度 → 原样写入（保留 ℃）；
+  2. weather_lookup.needed=true → weather 可暂空，等实况回填；
+  3. 消息能看出目标季节或场合穿衣气候（含买冬装/夏装）→ 写该季节代表温度范围（冬约0-8℃、夏约26-30℃、春秋约12-20℃），不要用今天气温冒充购物季节；
+  4. 看不出 → 按上下文「今天日期」对应季节段给温度范围。
+- style_advice 且不依赖穿衣温度时，weather 可留空。
 
 【长期档案增量 profile_update】
 - 与 weather_lookup 类似：由你判断本轮是否含应写入用户【长期时尚档案】的信息，并填写 profile_update；服务端异步合并写库，你无需读旧档全文。
@@ -103,7 +112,7 @@ export const GATEKEEPER_SYSTEM_INSTRUCTION = `
   - 禁止填写肤色/身材/发型等外形字段（不在 patch 内）。
 
 【穿衣气候 dressing_climate】
-- 【禁止自行推断】dressing_climate 一律填空字符串；服务端会在查完天气后根据温度、锚点单品自动计算，勿根据「高原/保暖/温差」等话术填写 cold。
+- dressing_climate 一律填空字符串。穿衣厚薄只认 weather 里的温度，不再使用 dressing_climate。
 
 【严格提取，禁止臆测】
 - style_preference：仅当用户明确提到风格词时填写；否则填空字符串。禁止用「日常休闲」当占位，风格判断交给搭配师。

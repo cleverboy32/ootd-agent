@@ -98,6 +98,20 @@ export function filterSkillsForWardrobeSearch(names: string[]): string[] {
   );
 }
 
+/**
+ * weather 可解析出 ℃ 时强制注入 weather-dressing（不依赖选 skill 模型）。
+ * parseTemperatureCelsius 由调用方传入，避免 skillSelection ↔ slotTempFilter 循环依赖时可内联。
+ */
+export function ensureWeatherDressingSkill(
+  names: string[],
+  weather: string,
+  hasParseableTemperature: (weather: string) => boolean
+): string[] {
+  if (!hasParseableTemperature(weather)) return names;
+  if (names.includes('weather-dressing')) return names;
+  return ['weather-dressing', ...names];
+}
+
 export type StylistSkillCatalogEntry = {
   name: StylistSelectableSkillName;
   description: string;

@@ -1,15 +1,11 @@
-import { parseTemperatureCelsius } from '@/server/utils/ragSeasonFilter';
 import type { WardrobeSearchQuery } from '@/server/utils/ragSearchSlots';
+import {
+  parseTemperatureCelsius,
+  resolveWeatherDressBand as bandFromCelsius,
+  type WeatherDressBand,
+} from '@/server/utils/slotTempFilter';
 
-/** Aligns with weather-dressing temperature bands. */
-export type WeatherDressBand =
-  | 'hot'
-  | 'warm'
-  | 'comfort'
-  | 'mild_cool'
-  | 'cool'
-  | 'cold'
-  | 'freezing';
+export type { WeatherDressBand };
 
 export type WeatherQueryGuardChange = {
   slot: string;
@@ -33,9 +29,13 @@ const MID_OUTER_OK =
 const THIN_OUTER_ONLY =
   /薄外套|薄开衫|薄针织|开衫|衬衫外套|薄风衣|针织开衫|cardigan/i;
 const SHORT_TOP = /短袖|无袖|背心|吊带|tank|sleeveless/i;
+const THIN_BOTTOM = /短裤|热裤|短裙|迷你裙|凉鞋裙|骑行裤|shorts|mini\s*skirt/i;
+const THICK_BOTTOM_OK = /毛呢|厚牛仔|灯芯绒|加绒|毛裤|呢裤|厚裙|羊毛/i;
 
 const DEFAULT_THIN_OUTER = '薄针织开衫';
 const DEFAULT_MID_OUTER = '摇粒绒外套';
+const DEFAULT_THICK_BOTTOM = '厚长裤';
+const DEFAULT_THICK_TIGHTS = '厚打底袜';
 
 const NEEDS_THIN_OUTER: WeatherDressBand[] = ['comfort', 'mild_cool'];
 const NEEDS_MID_OUTER: WeatherDressBand[] = ['cool'];
@@ -49,17 +49,14 @@ const FORBID_HEAVY_OUTER: WeatherDressBand[] = [
   'cool',
 ];
 const NEEDS_LONG_TOP: WeatherDressBand[] = ['mild_cool', 'cool', 'cold', 'freezing'];
+const NEEDS_WARM_BOTTOM: WeatherDressBand[] = ['cool', 'cold', 'freezing'];
+const NEEDS_LEG_LAYER: WeatherDressBand[] = ['cool', 'cold', 'freezing'];
 
+/** 从 weather 文本解析 ℃ 并落入温度档；无法解析则 null */
 export function resolveWeatherDressBand(weather: string): WeatherDressBand | null {
   const temp = parseTemperatureCelsius(weather.trim());
   if (temp === null) return null;
-  if (temp >= 28) return 'hot';
-  if (temp >= 26) return 'warm';
-  if (temp >= 22) return 'comfort';
-  if (temp >= 18) return 'mild_cool';
-  if (temp >= 13) return 'cool';
-  if (temp >= 8) return 'cold';
-  return 'freezing';
+  return bandFromCelsius(temp);
 }
 
 function userNamedNoOuter(userText: string): boolean {
@@ -74,15 +71,24 @@ function userNamedShortTop(userText: string): boolean {
   return /短袖|无袖|吊带|背心/.test(userText);
 }
 
+function userNamedThinBottom(userText: string): boolean {
+  return /短裤|短裙|迷你裙|热裤/.test(userText);
+}
+
 function isHeavyForbiddenInBand(query: string, band: WeatherDressBand): boolean {
   if (!HEAVY_OUTER.test(query)) return false;
   if (band === 'cool' && MID_OUTER_OK.test(query)) return false;
   return true;
 }
 
+function looksLikeSkirtRoute(query: string): boolean {
+  return /裙|dress|skirt/i.test(query);
+}
+
 /**
- * Weather guard: sandwich layers + outer thickness only.
- * Does NOT rewrite skirt↔pants or dress routes (style owns those).
+ * Weather guard: sandwich layers + thickness for top/outer/bottom.
+ * Runs whenever weather contains a parseable ℃ (不依赖 weather skill 是否选中).
+ * Does NOT rewrite skirt↔pants routes (style owns those); cold skirt must get leg layer.
  */
 export function applyWeatherQueryGuard(
   queries: WardrobeSearchQuery[],
@@ -93,11 +99,6 @@ export function applyWeatherQueryGuard(
     specialRequests?: string;
   }
 ): WeatherQueryGuardResult {
-  const skillNames = options.skillNames ?? [];
-  if (!skillNames.some((name) => name.startsWith('weather-'))) {
-    return { queries, changes: [] };
-  }
-
   const band = resolveWeatherDressBand(options.weather);
   if (!band) return { queries, changes: [] };
 
@@ -185,6 +186,24 @@ export function applyWeatherQueryGuard(
       }
     }
 
+    if (
+      (slot === 'bottom' || slot === 'dress') &&
+      NEEDS_WARM_BOTTOM.includes(band) &&
+      !userNamedThinBottom(userText) &&
+      THIN_BOTTOM.test(query) &&
+      !THICK_BOTTOM_OK.test(query)
+    ) {
+      const rewritten = slot === 'dress' ? '厚连衣裙' : DEFAULT_THICK_BOTTOM;
+      changes.push({
+        slot,
+        from: query,
+        to: rewritten,
+        reason: `${band}: bottom layer too thin for band`,
+      });
+      next.push({ ...item, query: rewritten });
+      continue;
+    }
+
     next.push(item);
   }
 
@@ -242,6 +261,45 @@ export function applyWeatherQueryGuard(
           reason: `${band}: sandwich requires thick outer layer${outfitId ? ` (${outfitId})` : ''}`,
         });
       }
+    }
+  }
+
+  // 凉及以下裙装：补腿部保暖 accessory（厚打底袜）
+  if (NEEDS_LEG_LAYER.includes(band)) {
+    const skirtOutfitIds =
+      outfitIds.length > 0
+        ? outfitIds.filter((id) =>
+            next.some(
+              (q) =>
+                q.outfitId === id &&
+                (q.slot === 'dress' || (q.slot === 'bottom' && looksLikeSkirtRoute(q.query)))
+            )
+          )
+        : next.some(
+              (q) => q.slot === 'dress' || (q.slot === 'bottom' && looksLikeSkirtRoute(q.query))
+            )
+          ? [undefined]
+          : [];
+
+    for (const outfitId of skirtOutfitIds) {
+      const hasLeg = next.some(
+        (q) =>
+          (outfitId ? q.outfitId === outfitId : true) &&
+          q.slot === 'accessory' &&
+          /袜|打底|tights|pantyhose|stockings/i.test(q.query)
+      );
+      if (hasLeg) continue;
+      next.push({
+        slot: 'accessory',
+        query: DEFAULT_THICK_TIGHTS,
+        ...(outfitId ? { outfitId } : {}),
+      });
+      changes.push({
+        slot: 'accessory',
+        from: '',
+        to: DEFAULT_THICK_TIGHTS,
+        reason: `${band}: skirt/dress route needs leg layer${outfitId ? ` (${outfitId})` : ''}`,
+      });
     }
   }
 

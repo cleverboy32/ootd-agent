@@ -28,17 +28,17 @@ export function buildOutfitPlanStrategyHint(options: OutfitPlanStrategyOptions):
   }
 
   if (hasStyleSkill) {
-    return `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套），不要混裤装与连衣裙路线。
-- 已注入风格技能：有天气细则时先跟层次与厚薄；形态细节放 target；search_query 只写粗品类+轮廓。
-- 若场合需要点缀或用户提及配饰：加 accessory 槽。
+    return `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套与下装厚薄），不要混裤装与连衣裙路线。
+- 已注入风格技能：有天气细则时先跟上装/下装三明治层次与厚薄；形态细节放 target；search_query 只写粗品类+轮廓。
+- 若场合需要点缀、用户提及配饰、或天气要求裙装补腿：加 accessory 槽。
 - target 与 search_query 必须同品类主线；search_query 一律粗；多套时每套该槽可不同 query（分开检索）。`;
   }
 
-  return `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套），不要混裤装与连衣裙路线。
+  return `- 若用户要「一套」：只出 outfit_1；覆盖上装+下装+鞋（视天气加外套与下装厚薄），不要混裤装与连衣裙路线。
 - 无风格技能：本步只定【槽位集合 + 天气厚薄】，不定细品类初稿。overall_concept 写场合与层次即可。
 - target / search_query 只写槽位大类与厚薄（如上装、下装、鞋、薄外套）；可带性别词。禁止预设具体鞋型、裤型、外套款名。
-- 裙还是裤、具体鞋型留给召回后根据衣橱组合；不要无理由默认运动鞋。
-- 若场合需要点缀或用户提及配饰：加 accessory 槽。
+- 裙还是裤、具体鞋型留给召回后根据衣橱组合；不要无理由默认运动鞋。凉及以下走裙装时须加打底袜 accessory。
+- 若场合需要点缀、用户提及配饰、或天气要求裙装补腿：加 accessory 槽。
 - 多套时每套该槽可不同粗 query（分开检索）。`;
 }
 

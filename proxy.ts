@@ -41,6 +41,14 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/api/auth/')) {
     return NextResponse.next();
   }
+  // 本地评测口：由 route 内 EVAL_API_ENABLED 门控，不走登录
+  // basePath=/ootd 时，部分环境 pathname 可能带前缀
+  if (
+    pathname.startsWith('/api/eval/') ||
+    pathname.startsWith('/ootd/api/eval/')
+  ) {
+    return NextResponse.next();
+  }
 
   const payload = await verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!payload) return unauthorized();

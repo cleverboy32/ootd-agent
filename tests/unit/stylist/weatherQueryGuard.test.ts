@@ -31,7 +31,7 @@ describe('applyWeatherQueryGuard', () => {
     assert.equal(changes.some((c) => c.slot === 'bottom'), false);
   });
 
-  it('keeps dress route in cool band', () => {
+  it('keeps dress route in cool band and adds leg layer', () => {
     const { queries, changes } = applyWeatherQueryGuard(
       [
         { slot: 'dress', query: '浅粉针织连衣裙' },
@@ -42,6 +42,7 @@ describe('applyWeatherQueryGuard', () => {
     );
     assert.equal(queries.some((q) => q.slot === 'dress'), true);
     assert.equal(changes.some((c) => c.slot === 'dress'), false);
+    assert.ok(queries.some((q) => q.slot === 'accessory' && /打底袜/.test(q.query)));
   });
 
   it('rewrites heavy outerwear in cool/mid band to mid-weight', () => {
@@ -169,10 +170,19 @@ describe('applyWeatherQueryGuard', () => {
     assert.ok(changes.some((c) => c.slot === 'outerwear'));
   });
 
-  it('skips when weather skill absent', () => {
-    const { changes } = applyWeatherQueryGuard(
+  it('runs when weather skill absent but temperature is parseable', () => {
+    const { queries, changes } = applyWeatherQueryGuard(
       [{ slot: 'bottom', query: '高腰A字半身裙' }],
       { weather, skillNames: ['style-sweet'], userMessage: '下午茶' }
+    );
+    assert.ok(changes.length > 0);
+    assert.ok(queries.some((q) => q.slot === 'accessory' && /打底袜/.test(q.query)));
+  });
+
+  it('skips when temperature is not parseable', () => {
+    const { changes } = applyWeatherQueryGuard(
+      [{ slot: 'outerwear', query: '羽绒服' }],
+      { weather: '未知天气', skillNames: ['weather-dressing'], userMessage: '出门' }
     );
     assert.equal(changes.length, 0);
   });

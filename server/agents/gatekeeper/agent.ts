@@ -13,7 +13,6 @@ import {
   coerceWardrobeBrowseIntent,
   coerceWeatherWearabilityByContext,
   adjudicateNewTaskVsRevisionIntent,
-  isOutfitGeneratingIntent,
   hydrateWeatherFromIntentText,
   shouldFetchWeatherForIntent,
 } from '../intent';
@@ -23,13 +22,13 @@ import { resolveWardrobeAnchor } from './wardrobeResolver';
 import type { WardrobeAnchorCandidate } from '../intent';
 import { gatekeeperSchema, WeatherLookup, type ProfileUpdate } from './schema';
 import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
-import { resolveDressingClimateForIntent } from '@/server/utils/ragSeasonFilter';
 import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
 import { formatSessionItemsForGate } from '@/server/utils/sessionItems';
 import { imageCountFact, stripHistoryImages, stripImageParts } from './textInput';
 import { releaseDeicticUpload } from '../stylist/uploadVision';
 import type { SessionPurchaseItem } from '@/server/utils/sessionItems';
 import { normalizeProfileUpdate } from '@/server/utils/profileUpdatePatch';
+import { formatShanghaiDateHint } from '@/server/utils/slotTempFilter';
 
 export type { WeatherLookup, ProfileUpdate } from './schema';
 
@@ -104,9 +103,9 @@ async function finalizeGatekeeperIntent(
     fetchedWeather = enriched.weather.trim() || undefined;
   }
 
-  // 服务端统一解析 dressing_climate（实况温度 / 锚点 / 活动；忽略 Gatekeeper LLM 推断）
-  if (isOutfitGeneratingIntent(enriched)) {
-    enriched = resolveDressingClimateForIntent(enriched, contextText);
+  // dressing_climate 停用：厚薄只认 weather 可解析温度，不再服务端推导气候档
+  if (enriched.dressing_climate) {
+    enriched = { ...enriched, dressing_climate: '' };
   }
 
   const suggestCityForWeather = Boolean(weatherLookup?.needed) && !enriched.weather.trim();
@@ -128,8 +127,10 @@ export async function callGatekeeperAgent(
   const sessionBlock = formatSessionItemsForGate(ctx.sessionItems ?? []);
   const imageCount = ctx.currentImageUrls?.length || (ctx.currentImageUrl ? 1 : 0);
   const fact = imageCountFact(imageCount);
+  const dateHint = formatShanghaiDateHint();
   const textInput = stripImageParts(currentInput);
   const gatedInput: Part[] = [
+    { text: `【系统日期】${dateHint}` },
     ...(sessionBlock ? [{ text: sessionBlock }] : []),
     ...(fact ? [{ text: fact }] : []),
     ...textInput,

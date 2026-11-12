@@ -9,12 +9,10 @@ import {
   WardrobeSearchQuery,
 } from '@/server/utils/ragSearchSlots';
 import {
-  applySeasonFilter,
-  applyTemperatureFilter,
-  buildSeasonFilterContext,
-  expandedSearchLimit,
+  applySlotTemperatureFilter,
   parseTemperatureCelsius,
-} from '@/server/utils/ragSeasonFilter';
+  resolveSlotTempFilterFromWeather,
+} from '@/server/utils/slotTempFilter';
 import {
   buildSlotMatchAssessments,
   filterResultsForAthleticContext,
@@ -100,27 +98,24 @@ async function runOneSlotSearch(
   userId: string,
   fetchLimit: number,
   resultLimit: number,
-  temperature: number | null,
-  seasonContext: ReturnType<typeof buildSeasonFilterContext>,
+  weather: string,
   athletic: boolean,
   skillNames: string[] | undefined
 ): Promise<WardrobeSearchResult[]> {
   const mainCategory = resolveMainCategoryForSlot(slot);
   const parsedSlot = parseWardrobeSearchSlot(slot);
   const searchQuery = query;
+  const slotTempRange = resolveSlotTempFilterFromWeather(weather, parsedSlot ?? slot);
   const rawResults = await searchWardrobeItemsByText(searchQuery, userId, fetchLimit, mainCategory, {
     slot: parsedSlot,
-    temperatureCelsius: temperature,
+    slotTempRange,
   });
-  const temperatureFiltered = applyTemperatureFilter(rawResults, temperature);
-  const seasonFiltered = applySeasonFilter(
-    temperatureFiltered,
-    seasonContext,
-    parsedSlot,
+  const temperatureFiltered = applySlotTemperatureFilter(rawResults, slotTempRange).slice(
+    0,
     resultLimit
   );
   const athleticFiltered = filterResultsForAthleticContext(
-    seasonFiltered,
+    temperatureFiltered,
     parsedSlot,
     athletic
   );
@@ -191,29 +186,20 @@ export async function performRagSearch(
   );
 
   try {
-    const seasonContext = buildSeasonFilterContext(logContext?.intent, logContext?.userMessage);
     const resultLimit = 5;
-    const fetchLimit = expandedSearchLimit(seasonContext, resultLimit);
-
-    if (seasonContext.isWarmWeather) {
-      console.log(
-        `[RAG_HANDLER] Warm-season filter active. targetSeasons=${seasonContext.targetSeasons.join(',')}`
-      );
-    } else {
-      console.log(
-        `[RAG_HANDLER] Cold-season filter active. targetSeasons=${seasonContext.targetSeasons.join(',')}` +
-          (seasonContext.strictColdActivity ? ', strictColdActivity=true' : '')
-      );
-    }
+    const fetchLimit = Math.max(resultLimit * 2, 10);
+    const weather = logContext?.intent?.weather?.trim() ?? '';
+    const temperature = parseTemperatureCelsius(weather);
 
     const athletic = isAthleticOccasion(logContext?.intent, logContext?.userMessage);
     if (athletic) {
       console.log('[RAG_HANDLER] Athletic occasion detected — applying slot fitness filter');
     }
 
-    const temperature = parseTemperatureCelsius(logContext?.intent?.weather?.trim() ?? '');
     if (temperature !== null) {
-      console.log(`[RAG_HANDLER] Temperature prefilter active: ${temperature}℃ (SQL + post-check)`);
+      console.log(
+        `[RAG_HANDLER] Slot temp-range filter active: ambient≈${temperature}℃ (per-slot overlap, not ambient containment)`
+      );
     }
 
     console.log(`[RAG_HANDLER] Running ${collapsed.length} searches in parallel...`);
@@ -226,8 +212,7 @@ export async function performRagSearch(
           userId,
           fetchLimit,
           resultLimit,
-          temperature,
-          seasonContext,
+          weather,
           athletic,
           logContext?.skillNames
         );
@@ -297,10 +282,10 @@ export async function performRagSearch(
         intent: logContext?.intent,
         anchorItem: logContext?.anchorItem,
         seasonFilter: {
-          dressingClimate: seasonContext.dressingClimate,
-          targetSeasons: seasonContext.targetSeasons,
-          isWarmWeather: seasonContext.isWarmWeather,
-          strictColdActivity: seasonContext.strictColdActivity,
+          dressingClimate: '',
+          targetSeasons: [],
+          isWarmWeather: temperature !== null ? temperature >= 26 : false,
+          strictColdActivity: false,
         },
       })
     );

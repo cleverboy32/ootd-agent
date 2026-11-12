@@ -37,7 +37,7 @@ export const SELECT_STYLIST_SKILLS_INSTRUCTION = `你是穿搭助手的技能调
 
 【场景】
 - athletic-outfit：需要大幅度活动、训练、球类、瑜伽等再选。气质向舞蹈/演出若已挂形制风格，不要叠运动 skill。
-- weather-dressing：上下文有可用实况天气（今天/明天温度雨雪等）再选；纯季节购物且没有可用气温时不要选。
+- weather-dressing：intent.weather 含可解析气温（实况或推断的 ℃/温度范围）时再选；服务端在可解析温度时也会强制注入，漏选无妨。
 - outfit-design：用户要买、看新品或入手时再选。
 
 【身形与色彩】

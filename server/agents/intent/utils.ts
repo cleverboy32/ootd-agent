@@ -365,27 +365,11 @@ export function inferDressingClimateFromAnchor(intent: GatekeeperIntent): Dressi
   return '';
 }
 
+/** @deprecated dressing_climate 已停用；厚薄只认 weather 温度。始终清空该字段。 */
 export function correctDressingClimate(intent: GatekeeperIntent): GatekeeperIntent {
-  if (!isOutfitGeneratingIntent(intent)) return intent;
-
-  const fromAnchor = inferDressingClimateFromAnchor(intent);
-  const current = parseDressingClimate(intent.dressing_climate);
-
-  if (!current && fromAnchor) {
-    console.warn(`[INTENT] Filling dressing_climate from anchor: ${fromAnchor}`);
-    intent.dressing_climate = fromAnchor;
-    return intent;
+  if (intent.dressing_climate) {
+    intent.dressing_climate = '';
   }
-
-  if (
-    current &&
-    fromAnchor &&
-    ((fromAnchor === 'cold' && current === 'warm') || (fromAnchor === 'warm' && current === 'cold'))
-  ) {
-    console.warn(`[INTENT] Correcting dressing_climate: ${current} → ${fromAnchor}`);
-    intent.dressing_climate = fromAnchor;
-  }
-
   return intent;
 }
 

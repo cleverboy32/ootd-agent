@@ -30,6 +30,7 @@ describe('loadSkill', () => {
     assert.match(body, /## 温度档位/);
     assert.match(body, /## 修正项/);
     assert.match(body, /中厚外套/);
+    assert.match(body, /下装三明治/);
     assert.match(body, /凉 \| 13–17℃[\s\S]*?中厚/);
   });
 
