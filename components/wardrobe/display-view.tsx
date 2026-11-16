@@ -16,8 +16,9 @@ const categories = [
   { value: 'BOTTOM', label: '下装' },
   { value: 'OUTERWEAR', label: '外套' },
   { value: 'FOOTWEAR', label: '鞋履' },
+  { value: 'SOCKS', label: '袜类' },
   { value: 'ACCESSORY', label: '配饰' },
-  { value: 'ONE_PIECE', label: '连身' },
+  { value: 'ONE_PIECE', label: '裙装' },
 ] as const;
 
 interface DisplayViewProps {
@@ -226,7 +227,7 @@ export function DisplayView({ onAddItems }: DisplayViewProps) {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 sm:grid-cols-7">
+        <TabsList className="grid w-full grid-cols-4 sm:grid-cols-8">
           {categories.map((category) => (
             <TabsTrigger key={category.value} value={category.value}>
               {category.label}
