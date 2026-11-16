@@ -8,7 +8,7 @@ import {
 describe('buildWardrobeQueryEmbeddingText', () => {
   it('keeps full document field structure with intent hints', () => {
     const text = buildWardrobeQueryEmbeddingText('beige A-line midi dress with belt for office', {
-      slot: 'dress',
+      slot: 'skirt',
       intent: {
         dressing_climate: 'warm',
         occasion: 'office commute',
@@ -18,7 +18,7 @@ describe('buildWardrobeQueryEmbeddingText', () => {
 
     assert.match(
       text,
-      /^MainCategory: ONE_PIECE\. Category: dress\. Description: beige A-line midi dress with belt for office\./
+      /^MainCategory: ONE_PIECE\. Category: skirt\. Description: beige A-line midi dress with belt for office\./
     );
     assert.match(text, /Colors: beige\./);
     assert.match(text, /Season: summer\./);
@@ -36,7 +36,7 @@ describe('buildWardrobeQueryEmbeddingText', () => {
   });
 
   it('extracts Chinese color for dress resolver queries', () => {
-    const text = buildWardrobeQueryEmbeddingText('白色裙子', { slot: 'dress' });
+    const text = buildWardrobeQueryEmbeddingText('白色裙子', { slot: 'skirt' });
     assert.match(text, /Colors: white\./);
     assert.match(text, /Description: 白色裙子\./);
   });
@@ -58,8 +58,11 @@ describe('buildWardrobeDocumentEmbeddingText', () => {
       tags: ['casual'],
       season: ['summer'],
       material: ['linen'],
+      tempMin: 16,
+      tempMax: 26,
     });
     assert.match(text, /^MainCategory: BOTTOM\. Category: Wide-Leg Trousers\./);
+    assert.match(text, /TempSuitable: 16-26℃\./);
   });
 
   it('query injects mainCategory from slot', () => {
@@ -67,5 +70,24 @@ describe('buildWardrobeDocumentEmbeddingText', () => {
       slot: 'bottom',
     });
     assert.match(text, /^MainCategory: BOTTOM\. Category: bottom\./);
+  });
+
+  it('query injects TempSuitable from slotTempRange', () => {
+    const text = buildWardrobeQueryEmbeddingText('厚针织毛衣内搭', {
+      slot: 'top',
+      slotTempRange: { min: 5, max: 14 },
+    });
+    assert.match(text, /TempSuitable: 5-14℃\./);
+  });
+
+  it('omits TempSuitable when both bounds null', () => {
+    const text = buildWardrobeDocumentEmbeddingText({
+      mainCategory: 'ACCESSORY',
+      subCategory: '耳环',
+      description: '金耳钉',
+      tempMin: null,
+      tempMax: null,
+    });
+    assert.doesNotMatch(text, /TempSuitable/);
   });
 });

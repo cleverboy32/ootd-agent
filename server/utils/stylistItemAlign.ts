@@ -77,10 +77,11 @@ export function reconcileAccessoryConcept(
 const LAYER_BY_MAIN_CATEGORY: Record<string, string> = {
   TOP: 'top',
   BOTTOM: 'bottom',
-  ONE_PIECE: 'dress',
+  ONE_PIECE: 'skirt',
   FOOTWEAR: 'shoes',
   OUTERWEAR: 'outerwear',
   ACCESSORY: 'accessory',
+  SOCKS: 'legwear',
 };
 
 /** 衣橱大类对应的穿搭层级。未知大类不改，留给模型自己的 layer。 */

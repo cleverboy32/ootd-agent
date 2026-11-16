@@ -13,7 +13,7 @@ import {
   clothingItemToEmbeddingFields,
 } from '@/server/utils/wardrobeAnalysis';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
-import type { TempRange } from '@/server/utils/slotTempFilter';
+import { type TempRange } from '@/server/utils/slotTempFilter';
 import {
   generateTextEmbedding,
   generateVisualEmbedding,
@@ -32,12 +32,10 @@ export interface WardrobeSearchOptions {
   intent?: GatekeeperIntent;
   embedding?: WardrobeSearchEmbeddingContext;
   /**
-   * 该槽目标适穿区间。与单品 tempMin/tempMax 求交过滤（非环境温度落点）。
+   * 该槽目标适穿区间。与单品 tempMin/tempMax 求交过滤（三明治槽温区，非环境℃落点）。
    * 双空旧单品保留。
    */
   slotTempRange?: TempRange | null;
-  /** @deprecated 使用 slotTempRange；若仍传入则按「环境℃落在单品区间」旧逻辑（锚点解析） */
-  temperatureCelsius?: number | null;
 }
 
 export type WardrobeSearchResult = {
@@ -50,6 +48,9 @@ export type WardrobeSearchResult = {
   season: string[];
   material: string[];
   tags: string[];
+  occasions?: string[];
+  formality?: string | null;
+  silhouette?: string[];
   similarity: number;
   /** 合适穿着温度下限。两个字段都空表示旧单品，检索时不过滤 */
   tempMin?: number | null;
@@ -68,31 +69,20 @@ export async function searchWardrobeItemsByText(
     (options.slotTempRange.min != null || options.slotTempRange.max != null)
       ? options.slotTempRange
       : null;
-  /** 锚点等旧调用：环境温度落在单品区间内 */
-  const temperatureCelsius =
-    !slotTempRange &&
-    options?.temperatureCelsius != null &&
-    Number.isFinite(options.temperatureCelsius)
-      ? options.temperatureCelsius
-      : null;
 
   const rangeMin = slotTempRange?.min ?? null;
   const rangeMax = slotTempRange?.max ?? null;
   const hasSlotRange = slotTempRange !== null;
-  // SQL 开区间：null 侧用极大/极小哨兵，配合 OR temp* IS NULL
-  const sqlRangeMin = rangeMin ?? -100;
-  const sqlRangeMax = rangeMax ?? 100;
+  // 区间求交硬过滤（非中点）；无边界时用极宽哨兵
+  const sqlRangeMin = rangeMin ?? -1000;
+  const sqlRangeMax = rangeMax ?? 1000;
 
   console.log(`[RAG-SEARCH] Initiating search for userId: ${userId}`);
   console.log(
     `[RAG-SEARCH] Searching with keywords: "${searchText}"` +
       (mainCategory ? `, mainCategory: ${mainCategory}` : '') +
       (options?.slot ? `, slot: ${options.slot}` : '') +
-      (hasSlotRange
-        ? `, slotTempRange: [${rangeMin ?? 'null'},${rangeMax ?? 'null'}]`
-        : temperatureCelsius !== null
-          ? `, temperaturePrefilter: ${temperatureCelsius}℃`
-          : '')
+      (hasSlotRange ? `, slotTempRange: [${rangeMin ?? 'null'},${rangeMax ?? 'null'}]` : '')
   );
 
   if (!searchText.trim()) {
@@ -100,10 +90,18 @@ export async function searchWardrobeItemsByText(
     return [];
   }
 
+  if (!mainCategory) {
+    console.warn(
+      `[RAG-SEARCH] Refusing unscoped search (missing mainCategory) query="${searchText.slice(0, 48)}" slot=${options?.slot ?? ''}`
+    );
+    return [];
+  }
+
   try {
     const embeddingContext: WardrobeQueryEmbeddingContext = {
       slot: options?.slot ?? options?.embedding?.slot,
       intent: options?.intent ?? options?.embedding?.intent,
+      slotTempRange: slotTempRange,
     };
     const textForEmbedding = options?.embedding?.useRawQueryEmbedding
       ? searchText.trim()
@@ -119,178 +117,71 @@ export async function searchWardrobeItemsByText(
 
     const vectorQueryString = `[${queryEmbedding.join(',')}]`;
 
-    // 槽位目标区间求交：双空旧单品保留；(itemMin<=rangeMax)∧(itemMax>=rangeMin)，空边界视为开区间。
-    const results: WardrobeSearchResult[] =
-      mainCategory && hasSlotRange
-        ? await prismadb.$queryRaw`
-            SELECT
-              "id",
-              "imageUrl",
-              "mainCategory",
-              "subCategory",
-              "description",
-              "colors",
-              "season",
-              "material",
-              "tags",
-              "tempMin",
-              "tempMax",
-              1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-            FROM
-              "ClothingItem"
-            WHERE
-              "userId" = ${userId}
-              AND "status" = 'completed'
-              AND "textEmbedding" IS NOT NULL
-              AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
-              AND (
-                ("tempMin" IS NULL AND "tempMax" IS NULL)
-                OR (
-                  ("tempMin" IS NULL OR "tempMin" <= ${sqlRangeMax})
-                  AND ("tempMax" IS NULL OR "tempMax" >= ${sqlRangeMin})
-                )
+    // 必须带 mainCategory；有槽温区时做区间求交硬过滤（双空旧单品放行）。
+    const results: WardrobeSearchResult[] = hasSlotRange
+      ? await prismadb.$queryRaw`
+          SELECT
+            "id",
+            "imageUrl",
+            "mainCategory",
+            "subCategory",
+            "description",
+            "colors",
+            "season",
+            "material",
+            "tags",
+            "occasions",
+            "formality",
+            "silhouette",
+            "tempMin",
+            "tempMax",
+            1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
+          FROM
+            "ClothingItem"
+          WHERE
+            "userId" = ${userId}
+            AND "status" = 'completed'
+            AND "textEmbedding" IS NOT NULL
+            AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
+            AND (
+              ("tempMin" IS NULL AND "tempMax" IS NULL)
+              OR (
+                COALESCE("tempMin", -1000) <= ${sqlRangeMax}
+                AND COALESCE("tempMax", 1000) >= ${sqlRangeMin}
               )
-            ORDER BY
-              "textEmbedding" <=> ${vectorQueryString}::vector
-            LIMIT ${limit};
-          `
-        : mainCategory && temperatureCelsius !== null
-          ? await prismadb.$queryRaw`
-              SELECT
-                "id",
-                "imageUrl",
-                "mainCategory",
-                "subCategory",
-                "description",
-                "colors",
-                "season",
-                "material",
-                "tags",
-                "tempMin",
-                "tempMax",
-                1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-              FROM
-                "ClothingItem"
-              WHERE
-                "userId" = ${userId}
-                AND "status" = 'completed'
-                AND "textEmbedding" IS NOT NULL
-                AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
-                AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
-                AND ("tempMax" IS NULL OR "tempMax" >= ${temperatureCelsius})
-              ORDER BY
-                "textEmbedding" <=> ${vectorQueryString}::vector
-              LIMIT ${limit};
-            `
-          : mainCategory
-            ? await prismadb.$queryRaw`
-                SELECT
-                  "id",
-                  "imageUrl",
-                  "mainCategory",
-                  "subCategory",
-                  "description",
-                  "colors",
-                  "season",
-                  "material",
-                  "tags",
-                  "tempMin",
-                  "tempMax",
-                  1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-                FROM
-                  "ClothingItem"
-                WHERE
-                  "userId" = ${userId}
-                  AND "status" = 'completed'
-                  AND "textEmbedding" IS NOT NULL
-                  AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
-                ORDER BY
-                  "textEmbedding" <=> ${vectorQueryString}::vector
-                LIMIT ${limit};
-              `
-            : hasSlotRange
-              ? await prismadb.$queryRaw`
-                  SELECT
-                    "id",
-                    "imageUrl",
-                    "mainCategory",
-                    "subCategory",
-                    "description",
-                    "colors",
-                    "season",
-                    "material",
-                    "tags",
-                    "tempMin",
-                    "tempMax",
-                    1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-                  FROM
-                    "ClothingItem"
-                  WHERE
-                    "userId" = ${userId}
-                    AND "status" = 'completed'
-                    AND "textEmbedding" IS NOT NULL
-                    AND (
-                      ("tempMin" IS NULL AND "tempMax" IS NULL)
-                      OR (
-                        ("tempMin" IS NULL OR "tempMin" <= ${sqlRangeMax})
-                        AND ("tempMax" IS NULL OR "tempMax" >= ${sqlRangeMin})
-                      )
-                    )
-                  ORDER BY
-                    "textEmbedding" <=> ${vectorQueryString}::vector
-                  LIMIT ${limit};
-                `
-              : temperatureCelsius !== null
-                ? await prismadb.$queryRaw`
-                    SELECT
-                      "id",
-                      "imageUrl",
-                      "mainCategory",
-                      "subCategory",
-                      "description",
-                      "colors",
-                      "season",
-                      "material",
-                      "tags",
-                      "tempMin",
-                      "tempMax",
-                      1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-                    FROM
-                      "ClothingItem"
-                    WHERE
-                      "userId" = ${userId}
-                      AND "status" = 'completed'
-                      AND "textEmbedding" IS NOT NULL
-                      AND ("tempMin" IS NULL OR "tempMin" <= ${temperatureCelsius})
-                      AND ("tempMax" IS NULL OR "tempMax" >= ${temperatureCelsius})
-                    ORDER BY
-                      "textEmbedding" <=> ${vectorQueryString}::vector
-                    LIMIT ${limit};
-                  `
-                : await prismadb.$queryRaw`
-                    SELECT
-                      "id",
-                      "imageUrl",
-                      "mainCategory",
-                      "subCategory",
-                      "description",
-                      "colors",
-                      "season",
-                      "material",
-                      "tags",
-                      "tempMin",
-                      "tempMax",
-                      1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
-                    FROM
-                      "ClothingItem"
-                    WHERE
-                      "userId" = ${userId}
-                      AND "status" = 'completed'
-                      AND "textEmbedding" IS NOT NULL
-                    ORDER BY
-                      "textEmbedding" <=> ${vectorQueryString}::vector
-                    LIMIT ${limit};
-                  `;
+            )
+          ORDER BY
+            "textEmbedding" <=> ${vectorQueryString}::vector
+          LIMIT ${limit};
+        `
+      : await prismadb.$queryRaw`
+          SELECT
+            "id",
+            "imageUrl",
+            "mainCategory",
+            "subCategory",
+            "description",
+            "colors",
+            "season",
+            "material",
+            "tags",
+            "occasions",
+            "formality",
+            "silhouette",
+            "tempMin",
+            "tempMax",
+            1 - ("textEmbedding" <=> ${vectorQueryString}::vector) as similarity
+          FROM
+            "ClothingItem"
+          WHERE
+            "userId" = ${userId}
+            AND "status" = 'completed'
+            AND "textEmbedding" IS NOT NULL
+            AND "mainCategory" = ${mainCategory}::"ClothingMainCategory"
+          ORDER BY
+            "textEmbedding" <=> ${vectorQueryString}::vector
+          LIMIT ${limit};
+        `;
 
     console.log('[RAG-SEARCH] Raw search results from DB:', JSON.stringify(results, null, 2));
 
@@ -327,6 +218,39 @@ export async function getWardrobeItemDetails(itemId: string) {
     return item;
   } catch (error) {
     console.error(`[DB-ERROR] Failed to fetch clothing item with id "${itemId}":`, error);
+    return null;
+  }
+}
+
+/** 衣橱锚点适穿温度 + 展示名（天气冲突检测用） */
+export async function getWardrobeItemTempFitMeta(itemId: string): Promise<{
+  id: string;
+  label: string;
+  tempMin: number | null;
+  tempMax: number | null;
+  description: string | null;
+} | null> {
+  try {
+    const item = await prismadb.clothingItem.findUnique({
+      where: { id: itemId },
+      select: {
+        id: true,
+        subCategory: true,
+        description: true,
+        tempMin: true,
+        tempMax: true,
+      },
+    });
+    if (!item) return null;
+    return {
+      id: item.id,
+      label: item.subCategory?.trim() || '这件衣橱单品',
+      tempMin: item.tempMin ?? null,
+      tempMax: item.tempMax ?? null,
+      description: item.description ?? null,
+    };
+  } catch (error) {
+    console.error(`[DB-ERROR] Failed to fetch temp meta for "${itemId}":`, error);
     return null;
   }
 }

@@ -231,9 +231,11 @@ function layerHintOverlap(layer: string, hint: string, name: string): boolean {
 const SLOT_LAYERS: Record<string, string[]> = {
   top: ['inner_top', 'top'],
   bottom: ['bottom'],
-  dress: ['dress'],
+  dress: ['skirt', 'dress'],
+  skirt: ['skirt', 'dress'],
   shoes: ['shoes'],
   outerwear: ['outerwear'],
+  legwear: ['legwear'],
   accessory: ['accessory'],
 };
 

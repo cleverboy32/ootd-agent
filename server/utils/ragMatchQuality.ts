@@ -16,7 +16,7 @@ export interface SlotMatchAssessment {
 export const ATHLETIC_OCCASION_HINT =
   /篮球|打球|足球|运动|健身|跑步|瑜伽|球类|训练|athletic|basketball|workout|gym|sport/i;
 
-const CORE_SLOTS: WardrobeSearchSlot[] = ['top', 'bottom', 'shoes'];
+const CORE_SLOTS: WardrobeSearchSlot[] = ['top', 'inner_top', 'bottom', 'shoes'];
 
 const ATHLETIC_BOTTOM_BAD =
   /wrap short|denim bermuda|denim short|cargo jean|wide-leg denim|skirt|midi|maxi dress|半裙|长裙|牛仔短裤|阔腿牛仔/i;
@@ -62,7 +62,7 @@ export function isItemAthleticallyAppropriate(
     return false;
   }
 
-  if (slot === 'top') {
+  if (slot === 'top' || slot === 'inner_top') {
     if (ATHLETIC_TOP_GOOD.test(text)) return true;
     // 普通 T 恤在运动场景偏弱，但不直接判死
     if (item.similarity >= getTextSimilarityThresholds().slotAdequate) return true;

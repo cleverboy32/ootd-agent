@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  alignOutfitPlanTempsToSlotRanges,
+  alignSearchQueryTempToSlotRange,
+  clampNoStyleOutfitPlan,
+  expandNoStyleCoverageSlots,
   flattenOutfitPlanToQueries,
   planQueryBottomCategoryConflict,
 } from '@/server/utils/outfitPlanSearch';
-import { collapseIdenticalSlotQueries } from '@/server/utils/ragSearchSlots';
+import { THICKNESS_TEMP_RANGES } from '@/server/utils/slotTempFilter';
+import {
+  collapseIdenticalSlotQueries,
+  collapseQueriesForRound,
+} from '@/server/utils/ragSearchSlots';
 import { filterResultsByStyleSkill } from '@/server/utils/queryStyleFilter';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 
@@ -23,6 +31,132 @@ function item(
     ...overrides,
   };
 }
+
+describe('alignSearchQueryTempToSlotRange', () => {
+  it('rewrites 16-24 thin base phrase to thermal_base when slot is cold inner', () => {
+    const out = alignSearchQueryTempToSlotRange(
+      '薄长袖打底衫，适合16到24度单穿，作为内搭贴身层，休闲风格。',
+      THICKNESS_TEMP_RANGES.thermal_base
+    );
+    assert.match(out, /适合-15到4度单穿/);
+    assert.doesNotMatch(out, /16到24/);
+  });
+
+  it('keeps phrase when already overlapping slot range', () => {
+    const out = alignSearchQueryTempToSlotRange(
+      '薄长袖打底，适合16到23度单穿。',
+      THICKNESS_TEMP_RANGES.thin_top_long
+    );
+    assert.match(out, /16到23/);
+  });
+});
+
+describe('alignOutfitPlanTempsToSlotRanges', () => {
+  it('at 5℃ rewrites inner_top query off thin-base temps', () => {
+    const aligned = alignOutfitPlanTempsToSlotRanges(
+      {
+        outfits: [
+          {
+            id: 'outfit_1',
+            overall_concept: '冷天',
+            slots: [
+              {
+                slot: 'inner_top',
+                target: '薄打底 16-24',
+                search_query:
+                  '薄长袖打底衫，适合16到24度单穿，作为内搭贴身层，休闲风格，日常出行。',
+                allow_new: true,
+              },
+            ],
+          },
+        ],
+      },
+      '约5℃'
+    );
+    const q = aligned.outfits[0].slots[0].search_query;
+    assert.match(q, /适合-15到4度单穿/);
+    assert.doesNotMatch(q, /16到24/);
+  });
+});
+
+describe('expandNoStyleCoverageSlots', () => {
+  it('at 15℃ adds skirt + legwear when plan only has bottom', () => {
+    const expanded = expandNoStyleCoverageSlots(
+      {
+        outfits: [
+          {
+            id: 'outfit_1',
+            overall_concept: '通勤',
+            slots: [
+              {
+                slot: 'bottom',
+                target: '牛仔裤',
+                search_query: '直筒牛仔裤，适合12到23度单穿。',
+                allow_new: true,
+              },
+            ],
+          },
+        ],
+      },
+      '约15℃'
+    );
+    const slots = expanded.outfits[0].slots.map((s) => s.slot);
+    assert.ok(slots.includes('bottom'));
+    assert.ok(slots.includes('skirt'));
+    assert.ok(slots.includes('legwear'));
+  });
+
+  it('does not add legwear on hot band', () => {
+    const expanded = expandNoStyleCoverageSlots(
+      {
+        outfits: [
+          {
+            id: 'outfit_1',
+            overall_concept: '炎热',
+            slots: [
+              {
+                slot: 'bottom',
+                target: '短裤',
+                search_query: '短裤，适合24到38度单穿。',
+                allow_new: true,
+              },
+            ],
+          },
+        ],
+      },
+      '约32℃'
+    );
+    const slots = expanded.outfits[0].slots.map((s) => s.slot);
+    assert.ok(slots.includes('skirt'));
+    assert.ok(!slots.includes('legwear'));
+  });
+});
+
+describe('clampNoStyleOutfitPlan', () => {
+  it('keeps only outfit_1 when plan has multiple outfits', () => {
+    const clamped = clampNoStyleOutfitPlan({
+      outfits: [
+        {
+          id: 'outfit_1',
+          overall_concept: '骨架A',
+          slots: [
+            { slot: 'bottom', target: '裤', search_query: '厚裤', allow_new: true },
+          ],
+        },
+        {
+          id: 'outfit_2',
+          overall_concept: '骨架B',
+          slots: [
+            { slot: 'bottom', target: '裙', search_query: '厚裙', allow_new: true },
+          ],
+        },
+      ],
+    });
+    assert.equal(clamped.outfits.length, 1);
+    assert.equal(clamped.outfits[0].id, 'outfit_1');
+    assert.equal(clamped.outfits[0].overall_concept, '骨架A');
+  });
+});
 
 describe('flattenOutfitPlanToQueries', () => {
   it('展开为每套每槽一条且带 outfitId', () => {
@@ -91,6 +225,39 @@ describe('collapseIdenticalSlotQueries', () => {
       }
     }
     assert.equal(collapseIdenticalSlotQueries(queries).length, 8);
+  });
+});
+
+describe('collapseQueriesForRound', () => {
+  it('无 style sharedPoolBySlot：同槽不同 query 仍合并为 1，canonical 取 outfit_1', () => {
+    const collapsed = collapseQueriesForRound(
+      [
+        { outfitId: 'outfit_2', slot: 'bottom', query: '半裙 query', target: '半裙' },
+        { outfitId: 'outfit_1', slot: 'bottom', query: '直筒裤 query', target: '直筒裤' },
+        { outfitId: 'outfit_1', slot: 'shoes', query: '皮鞋' },
+        { outfitId: 'outfit_2', slot: 'shoes', query: '运动鞋' },
+      ],
+      { sharedPoolBySlot: true }
+    );
+    assert.equal(collapsed.length, 2);
+    const bottom = collapsed.find((g) => g.slot === 'bottom');
+    assert.equal(bottom?.query, '直筒裤 query');
+    assert.equal(bottom?.target, '直筒裤');
+    assert.deepEqual(bottom?.outfitIds.sort(), ['outfit_1', 'outfit_2']);
+    const shoes = collapsed.find((g) => g.slot === 'shoes');
+    assert.equal(shoes?.query, '皮鞋');
+    assert.deepEqual(shoes?.outfitIds.sort(), ['outfit_1', 'outfit_2']);
+  });
+
+  it('有 style：同槽不同 query 仍各搜一次', () => {
+    const collapsed = collapseQueriesForRound(
+      [
+        { outfitId: 'outfit_1', slot: 'bottom', query: '直筒裤' },
+        { outfitId: 'outfit_2', slot: 'bottom', query: '半裙' },
+      ],
+      { sharedPoolBySlot: false }
+    );
+    assert.equal(collapsed.length, 2);
   });
 });
 

@@ -35,7 +35,7 @@ async function main() {
   const queries = [
     { query: 'lightweight jacket or cardigan office commute layer', slot: 'outerwear' as const },
     { query: 'casual professional top office commute', slot: 'top' as const },
-    { query: '白色裙子', slot: 'dress' as const },
+    { query: '白色裙子', slot: 'skirt' as const },
   ];
 
   console.log(`[DIAG] EMBEDDING_MODEL=${process.env.EMBEDDING_MODEL}`);

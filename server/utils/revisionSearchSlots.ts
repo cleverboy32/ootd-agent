@@ -3,6 +3,10 @@ import type { WardrobeSearchQuery, WardrobeSearchSlot } from '@/server/utils/rag
 /** 从 special_requests / 用户话术推断本轮 revision 要改的槽位 */
 const SLOT_HINTS: Array<{ slot: WardrobeSearchSlot; patterns: RegExp[] }> = [
   {
+    slot: 'legwear',
+    patterns: [/打底袜|连裤袜|长筒袜|丝袜|腿袜|tights|pantyhose|stockings|legwear/i],
+  },
+  {
     slot: 'accessory',
     patterns: [
       /项链|耳环|耳坠|耳钉|配饰|choker|颈链|吊坠|手链|戒指|围巾|帽子|腰带|包|bag/i,
@@ -22,12 +26,16 @@ const SLOT_HINTS: Array<{ slot: WardrobeSearchSlot; patterns: RegExp[] }> = [
     patterns: [/裤|裙(?!子装)|短裤|阔腿|bottom|trousers?|pants?|jeans|skirt|shorts/i],
   },
   {
-    slot: 'top',
-    patterns: [/上衣|内搭|T\s*恤|衬衫|背心|针织|top|t-?shirt|blouse|shirt|tee\b/i],
+    slot: 'inner_top',
+    patterns: [/内搭|打底衫|里层上装|inner[_\s-]?top/i],
   },
   {
-    slot: 'dress',
-    patterns: [/连衣裙|连体|dress|one[\s-]?piece/i],
+    slot: 'top',
+    patterns: [/上衣|T\s*恤|衬衫|背心|针织|毛衣|top|t-?shirt|blouse|shirt|tee\b/i],
+  },
+  {
+    slot: 'skirt',
+    patterns: [/连衣裙|连体|半身裙|短裙|长裙|裙装|dress|skirt|one[\s-]?piece/i],
   },
 ];
 

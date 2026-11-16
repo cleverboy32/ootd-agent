@@ -58,13 +58,15 @@ export interface StylistSelectionAuditInput {
 
 const LAYER_TO_SLOT: Record<string, WardrobeSearchSlot> = {
   top: 'top',
-  inner_top: 'top',
+  inner_top: 'inner_top',
   bottom: 'bottom',
-  dress: 'dress',
-  one_piece: 'dress',
+  skirt: 'skirt',
+  dress: 'skirt',
+  one_piece: 'skirt',
   shoes: 'shoes',
   footwear: 'shoes',
   outerwear: 'outerwear',
+  legwear: 'legwear',
   accessory: 'accessory',
 };
 
