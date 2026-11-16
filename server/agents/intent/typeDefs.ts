@@ -113,6 +113,14 @@ export interface WeatherEnrichmentContext {
 
 // ─── Finalize I/O interfaces ───────────────────────────────────────────────────
 
+/** 衣橱锚点适穿温度（由 Gatekeeper 查库后传入 finalize） */
+export type WardrobeAnchorTempMeta = {
+  label: string;
+  tempMin: number | null;
+  tempMax: number | null;
+  description?: string | null;
+};
+
 export interface FinalizeGatekeeperInput {
   extracted_intent: GatekeeperIntent;
   followup_questions?: string[];
@@ -121,6 +129,8 @@ export interface FinalizeGatekeeperInput {
   /** 服务端本轮按 weather_lookup 查到的天气；区别于 intent.weather 中用户自述的天气 */
   fetchedWeather?: string;
   wardrobeResolver?: WardrobeResolverResult;
+  /** 已解析衣橱锚点的适穿温度；缺省则仅靠 special_requests 文本启发式 */
+  wardrobeAnchorTemp?: WardrobeAnchorTempMeta;
   currentMessageText?: string;
   history?: Content[];
   /** Gatekeeper LLM 本轮自判的放行结论，仅 style_advice 等语义类型参考 */

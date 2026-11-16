@@ -6,6 +6,7 @@ import {
   OutfitRequestType,
   WardrobeResolverResult,
   WardrobeAnchorCandidate,
+  WardrobeAnchorTempMeta,
 } from './typeDefs';
 import {
   normalizeGatekeeperIntent,
@@ -18,6 +19,16 @@ import {
   isWardrobePairingAnchorReady,
   isWardrobeBrowseIntent,
 } from './utils';
+import {
+  buildWeatherMismatchOfferReply,
+  historyHasWeatherMismatchOffer,
+  isWeatherMismatchInsist,
+  itemConflictsWithWeatherCelsius,
+  parseWeatherCelsiusOrNull,
+  resolveItemTempRange,
+  specialRequestsLooksLikeHardGarmentConstraint,
+  WEATHER_MISMATCH_HARD_REFUSE,
+} from '@/server/utils/weatherAnchorFit';
 
 // ─── Reply builders ────────────────────────────────────────────────────────────
 
@@ -99,8 +110,91 @@ interface FinalizeContext {
   suggestCityForWeather?: boolean;
   fetchedWeather?: string;
   wardrobeResolver?: WardrobeResolverResult;
+  wardrobeAnchorTemp?: WardrobeAnchorTempMeta;
   currentMessageText?: string;
   history?: Content[];
+}
+
+function blockWeatherMismatch(
+  intent: GatekeeperIntent,
+  options: {
+    itemLabel: string;
+    weatherCelsius: number;
+    source: 'wardrobe' | 'special_requests';
+    userText: string;
+    history?: Content[];
+  }
+): GatekeeperFinalizeResult {
+  const insist =
+    isWeatherMismatchInsist(options.userText) &&
+    historyHasWeatherMismatchOffer(options.history);
+  if (insist) {
+    console.log('[GATEKEEPER] weather mismatch — hard refuse after insist');
+    return {
+      is_complete: false,
+      extracted_intent: { ...intent, request_type: 'clarify' },
+      followup_questions: [],
+      gatekeeper_reply: WEATHER_MISMATCH_HARD_REFUSE,
+    };
+  }
+  console.log(
+    `[GATEKEEPER] weather mismatch — offer swap (${options.source}, ${options.weatherCelsius}℃)`
+  );
+  return {
+    is_complete: false,
+    extracted_intent: { ...intent, request_type: 'clarify' },
+    followup_questions: [],
+    gatekeeper_reply: buildWeatherMismatchOfferReply({
+      itemLabel: options.itemLabel,
+      weatherCelsius: options.weatherCelsius,
+      source: options.source,
+    }),
+  };
+}
+
+/** 衣橱锚点或 special_requests 硬约束 vs 实况气温；冲突则短路 */
+function maybeBlockWeatherUnfitGarment(ctx: FinalizeContext): GatekeeperFinalizeResult | null {
+  const weatherCelsius = parseWeatherCelsiusOrNull(ctx.intent.weather || '');
+  if (weatherCelsius === null) return null;
+
+  const userText = ctx.currentMessageText?.trim() ?? '';
+  const special = ctx.intent.special_requests?.trim() ?? '';
+
+  if (ctx.wardrobeAnchorTemp) {
+    const range = resolveItemTempRange({
+      tempMin: ctx.wardrobeAnchorTemp.tempMin,
+      tempMax: ctx.wardrobeAnchorTemp.tempMax,
+      textFallback:
+        ctx.wardrobeAnchorTemp.description ||
+        ctx.intent.anchor_item_summary ||
+        ctx.wardrobeAnchorTemp.label,
+    });
+    if (range && itemConflictsWithWeatherCelsius(range, weatherCelsius)) {
+      return blockWeatherMismatch(ctx.intent, {
+        itemLabel: ctx.wardrobeAnchorTemp.label || ctx.intent.anchor_item_summary || '该单品',
+        weatherCelsius,
+        source: 'wardrobe',
+        userText,
+        history: ctx.history,
+      });
+    }
+  }
+
+  if (specialRequestsLooksLikeHardGarmentConstraint(special)) {
+    const range = resolveItemTempRange({ textFallback: special });
+    if (range && itemConflictsWithWeatherCelsius(range, weatherCelsius)) {
+      const labelMatch = special.match(/[「『]?([\u4e00-\u9fffA-Za-z0-9]{2,16}(?:裙|裤|衫|外套|鞋|靴|衣))[」』]?/);
+      return blockWeatherMismatch(ctx.intent, {
+        itemLabel: labelMatch?.[1] || special.slice(0, 24),
+        weatherCelsius,
+        source: 'special_requests',
+        userText,
+        history: ctx.history,
+      });
+    }
+  }
+
+  return null;
 }
 
 type RequestTypeHandler = (ctx: FinalizeContext) => GatekeeperFinalizeResult;
@@ -278,6 +372,9 @@ const handleWardrobePairing: RequestTypeHandler = (ctx) => {
     return blockForMissingOccasion({ ...ctx, intent });
   }
 
+  const weatherBlock = maybeBlockWeatherUnfitGarment({ ...ctx, intent });
+  if (weatherBlock) return weatherBlock;
+
   return { is_complete: true, extracted_intent: intent, followup_questions: [] };
 };
 
@@ -316,6 +413,8 @@ const handleWardrobeOutfit: RequestTypeHandler = (ctx) => {
   if (!ctx.intent.occasion.trim()) {
     return blockForMissingOccasion(ctx);
   }
+  const weatherBlock = maybeBlockWeatherUnfitGarment(ctx);
+  if (weatherBlock) return weatherBlock;
   return { is_complete: true, extracted_intent: ctx.intent, followup_questions: [] };
 };
 
@@ -357,6 +456,7 @@ export function finalizeGatekeeperResult(
     modelIsComplete: input.modelIsComplete,
     suggestCityForWeather: input.suggestCityForWeather,
     fetchedWeather: input.fetchedWeather,
+    wardrobeAnchorTemp: input.wardrobeAnchorTemp,
     wardrobeResolver: input.wardrobeResolver,
     currentMessageText: input.currentMessageText,
     history: input.history,

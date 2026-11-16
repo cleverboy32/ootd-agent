@@ -19,7 +19,8 @@ import {
 import { evaluateGatekeeperOutput } from '@/server/utils/gatekeeperEvaluator';
 import { logGatekeeperAudit } from '@/server/logging/gatekeeper';
 import { resolveWardrobeAnchor } from './wardrobeResolver';
-import type { WardrobeAnchorCandidate } from '../intent';
+import type { WardrobeAnchorCandidate, WardrobeAnchorTempMeta } from '../intent';
+import { getWardrobeItemTempFitMeta } from '@/server/services/wardrobeService';
 import { gatekeeperSchema, WeatherLookup, type ProfileUpdate } from './schema';
 import { GATEKEEPER_SYSTEM_INSTRUCTION } from './prompts';
 import { evaluateCityWeatherGate } from '@/server/utils/cityWeatherGate';
@@ -205,6 +206,22 @@ export async function callGatekeeperAgent(
       );
     }
 
+    let wardrobeAnchorTemp: WardrobeAnchorTempMeta | undefined;
+    const resolvedAnchorId =
+      intent.anchor_wardrobe_id?.trim() ||
+      (wardrobeResolver?.status === 'resolved' ? wardrobeResolver.itemId : '');
+    if (intent.request_type === 'wardrobe_pairing' && resolvedAnchorId) {
+      const meta = await getWardrobeItemTempFitMeta(resolvedAnchorId);
+      if (meta) {
+        wardrobeAnchorTemp = {
+          label: meta.label,
+          tempMin: meta.tempMin,
+          tempMax: meta.tempMax,
+          description: meta.description,
+        };
+      }
+    }
+
     const result = finalizeGatekeeperResult({
       extracted_intent: intent,
       followup_questions: parsed.followup_questions,
@@ -212,6 +229,7 @@ export async function callGatekeeperAgent(
       suggestCityForWeather,
       fetchedWeather,
       wardrobeResolver,
+      wardrobeAnchorTemp,
       currentMessageText: extractTextFromParts(currentInput),
       history,
       modelIsComplete: parsed.is_complete,
