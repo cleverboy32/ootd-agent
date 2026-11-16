@@ -218,12 +218,17 @@ export function outfitHasAccessoryItem(
   outfit: StylistOutfit,
   ragCache?: Map<string, ClothingItem>
 ): boolean {
-  return outfit.selected_items.some(
-    (item) =>
-      layerKey(item.layer) === 'accessory' ||
-      layerKey(item.layer).includes('accessor') ||
-      ragCache?.get(item.id)?.mainCategory?.toUpperCase() === 'ACCESSORY'
-  );
+  return outfit.selected_items.some((item) => {
+    const key = layerKey(item.layer);
+    if (key === 'legwear' || key.includes('legwear')) return false;
+    const main = ragCache?.get(item.id)?.mainCategory?.toUpperCase();
+    if (main === 'SOCKS') return false;
+    return (
+      key === 'accessory' ||
+      key.includes('accessor') ||
+      main === 'ACCESSORY'
+    );
+  });
 }
 
 /** 整套穿搭构图：服装为主体，配饰融入整体（参考图用于款式颜色，画面仍是全身造型） */
@@ -304,14 +309,16 @@ export function buildAccessoryPresentConstraints(
   return lines;
 }
 
-/** 与 accessoryScaleRef 对齐：小首饰才补描写，包/帽等大配饰不改。 */
+/** 与 accessoryScaleRef 对齐：小首饰才补描写，包/帽/腿层等不改。 */
 function isTextOnlySmallJewelry(name: string, layer: string): boolean {
+  const key = layerKey(layer);
+  if (key === 'legwear' || key.includes('legwear')) return false;
   const blob = `${name} ${layer} accessory`;
-  if (/包|帽|围巾|丝巾|腰带|发带|bag|hat|scarf|belt|tote|purse|handbag/i.test(blob)) {
+  if (/包|帽|围巾|丝巾|腰带|发带|袜|打底|tights|pantyhose|stockings|bag|hat|scarf|belt|tote|purse|handbag/i.test(blob)) {
     return false;
   }
   return (
-    layerKey(layer) === 'accessory' ||
+    key === 'accessory' ||
     /耳环|耳坠|耳钉|项链|项圈|手链|手镯|戒指|发夹|发箍|choker|earring|necklace|bracelet|pendant/i.test(
       blob
     )
@@ -334,8 +341,9 @@ export function smallJewelryTextOnlyAppearance(name: string, description?: strin
   return `${withDesc}，细小精致点缀，禁止放大`;
 }
 
-/** 参考图 label 是否为配饰（layer / ACCESSORY / 常见品类词） */
+/** 参考图 label 是否为配饰（layer / ACCESSORY / 常见品类词）；腿层不算小首饰配饰 */
 export function isAccessoryReferenceLabel(label: string): boolean {
+  if (/\blegwear\b/i.test(label) || /打底袜|连裤袜|长筒袜|丝袜/.test(label)) return false;
   const head = label.split(/\s*[|—]\s*/)[0] ?? label;
   const rest = label.slice(head.length);
   if (/\baccessory\b/i.test(label) || /\bACCESSORY\b/.test(label)) return true;

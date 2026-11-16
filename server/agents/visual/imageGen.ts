@@ -39,7 +39,11 @@ export function isAccessoryReferenceItem(
   layer?: string,
   mainCategory?: string | null
 ): boolean {
-  if (layer === 'accessory') return true;
+  const key = (layer ?? '').trim().toLowerCase();
+  // 腿层 / SOCKS 不按小首饰缩放
+  if (key === 'legwear' || key.includes('legwear')) return false;
+  if ((mainCategory ?? '').toUpperCase() === 'SOCKS') return false;
+  if (key === 'accessory') return true;
   return (mainCategory ?? '').toUpperCase() === 'ACCESSORY';
 }
 
