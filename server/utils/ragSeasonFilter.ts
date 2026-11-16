@@ -6,7 +6,10 @@ import {
 } from '@/server/agents/intent';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
-import { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
+import {
+  computeFeelsLikeCelsius,
+  parseTemperatureCelsius,
+} from '@/server/utils/slotTempFilter';
 
 export { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
 
@@ -22,9 +25,9 @@ export interface SeasonFilterContext {
 
 const ALL_SEASONS: ClothingSeason[] = ['spring', 'summer', 'autumn', 'winter'];
 
-/** 穿衣指数口径：≥26℃ 才是短袖短裤天；22–25℃ 早晚体感偏凉，归 mild 交给 Stylist 按天气文本挑 */
-const WARM_MIN_CELSIUS = 26;
-const COLD_MAX_CELSIUS = 12;
+/** 穿衣指数口径：与 weather-dressing 对齐；≥23℃ 偏暖短袖向；≤11℃ 偏冷 */
+const WARM_MIN_CELSIUS = 23;
+const COLD_MAX_CELSIUS = 11;
 
 const STRICT_COLD_ACTIVITY_HINT = /滑雪|滑雪服|雪场|雪地|skiing|snowboard|snow sports/i;
 
@@ -58,7 +61,10 @@ export function inferClimateFromWeather(weather: string): DressingClimate | '' {
   if (!normalized) return '';
 
   const temp = parseTemperatureCelsius(normalized);
-  if (temp !== null) return climateFromParsedTemperature(temp);
+  if (temp !== null) {
+    const { feelsLikeCelsius } = computeFeelsLikeCelsius(normalized, temp);
+    return climateFromParsedTemperature(feelsLikeCelsius);
+  }
 
   if (/冬|寒冷|下雪|保暖|冷/i.test(normalized)) return 'cold';
   if (/夏|炎热|热/i.test(normalized)) return 'warm';
@@ -87,8 +93,12 @@ function inferClimateFromActivity(intent: GatekeeperIntent, userMessage?: string
   const activityText = buildActivityText(intent, userMessage);
   if (!STRICT_COLD_ACTIVITY_HINT.test(activityText)) return '';
 
-  const temp = intent.weather?.trim() ? parseTemperatureCelsius(intent.weather) : null;
-  if (temp !== null && temp >= WARM_MIN_CELSIUS) return '';
+  const weatherText = intent.weather?.trim() ?? '';
+  const temp = weatherText ? parseTemperatureCelsius(weatherText) : null;
+  if (temp !== null) {
+    const { feelsLikeCelsius } = computeFeelsLikeCelsius(weatherText, temp);
+    if (feelsLikeCelsius >= WARM_MIN_CELSIUS) return '';
+  }
 
   return 'cold';
 }
@@ -111,7 +121,12 @@ export function computeDressingClimate(
   const fromAnchor = inferDressingClimateFromAnchor(intent);
   const weatherText = intent.weather?.trim() ?? '';
   const parsedTemp = weatherText ? parseTemperatureCelsius(weatherText) : null;
-  const fromWeatherTemp = parsedTemp !== null ? climateFromParsedTemperature(parsedTemp) : '';
+  const fromWeatherTemp =
+    parsedTemp !== null
+      ? climateFromParsedTemperature(
+          computeFeelsLikeCelsius(weatherText, parsedTemp).feelsLikeCelsius
+        )
+      : '';
   const fromWeatherKeyword =
     weatherText && parsedTemp === null ? inferClimateFromWeather(weatherText) : '';
   const fromActivity = inferClimateFromActivity(intent, userMessage);
@@ -396,12 +411,14 @@ export function applyTemperatureFilter<T extends { tempMin?: number | null; temp
 export function filterAnchorCandidatesByWeather<
   T extends { tempMin?: number | null; tempMax?: number | null },
 >(results: T[], weather?: string): T[] {
-  const temperature = parseTemperatureCelsius(weather?.trim() ?? '');
+  const weatherText = weather?.trim() ?? '';
+  const temperature = parseTemperatureCelsius(weatherText);
   if (temperature === null) return results;
-  const filtered = applyTemperatureFilter(results, temperature);
+  const { feelsLikeCelsius } = computeFeelsLikeCelsius(weatherText, temperature);
+  const filtered = applyTemperatureFilter(results, feelsLikeCelsius);
   if (filtered.length !== results.length) {
     console.log(
-      `[WARDROBE_RESOLVER] temperature filter ${temperature}℃: ${results.length} → ${filtered.length}`
+      `[WARDROBE_RESOLVER] temperature filter feelsLike ${feelsLikeCelsius}℃ (raw ${temperature}℃): ${results.length} → ${filtered.length}`
     );
   }
   return filtered;

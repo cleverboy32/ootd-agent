@@ -2,12 +2,12 @@ import { ClothingMainCategory } from '@prisma/client';
 import { searchWardrobeItemsByText } from '@/server/services/wardrobeService';
 import { inferAnchorSlotFromSummary } from '@/server/agents/intent';
 import { filterItemsByQueryColor } from '@/server/utils/queryColorMatch';
-import {
-  filterAnchorCandidatesByWeather,
-  parseTemperatureCelsius,
-} from '@/server/utils/ragSeasonFilter';
 import { getTextSimilarityThresholds } from '@/server/services/embedding';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import {
+  applySlotTemperatureFilter,
+  resolveDressingFromWeather,
+} from '@/server/utils/slotTempFilter';
 import type {
   AnchorSlot,
   WardrobeAnchorCandidate,
@@ -22,7 +22,7 @@ function slotToMainCategory(slot: AnchorSlot): ClothingMainCategory | undefined 
   const map: Record<AnchorSlot, ClothingMainCategory> = {
     top: 'TOP',
     bottom: 'BOTTOM',
-    dress: 'ONE_PIECE',
+    dress: 'ONE_PIECE', // 裙装锚点；检索侧 dress alias → skirt
     shoes: 'FOOTWEAR',
     outerwear: 'OUTERWEAR',
     accessory: 'ACCESSORY',
@@ -80,11 +80,19 @@ export async function resolveWardrobeAnchor(
   }
 
   const mainCategory = effectiveSlot ? slotToMainCategory(effectiveSlot) : undefined;
-  const searchSlot = effectiveSlot ? (effectiveSlot as WardrobeSearchSlot) : undefined;
-  const temperatureCelsius = parseTemperatureCelsius(weather?.trim() ?? '');
+  if (!effectiveSlot || !mainCategory) {
+    console.warn(
+      `[WARDROBE_RESOLVER] Missing slot/mainCategory for "${query.slice(0, 32)}"; refusing unscoped search`
+    );
+    return { status: 'not_found' };
+  }
+
+  const searchSlot = effectiveSlot as WardrobeSearchSlot;
+  const slotTempRange =
+    resolveDressingFromWeather(weather?.trim() ?? '')?.slotRange(searchSlot) ?? null;
   const searchOptions = {
-    ...(searchSlot ? { slot: searchSlot } : {}),
-    ...(temperatureCelsius !== null ? { temperatureCelsius } : {}),
+    slot: searchSlot,
+    ...(slotTempRange ? { slotTempRange } : {}),
   };
   const rawResults = await searchWardrobeItemsByText(
     query,
@@ -94,12 +102,7 @@ export async function resolveWardrobeAnchor(
     searchOptions
   );
 
-  let results = rawResults;
-  if (results.length === 0 && mainCategory) {
-    results = await searchWardrobeItemsByText(query, userId, MAX_CANDIDATES + 1, undefined, searchOptions);
-  }
-
-  const { matched, rejected } = filterItemsByQueryColor(query, results);
+  const { matched, rejected } = filterItemsByQueryColor(query, rawResults);
   if (matched.length === 0 && rejected.length > 0) {
     const nearMiss = toCandidate(
       [...rejected].sort((a, b) => b.similarity - a.similarity)[0]
@@ -110,10 +113,10 @@ export async function resolveWardrobeAnchor(
     return { status: 'color_mismatch', queriedSummary: query, nearMiss };
   }
 
-  const temperatureFit = filterAnchorCandidatesByWeather(matched, weather);
+  const temperatureFit = applySlotTemperatureFilter(matched, slotTempRange);
   if (matched.length > 0 && temperatureFit.length === 0) {
     console.warn(
-      `[WARDROBE_RESOLVER] All ${matched.length} candidates filtered by weather="${(weather ?? '').slice(0, 40)}"`
+      `[WARDROBE_RESOLVER] All ${matched.length} candidates filtered by slotTempRange weather="${(weather ?? '').slice(0, 40)}"`
     );
     return { status: 'not_found' };
   }
