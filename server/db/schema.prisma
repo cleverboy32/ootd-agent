@@ -183,6 +183,7 @@ enum ClothingMainCategory {
   OUTERWEAR // 外套
   FOOTWEAR  // 鞋履
   ACCESSORY // 配饰
+  SOCKS     // 袜类/腿层（打底袜、连裤袜、长筒袜等）
   ONE_PIECE // 连身装 (如连衣裙、连体裤)
 }
 

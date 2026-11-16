@@ -2,9 +2,12 @@ import { PrismaClient } from '@prisma/client';
 import { neon } from '@neondatabase/serverless';
 import { PrismaNeon } from '@prisma/adapter-neon';
 
-// Declare a global variable to cache the PrismaClient instance
+// Dev HMR 会复用 globalThis.prisma；schema/enum 变更后旧实例 DMMF 仍旧，写入新枚举会 ValidationError。
+const PRISMA_CLIENT_REV = 'clothing-main-category-socks-20261112';
+
 declare global {
   var prisma: PrismaClient | undefined;
+  var prismaClientRev: string | undefined;
 }
 
 const neonConnection = neon(process.env.DATABASE_URL!);
@@ -18,16 +21,24 @@ function createPrismaClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
-// Dev HMR 会复用 globalThis.prisma；schema 新增 model 后旧实例没有对应 delegate，需重建。
-let prismadb = globalThis.prisma ?? createPrismaClient();
-if (
-  process.env.NODE_ENV !== 'production' &&
-  typeof (prismadb as { savedOutfit?: { findMany?: unknown } }).savedOutfit?.findMany !==
+function isPrismaClientCurrent(client: PrismaClient): boolean {
+  if (
+    typeof (client as { savedOutfit?: { findMany?: unknown } }).savedOutfit?.findMany !==
     'function'
-) {
+  ) {
+    return false;
+  }
+  return globalThis.prismaClientRev === PRISMA_CLIENT_REV;
+}
+
+let prismadb: PrismaClient = globalThis.prisma ?? createPrismaClient();
+if (process.env.NODE_ENV !== 'production' && !isPrismaClientCurrent(prismadb)) {
   void prismadb.$disconnect().catch(() => undefined);
   prismadb = createPrismaClient();
 }
-if (process.env.NODE_ENV !== 'production') globalThis.prisma = prismadb;
+if (process.env.NODE_ENV !== 'production') {
+  globalThis.prisma = prismadb;
+  globalThis.prismaClientRev = PRISMA_CLIENT_REV;
+}
 export default prismadb;
 
