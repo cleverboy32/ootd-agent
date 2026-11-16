@@ -186,7 +186,7 @@ export function buildWardrobeQueryEmbeddingText(
   const colors = extractQueryEmbeddingColors(normalizedQuery);
   const slotTemp = context.slotTempRange;
 
-  return buildWardrobeDocumentEmbeddingText({
+  return buildWardrobeEmbeddingText({
     mainCategory,
     subCategory: category,
     description: '',
@@ -198,7 +198,7 @@ export function buildWardrobeQueryEmbeddingText(
     material: [],
     tempMin: slotTemp?.min ?? null,
     tempMax: slotTemp?.max ?? null,
-  });
+  }, { omitEmptyFields: true });
 }
 
 function resolveCategoryHint(query: string, slot?: WardrobeSearchSlot | string): string {
