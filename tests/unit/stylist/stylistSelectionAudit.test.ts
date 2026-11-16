@@ -8,7 +8,8 @@ import type { StylistResult } from '@/server/agents/stylist/schema';
 
 describe('layerToSearchSlot', () => {
   it('maps stylist layers to RAG slots', () => {
-    assert.equal(layerToSearchSlot('inner_top'), 'top');
+    assert.equal(layerToSearchSlot('inner_top'), 'inner_top');
+    assert.equal(layerToSearchSlot('top'), 'top');
     assert.equal(layerToSearchSlot('bottom'), 'bottom');
     assert.equal(layerToSearchSlot('shoes'), 'shoes');
   });

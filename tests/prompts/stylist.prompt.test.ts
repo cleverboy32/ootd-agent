@@ -378,7 +378,7 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     }
   });
 
-  it('无风格技能 → Plan query 只到槽位大类+厚薄，不定细品类', async () => {
+  it('无风格技能 → Plan query 按目标写检索信号，不堆细款名', async () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_outfit',
       occasion: '上班通勤',
@@ -400,13 +400,13 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     assert.ok(queries.length >= 3, `应有多槽位检索，实际: ${JSON.stringify(queries)}`);
     const all = queries.map((entry) => entry.query).join(' ');
     assert.match(all, /上装|上衣|下装|裤|裙|鞋|外套/);
-    assert.doesNotMatch(
-      all,
-      /乐福鞋|平底乐福|芭蕾鞋|玛丽珍|西装外套|薄风衣|直筒裤|高腰直筒|针织衫|阔腿裤/
-    );
+    // 应有可检索信号（袖长/厚薄/场景等），不能只剩万能大类
+    assert.match(all, /长袖|短袖|保暖|厚|薄|中厚|通勤|日常|适穿|针织|棉|羽绒/);
+    assert.doesNotMatch(all, /乐福鞋|平底乐福|芭蕾鞋|玛丽珍|双排扣|高腰直筒九分/);
     const shoes = queries.filter((entry) => entry.slot === 'shoes').map((entry) => entry.query).join(' ');
     if (shoes) {
-      assert.doesNotMatch(shoes, /运动鞋|乐福|芭蕾|玛丽珍|短靴|德训/);
+      assert.doesNotMatch(shoes, /运动鞋|乐福鞋|芭蕾|玛丽珍/);
+      assert.doesNotMatch(shoes, /^女\s*鞋$/);
     }
   });
 
@@ -447,10 +447,10 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     const styleText = withStyle.map((entry) => entry.query).join(' ');
     const plainText = noStyle.map((entry) => entry.query).join(' ');
     assert.match(styleText, /短|高腰|阔腿|长裙|针织|衬衫/);
-    assert.doesNotMatch(plainText, /乐福鞋|西装外套|直筒裤|芭蕾鞋/);
+    assert.doesNotMatch(plainText, /乐福鞋|芭蕾鞋|玛丽珍/);
   });
 
-  it('无风格正式场合 → 粗槽检索，鞋不默认运动鞋，也不预设乐福鞋', async () => {
+  it('无风格正式场合 → query 有检索信号，鞋不默认运动鞋，也不预设乐福鞋', async () => {
     const intent = normalizeGatekeeperIntent({
       request_type: 'wardrobe_outfit',
       occasion: '古典舞蹈课录制视频',
@@ -472,10 +472,12 @@ describe('Stylist — 天气穿衣细则 Skill', { concurrency: true }, () => {
     assert.ok(queries.length >= 3, `应有多槽位检索，实际: ${JSON.stringify(queries)}`);
     const all = queries.map((entry) => entry.query).join(' ');
     assert.match(all, /上装|上衣|下装|裙|裤|鞋|外套/);
-    assert.doesNotMatch(all, /乐福鞋|玛丽珍|西装外套|直筒裤/);
+    assert.match(all, /长袖|保暖|厚|薄|中厚|正式|得体|通勤|日常|适穿/);
+    assert.doesNotMatch(all, /乐福鞋|玛丽珍|双排扣/);
     const shoes = queries.filter((entry) => entry.slot === 'shoes').map((entry) => entry.query).join(' ');
     if (shoes) {
-      assert.doesNotMatch(shoes, /运动鞋|乐福|玛丽珍/);
+      assert.doesNotMatch(shoes, /运动鞋|乐福鞋|玛丽珍/);
+      assert.doesNotMatch(shoes, /^女\s*鞋$/);
     }
   });
 

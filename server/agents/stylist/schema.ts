@@ -113,7 +113,7 @@ export const stylistSchema: Schema = {
                 layer: {
                   type: Type.STRING,
                   description:
-                    '穿搭层级，只能是：top（主上装：衬衫/T恤/开衫等独自可见的上装）| inner_top（内搭：外面还有外套罩着时的里层）| outerwear（外套）| bottom | dress | shoes | accessory。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。',
+                    '穿搭层级，只能是：top（炎热主上装；或凉～寒冷的保暖中间层）| inner_top（有外套时的内搭；微暖～微凉无中间层时上装标此层；凉及更冷为最里打底）| outerwear（外套）| bottom（裤）| skirt（半身裙/连衣裙等所有裙装）| legwear（打底袜/长筒袜/连裤袜等腿层）| shoes | accessory（包/首饰/帽等，不含腿部保暖）。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。微暖～微凉有外套时禁止再标一层 top 中间层；凉及更冷须可有 top 中间层。一套内 bottom 与 skirt 二选一。',
                 },
                 reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
                 description: {
@@ -157,7 +157,7 @@ export const wardrobeSearchSchema: Schema = {
       items: {
         type: Type.OBJECT,
         properties: {
-          slot: { type: Type.STRING, description: '穿搭槽位，必须是以下之一：top | bottom | dress | shoes | outerwear | accessory' },
+          slot: { type: Type.STRING, description: '穿搭槽位，必须是以下之一：top | inner_top | bottom | skirt | shoes | outerwear | legwear | accessory（dress 视为 skirt 别名）' },
           query: {
             type: Type.STRING,
             description: '中文语义检索 query，用品类级短词（与衣橱中文描述对齐），不要整句英文',
@@ -190,7 +190,7 @@ export const outfitPlanSearchSchema: Schema = {
           overall_concept: {
             type: Type.STRING,
             description:
-              '本套设计核心概念（中文）。有风格技能合法分支时须点名并简述气质；无风格技能时只写场合与层次厚薄，不定细品类初稿。',
+              '本套设计核心概念（中文）。有风格技能合法分支时须点名并简述气质；无风格技能时写场合与层次厚薄，可点明裤/裙路线，不要写成完整细款配方。',
           },
           slots: {
             type: Type.ARRAY,
@@ -200,17 +200,18 @@ export const outfitPlanSearchSchema: Schema = {
               properties: {
                 slot: {
                   type: Type.STRING,
-                  description: 'top | bottom | dress | shoes | outerwear | accessory',
+                  description:
+                    'top | inner_top | bottom | skirt | shoes | outerwear | legwear | accessory。bottom=裤；skirt=所有裙装（半身裙+连衣裙）。inner_top=内搭：微暖～微凉有外套时与 outerwear 同开（不开 top）；凉及更冷与 top、outerwear 同开。无外套时禁止 inner_top。成品一套内 bottom 与 skirt 二选一。',
                 },
                 target: {
                   type: Type.STRING,
                   description:
-                    '该槽目标描述。有风格技能：颜色+形态+品类+可见止点。无风格技能：只写槽位大类与天气厚薄，禁止预设细款名；细品类留给召回后按衣橱组合。',
+                    '该槽目标描述。有风格技能：颜色+形态+品类+可见止点。无风格技能：写清检索目标（袖长、厚薄或适穿℃、用途场景、面料族等）及天气背景，禁止预设完整细款名。',
                 },
                 search_query: {
                   type: Type.STRING,
                   description:
-                    '向量检索词，须与 target 同向。有风格技能：粗品类+轮廓。无风格技能：槽位大类+厚薄（可带性别），禁止细品类与细轮廓堆砌。禁止具体色名与完整细款名。',
+                    '向量检索叙述（1～3句中文），须与 target 同向并按衣橱 text 向量维度扩写：品类/袖长或鞋型、面料、层次角色（内搭/中层/外套等）、风格与正式度、场合、廓形、单件适穿℃；颜色仅强约束时写。禁止短关键词串（如「女 厚针织 日常」）；禁止万能词与完整细款长名。',
                 },
                 allow_new: {
                   type: Type.BOOLEAN,

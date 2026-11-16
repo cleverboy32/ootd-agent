@@ -11,6 +11,12 @@ export type EvalWardrobeItem = {
   colors?: string[];
   season?: string[];
   tags?: string[];
+  material?: string[];
+  occasions?: string[];
+  formality?: string | null;
+  silhouette?: string[];
+  tempMin?: number | null;
+  tempMax?: number | null;
   similarity?: number;
 };
 
@@ -35,9 +41,17 @@ export function formatEvalWardrobeToXml(items: EvalWardrobeItem[]): {
       const season = (item.season ?? []).join(', ');
       const tags = (item.tags ?? []).join(', ');
       const colors = (item.colors ?? []).join(', ');
+      const material = (item.material ?? []).join(', ');
+      const occasions = (item.occasions ?? []).join(', ');
+      const silhouette = (item.silhouette ?? []).join(', ');
+      const formality = item.formality ?? '';
+      const tempMin =
+        item.tempMin === null || item.tempMin === undefined ? '' : String(item.tempMin);
+      const tempMax =
+        item.tempMax === null || item.tempMax === undefined ? '' : String(item.tempMax);
       const similarity =
         typeof item.similarity === 'number' ? item.similarity.toFixed(2) : '0.90';
-      return `  <item ref="${ref}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" mainCategory="${escapeXmlAttr(item.mainCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(colors)}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}"/>`;
+      return `  <item ref="${ref}" name="${escapeXmlAttr(item.subCategory)}" subCategory="${escapeXmlAttr(item.subCategory)}" mainCategory="${escapeXmlAttr(item.mainCategory)}" similarity="${similarity}" description="${escapeXmlAttr(item.description || '')}" colors="${escapeXmlAttr(colors)}" season="${escapeXmlAttr(season)}" tags="${escapeXmlAttr(tags)}" material="${escapeXmlAttr(material)}" occasions="${escapeXmlAttr(occasions)}" formality="${escapeXmlAttr(formality)}" silhouette="${escapeXmlAttr(silhouette)}" tempMin="${escapeXmlAttr(tempMin)}" tempMax="${escapeXmlAttr(tempMax)}"/>`;
     })
     .join('\n');
 

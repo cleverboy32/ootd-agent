@@ -30,8 +30,11 @@ describe('loadSkill', () => {
     assert.match(body, /## 温度档位/);
     assert.match(body, /## 修正项/);
     assert.match(body, /中厚外套/);
-    assert.match(body, /下装三明治/);
-    assert.match(body, /凉 \| 13–17℃[\s\S]*?中厚/);
+    assert.match(body, /上装三明治/);
+    assert.match(body, /定档以服务端槽温区表为准/);
+    assert.match(body, /凉 \| 6–11℃/);
+    assert.match(body, /微凉 \| 12–17℃[\s\S]*?2 层/);
+    assert.match(body, /微暖～微凉/);
   });
 
   it('不存在的 skill 抛出含名称的错误', () => {
@@ -101,7 +104,7 @@ describe('extractRetrievalSection', () => {
 });
 
 describe('filterSkillsForWardrobeSearch', () => {
-  it('检索只保留风格/天气/运动/新品 skill，去掉身形与色彩', () => {
+  it('检索只保留风格/天气/运动/新品/无风格组搭 skill，去掉身形与色彩与视觉', () => {
     assert.deepEqual(
       filterSkillsForWardrobeSearch([
         'style-korean',
@@ -111,8 +114,20 @@ describe('filterSkillsForWardrobeSearch', () => {
         'color-warm',
         'athletic-outfit',
         'outfit-design',
+        'outfit-basics',
+        'accessory-pairing',
+        'outfit-compatibility',
+        'stylist-visual',
       ]),
-      ['style-korean', 'weather-dressing', 'athletic-outfit', 'outfit-design']
+      [
+        'style-korean',
+        'weather-dressing',
+        'athletic-outfit',
+        'outfit-design',
+        'outfit-basics',
+        'accessory-pairing',
+        'outfit-compatibility',
+      ]
     );
   });
 });
@@ -193,7 +208,7 @@ describe('selectStylistOutfitSkillNames', () => {
     assert.equal(block('wardrobe_outfit'), '');
   });
 
-  it('主提示词不再包含三种模式标题', () => {
+  it('主提示词不再包含三种模式标题，视觉细则迁出', () => {
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /待购单品搭配模式/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /衣橱锚定搭配模式/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /反馈微调模式 feedback_revision/);
@@ -203,7 +218,12 @@ describe('selectStylistOutfitSkillNames', () => {
     assert.match(STYLIST_SYSTEM_INSTRUCTION, /禁止只改 name/);
     assert.match(STYLIST_SYSTEM_INSTRUCTION, /整套都用 new_item/);
     assert.match(loadSkill('stylist-feedback-revision'), /气质\/品类纠偏|禁止只改 name/);
-    assert.match(STYLIST_SYSTEM_INSTRUCTION, /有色彩技能时，脸周颜色、深浅和面积按技能/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /色彩认 color-\*/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /冲突优先级/);
+    assert.match(STYLIST_SYSTEM_INSTRUCTION, /legwear/);
+    assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /【视觉构想指南/);
+    assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /色彩协调学/);
+    assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /版型互补学/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /其余槽位用衣橱/);
     assert.doesNotMatch(STYLIST_SYSTEM_INSTRUCTION, /衣橱里已有该季节的外套就用衣橱/);
   });

@@ -5,21 +5,34 @@ import { withRetryOn429 } from '@/server/utils/retryOn429';
 import { UserProfileResult, profileHasVisualData } from '../user-profile/agent';
 import { performRagSearch } from '../rag/search';
 import {
+  ensureNoStyleBasicsSkills,
+  ensureOutfitCompatibilitySkill,
+  ensureStylistVisualSkill,
   ensureWeatherDressingSkill,
   filterSkillsForWardrobeSearch,
   normalizeStylistSkillNames,
   selectStylistOutfitSkillNames,
 } from './skillSelection';
-import { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
+import {
+  parseTemperatureCelsius,
+  resolveDressingFromWeather,
+} from '@/server/utils/slotTempFilter';
 import { selectStylistSkills } from './selectSkills';
 import { formatEvalWardrobeToXml } from './evalWardrobe';
-import { WardrobeSearchQuery, WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import {
+  parseWardrobeSearchSlot,
+  WardrobeSearchQuery,
+  WardrobeSearchSlot,
+} from '@/server/utils/ragSearchSlots';
 import { filterQueriesForRevisionSlots } from '@/server/utils/revisionSearchSlots';
 import {
   alignStylistItemsWithWardrobe,
   normalizeOutfitGarmentLayers,
 } from '@/server/utils/stylistItemAlign';
 import {
+  alignOutfitPlanTempsToSlotRanges,
+  clampNoStyleOutfitPlan,
+  expandNoStyleCoverageSlots,
   flattenOutfitPlanToQueries,
   type OutfitPlanResult,
 } from '@/server/utils/outfitPlanSearch';
@@ -48,6 +61,7 @@ import {
   STYLIST_SYSTEM_INSTRUCTION,
   OUTFIT_PLAN_SEARCH_INSTRUCTION,
   OUTFIT_RECONCILE_ADDENDUM,
+  NO_STYLE_SHARED_SLOT_QUERY_ADDENDUM,
   PURCHASE_PAIRING_SEARCH_ADDENDUM,
   WARDROBE_PAIRING_SEARCH_ADDENDUM,
   REVISION_SEARCH_ADDENDUM,
@@ -59,17 +73,13 @@ import { logWardrobeQueryAudit } from '@/server/logging/wardrobeQuery';
 import { buildSkillBlocks } from '@/server/skills/loadSkill';
 import { scheduleWardrobeQueryCritic } from './queryCritic';
 import { scheduleStylistOutfitCritic } from './outfitCritic';
-import { applyWeatherQueryGuard } from './weatherQueryGuard';
+import { buildPurchaseSandwichWeather } from '@/server/utils/weatherAnchorFit';
 import {
   buildNewItemDiversityBlock,
   collectRecentNewItemLabels,
   collectRecentOutfitFingerprints,
   collectRecentWardrobeIds,
 } from './newItemDiversity';
-import {
-  buildOutfitPlanStrategyHint,
-  buildReconcileNoStyleStrategyHint,
-} from './strategyHint';
 import { urlToGenerativePart } from '@/server/utils/image';
 import { stripHistoryImages } from '../gatekeeper/textInput';
 import {
@@ -153,21 +163,49 @@ function filterQueriesExcludingAnchorSlots(
   queries: WardrobeSearchQuery[],
   slots: Array<WardrobeSearchSlot | AnchorSlot | ''>
 ): WardrobeSearchQuery[] {
-  const excluded = new Set<string>(slots.filter((slot): slot is WardrobeSearchSlot | AnchorSlot => Boolean(slot)));
+  const excluded = new Set<string>();
+  for (const slot of slots) {
+    if (!slot) continue;
+    const parsed = parseWardrobeSearchSlot(slot);
+    excluded.add(parsed ?? slot);
+    excluded.add(slot);
+  }
   if (excluded.size === 0) return queries;
-  return queries.filter((item) => !item.slot || !excluded.has(item.slot));
+  return queries.filter((item) => {
+    if (!item.slot) return true;
+    const parsed = parseWardrobeSearchSlot(item.slot) ?? item.slot;
+    return !excluded.has(parsed) && !excluded.has(item.slot);
+  });
 }
 
-function anchorSlotToLayer(slot: WardrobeSearchSlot): string {
+function anchorSlotToLayer(slot: string): string {
+  const parsed = parseWardrobeSearchSlot(slot);
   const map: Record<WardrobeSearchSlot, string> = {
     top: 'top',
+    inner_top: 'inner_top',
     bottom: 'bottom',
-    dress: 'dress',
+    skirt: 'skirt',
     shoes: 'shoes',
     outerwear: 'outerwear',
+    legwear: 'legwear',
     accessory: 'accessory',
   };
-  return map[slot] ?? 'top';
+  return (parsed && map[parsed]) || 'top';
+}
+
+/**
+ * 待购：三明治厚薄按待购单品适穿温度，不拿今日实况否掉待购件。
+ * 其它 request_type：沿用 intent.weather。
+ */
+function intentWithSandwichWeather(
+  intent: GatekeeperIntent,
+  purchaseAnchors: AnchorItemInfo[]
+): GatekeeperIntent {
+  if (!isPurchasePairingIntent(intent) || purchaseAnchors.length === 0) return intent;
+  const axis = buildPurchaseSandwichWeather(purchaseAnchors.map((item) => item.summary));
+  if (!axis) return intent;
+  console.log(`[STYLIST_AGENT] purchase sandwich weather axis: ${axis}`);
+  return { ...intent, weather: axis };
 }
 
 export type WardrobeSearchAuditContext = {
@@ -195,6 +233,7 @@ export async function planOutfitsAndQueries(
   console.log('[STYLIST_AGENT] Planning outfits + wardrobe search queries...');
 
   const anchors = purchaseAnchors.length > 0 ? purchaseAnchors : anchorItem ? [anchorItem] : [];
+  const sandwichIntent = intentWithSandwichWeather(intent, purchaseAnchors);
   const isPairing = (isPurchasePairingIntent(intent) || isWardrobePairingIntent(intent)) && anchors.length > 0;
   const isRevision = intent.request_type === 'feedback_revision';
   const searchSkillNames = filterSkillsForWardrobeSearch(skillNames);
@@ -224,13 +263,9 @@ ${REVISION_SEARCH_ADDENDUM}
 `
     : '';
 
-  const hasStyleSkill = searchSkillNames.some((name) => name.startsWith('style-'));
-  const strategyHint = buildOutfitPlanStrategyHint({
-    mode: isRevision ? 'revision' : isPairing ? 'pairing' : 'outfit',
-    hasStyleSkill,
-    accessoryAnchorRequiresFullBase:
-      anchors.length === 1 && anchors[0].slot === 'accessory',
-  });
+  const slotTempHint =
+    resolveDressingFromWeather(sandwichIntent.weather ?? '')?.planHint ?? null;
+  const slotTempBlock = slotTempHint ? `\n${slotTempHint}\n` : '';
 
   const prompt = `
 【今日用户时尚档案】
@@ -243,22 +278,24 @@ ${REVISION_SEARCH_ADDENDUM}
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}
-- 天气: ${intent.weather}
+- 天气: ${sandwichIntent.weather}${
+    sandwichIntent.weather !== intent.weather
+      ? '（待购模式：厚薄按待购单品适穿温度，不是否定待购件）'
+      : ''
+  }
 - 场合: ${intent.occasion}
 - 风格: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${pairingBlock}${revisionBlock}
+${slotTempBlock}${skillBlock}${pairingBlock}${revisionBlock}
 【用户当前消息】
 ${userMessage || '（无文字，请根据对话历史推断）'}
 ${diversityBlock}
-【策略提示】
-${strategyHint}
-
 请输出 outfits 方案骨架（含每槽 target + search_query）：
 `;
 
   const contents: Content[] = [...stripHistoryImages(history), { role: 'user', parts: [{ text: prompt }] }];
 
+  const hasStyleSkill = searchSkillNames.some((name) => name.startsWith('style-'));
   let systemInstruction = OUTFIT_PLAN_SEARCH_INSTRUCTION;
   if (isRevision) {
     systemInstruction = `${OUTFIT_PLAN_SEARCH_INSTRUCTION}\n${REVISION_SEARCH_ADDENDUM}`;
@@ -268,6 +305,9 @@ ${strategyHint}
         ? WARDROBE_PAIRING_SEARCH_ADDENDUM
         : PURCHASE_PAIRING_SEARCH_ADDENDUM
     }`;
+  }
+  if (!hasStyleSkill) {
+    systemInstruction = `${systemInstruction}\n${NO_STYLE_SHARED_SLOT_QUERY_ADDENDUM}`;
   }
 
   const response = await withRetryOn429(
@@ -293,6 +333,29 @@ ${strategyHint}
     throw new Error('Outfit plan missing outfits[]');
   }
 
+  // 无 style：强制只保留一套检索骨架；再补齐 bottom+skirt(+legwear) 召回覆盖
+  if (!hasStyleSkill) {
+    const before = plan.outfits.length;
+    const clamped = clampNoStyleOutfitPlan(plan);
+    plan.outfits = clamped.outfits;
+    if (before > 1) {
+      console.log(`[STYLIST_AGENT] No-style plan truncated ${before} → 1 retrieval skeleton`);
+    }
+    const beforeSlots = plan.outfits[0]?.slots?.length ?? 0;
+    const expanded = expandNoStyleCoverageSlots(plan, sandwichIntent.weather ?? '');
+    plan.outfits = expanded.outfits;
+    const afterSlots = plan.outfits[0]?.slots?.length ?? 0;
+    if (afterSlots > beforeSlots) {
+      console.log(
+        `[STYLIST_AGENT] No-style coverage slots ${beforeSlots} → ${afterSlots} (bottom/skirt/legwear)`
+      );
+    }
+  }
+
+  // 适穿℃ 与槽温区表对齐（避免冷档 inner_top 仍写 16-24 导致硬过滤空召回）
+  const aligned = alignOutfitPlanTempsToSlotRanges(plan, sandwichIntent.weather ?? '');
+  plan.outfits = aligned.outfits;
+
   let queries = flattenOutfitPlanToQueries(plan);
 
   if (isPairing) {
@@ -307,14 +370,6 @@ ${strategyHint}
   if (isRevision) {
     queries = filterQueriesForRevisionSlots(queries, intent.special_requests || userMessage);
   }
-
-  const guarded = applyWeatherQueryGuard(queries, {
-    weather: intent.weather || '',
-    skillNames: searchSkillNames,
-    userMessage,
-    specialRequests: intent.special_requests,
-  });
-  queries = guarded.queries;
 
   console.log(
     '[STYLIST_AGENT] Outfit plan:',
@@ -351,28 +406,6 @@ ${strategyHint}
   }).catch((error) => {
     console.warn('[WARDROBE_QUERY] log failed:', error);
   });
-
-  if (guarded.changes.length > 0) {
-    void logWardrobeQueryAudit({
-      timestamp: new Date().toISOString(),
-      kind: 'weather_query_guard',
-      conversationId: audit?.conversationId,
-      messageId: audit?.messageId,
-      userMessage,
-      occasion: intent.occasion,
-      specialRequests: intent.special_requests,
-      stylePreference: intent.style_preference,
-      skillNames: searchSkillNames,
-      queries: queries.map((item) => ({
-        slot: item.slot,
-        query: item.query,
-        outfitId: item.outfitId,
-      })),
-      changes: guarded.changes,
-    }).catch((error) => {
-      console.warn('[WARDROBE_QUERY_GUARD] log failed:', error);
-    });
-  }
 
   scheduleWardrobeQueryCritic({
     intent,
@@ -539,6 +572,7 @@ export async function callStylistAgent(
   }
 
   const purchaseAnchors = isPurchasePairingIntent(intent) ? listPurchaseAnchors(intent) : [];
+  const sandwichIntent = intentWithSandwichWeather(intent, purchaseAnchors);
   const previousCache = options.previousStylistCache;
   const revisionOutfitId = intent.selected_outfit_id?.trim() || 'outfit_1';
   const previousOutfit =
@@ -582,10 +616,16 @@ export async function callStylistAgent(
           conversationId,
           messageId: options.messageId,
         });
-  const skillNames = ensureWeatherDressingSkill(
-    selectedSkills,
-    intent.weather || '',
-    (weather) => parseTemperatureCelsius(weather) !== null
+  const skillNames = ensureNoStyleBasicsSkills(
+    ensureOutfitCompatibilitySkill(
+      ensureStylistVisualSkill(
+        ensureWeatherDressingSkill(
+          selectedSkills,
+          sandwichIntent.weather || '',
+          (weather) => parseTemperatureCelsius(weather) !== null
+        )
+      )
+    )
   );
   const skillBlock = buildSkillBlocks(skillNames);
   if (options.evalWardrobeItems && options.evalWardrobeItems.length > 0) {
@@ -632,7 +672,7 @@ export async function callStylistAgent(
         source: isRevision ? 'stylist-agent-revision' : 'stylist-agent',
         conversationId,
         userMessage,
-        intent,
+        intent: sandwichIntent,
         anchorItem: anchorItem ?? undefined,
         skillNames,
       });
@@ -701,12 +741,20 @@ ${JSON.stringify(previousOutfit, null, 2)}
 `
         : '';
 
+  const reconcileHasStyle = skillNames.some((name) => name.startsWith('style-'));
   const planBlock =
     outfitPlan && outfitPlan.outfits.length > 0
-      ? `
+      ? reconcileHasStyle
+        ? `
 【方案骨架 Plan — 必须兑现】
 ${JSON.stringify(outfitPlan, null, 2)}
 - 确认方案时套数与 id 对齐 Plan；new_item 须兑现对应槽 target/search_query 的品类主线与颜色方向。
+`
+        : `
+【检索骨架 Plan — 无风格：仅开槽与召回，非最终套数】
+${JSON.stringify(outfitPlan, null, 2)}
+- Plan 只有一套检索骨架；最终出几套听用户（一套或 2～4 套），从共享召回池组合。
+- 开槽与厚薄听 Plan / 槽温区表；具体衣橱件从 XML 选，不必复述 Plan 文案成两套故事。
 `
       : '';
 
@@ -725,13 +773,15 @@ ${JSON.stringify(outfitPlan, null, 2)}
 
 【今日穿搭意图】
 - 请求类型: ${intent.request_type}
-- 天气温度: ${intent.weather}
+- 天气温度: ${sandwichIntent.weather}${
+    sandwichIntent.weather !== intent.weather
+      ? '（待购模式：厚薄按待购单品适穿温度）'
+      : ''
+  }
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}${buildReconcileNoStyleStrategyHint(
-  skillNames.some((name) => name.startsWith('style-'))
-)}
+${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '按 Plan 分槽召回'})】
 ${
   wardrobeXml ||

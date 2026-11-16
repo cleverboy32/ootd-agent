@@ -89,8 +89,14 @@ const STYLE_SKILL_SET = new Set<string>(
 
 const COLOR_UNDERTONE_SET = new Set(['color-warm', 'color-cool', 'color-neutral']);
 
-/** 衣橱检索只注入会影响 query 品类的 skill；身形/色彩全文留给出方案。 */
-const WARDROBE_SEARCH_SKILL_PREFIXES = ['style-', 'weather-', 'athletic-', 'outfit-'] as const;
+/** 衣橱检索只注入会影响 query 品类的 skill；身形/色彩/视觉全文留给出方案。 */
+const WARDROBE_SEARCH_SKILL_PREFIXES = [
+  'style-',
+  'weather-',
+  'athletic-',
+  'outfit-',
+  'accessory-',
+] as const;
 
 export function filterSkillsForWardrobeSearch(names: string[]): string[] {
   return names.filter((name) =>
@@ -110,6 +116,43 @@ export function ensureWeatherDressingSkill(
   if (!hasParseableTemperature(weather)) return names;
   if (names.includes('weather-dressing')) return names;
   return ['weather-dressing', ...names];
+}
+
+/** 出方案强制注入视觉指南；不进可选白名单。 */
+export function ensureStylistVisualSkill(names: string[]): string[] {
+  if (names.includes('stylist-visual')) return names;
+  return ['stylist-visual', ...names];
+}
+
+/** 出方案永远注入件间相容法则；有无 style-* 都保留。 */
+export function ensureOutfitCompatibilitySkill(names: string[]): string[] {
+  if (names.includes('outfit-compatibility')) return names;
+  return ['outfit-compatibility', ...names];
+}
+
+/**
+ * 无 style-* 时强制注入 outfit-basics + accessory-pairing。
+ * 有风格时配饰/组搭由 style 节负责，不叠这两份。
+ * 不剔除 outfit-compatibility（由 ensureOutfitCompatibilitySkill 保证）。
+ */
+export function ensureNoStyleBasicsSkills(names: string[]): string[] {
+  const hasStyle = names.some((name) => name.startsWith('style-'));
+  if (hasStyle) {
+    return names.filter((name) => name !== 'outfit-basics' && name !== 'accessory-pairing');
+  }
+  let next = names;
+  if (!next.includes('outfit-basics')) {
+    next = ['outfit-basics', ...next];
+  }
+  if (!next.includes('accessory-pairing')) {
+    const basicsIdx = next.indexOf('outfit-basics');
+    next = [
+      ...next.slice(0, basicsIdx + 1),
+      'accessory-pairing',
+      ...next.slice(basicsIdx + 1).filter((n) => n !== 'accessory-pairing'),
+    ];
+  }
+  return next;
 }
 
 export type StylistSkillCatalogEntry = {
