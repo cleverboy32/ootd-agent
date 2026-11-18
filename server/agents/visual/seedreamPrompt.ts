@@ -117,6 +117,16 @@ function isInnerLayer(layer: string): boolean {
   return key === 'inner_top' || key === 'inner' || key.includes('inner');
 }
 
+/** 三层上装时，最里层 inner_top 被 top 中层和 outerwear 外层遮住，不作为可见单品绘制。 */
+export function hiddenInnermostTop(
+  outfit: StylistOutfit
+): StylistOutfit['selected_items'][number] | undefined {
+  const hasMiddleLayer = outfit.selected_items.some((item) => layerKey(item.layer) === 'top');
+  const hasOuterwear = outfit.selected_items.some((item) => layerKey(item.layer) === 'outerwear');
+  if (!hasMiddleLayer || !hasOuterwear) return undefined;
+  return outfit.selected_items.find((item) => layerKey(item.layer) === 'inner_top');
+}
+
 function isSleevelessOuter(name: string, description = ''): boolean {
   return SLEEVELESS_OUTER_PATTERN.test(`${name} ${description}`);
 }
@@ -202,7 +212,9 @@ export function listTextOnlyItems(
   referenceLabels: string[]
 ): Array<{ name: string; layer: string; id: string; description?: string }> {
   const refBlob = referenceLabels.join(' ').toLowerCase();
+  const hiddenInnerId = hiddenInnermostTop(outfit)?.id;
   return outfit.selected_items.filter((item) => {
+    if (item.id === hiddenInnerId) return false;
     const name = item.name.trim();
     if (!name) return false;
     if (item.id === 'new_item') {
@@ -376,8 +388,11 @@ function buildShortReferencePrompt(
   subject: string
 ): string {
   const lines: string[] = [];
+  const hiddenInner = hiddenInnermostTop(outfit);
   if (hasPersonReference) {
-    lines.push('图1只取脸和身材，不取这张照片里的衣服。');
+    lines.push(
+      '图1只取脸和身材，不取这张照片里的衣服。脸、五官、肤色与真实肤质须与图1一致，禁止磨皮、匀肤、美白、美颜与改五官。'
+    );
   } else if (subject) {
     lines.push(`真实街拍，${subject}。`);
   } else {
@@ -389,6 +404,7 @@ function buildShortReferencePrompt(
   const accessoryRefs: Array<{ fig: number; label: string }> = [];
   garmentLabels.forEach((label, index) => {
     const fig = firstGarmentIndex + index;
+    if (hiddenInner && label.toLowerCase().includes('inner_top')) return;
     if (isAccessoryReferenceLabel(label)) {
       accessoryRefs.push({ fig, label });
     } else {
@@ -402,6 +418,10 @@ function buildShortReferencePrompt(
       .map((ref) => `图${ref.fig}${referenceDisplayName(ref.label)}`)
       .join('、');
     lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。`);
+  }
+
+  if (hiddenInner) {
+    lines.push('三层上装：最里面的内搭完全被中层和外套遮住，不显示、不露领口/前襟/袖口；只画中层和外套。');
   }
 
   const textOnly = listTextOnlyItems(outfit, referenceLabels);
@@ -520,14 +540,17 @@ function buildCompactTextOnlyPrompt(
   subject: string
 ): string {
   const lines: string[] = [];
+  const hiddenInner = hiddenInnermostTop(outfit);
   if (hasPersonReference) {
-    lines.push('图1只取脸和身材，不穿照片里的衣服。自然光，全身站立（含鞋履入画），禁止膝上特写裁切。');
+    lines.push(
+      '图1只取脸和身材，不穿照片里的衣服。脸、五官、肤色与真实肤质须与图1一致，禁止磨皮、匀肤、美白、美颜与改五官。自然光，全身站立（含鞋履入画），禁止膝上特写裁切。'
+    );
   } else {
     lines.push(`真实街拍，${subject || '东亚面孔'}。自然光，全身站立（含鞋履入画），禁止膝上特写裁切。`);
   }
 
   const sceneContext = outfit.visual_composition.outfit_details;
-  const coverInner = shouldCoverInner(outfit);
+  const coverInner = !hiddenInner && shouldCoverInner(outfit);
   const coverHost = coverInner ? findCoverHostItem(outfit) : undefined;
   const coveredInner = coverInner
     ? outfit.selected_items.find((item) => isInnerLayer(item.layer))
@@ -542,8 +565,12 @@ function buildCompactTextOnlyPrompt(
   const coverHostIndex = coverHost ? outfit.selected_items.indexOf(coverHost) : -1;
 
   lines.push('穿：');
+  if (hiddenInner) {
+    lines.push('三层上装：最里面的内搭完全被中层和外套遮住，不显示、不露领口/前襟/袖口；只画中层和外套。');
+  }
   let itemIndex = 0;
   for (const [index, item] of outfit.selected_items.entries()) {
+    if (item.id === hiddenInner?.id) continue;
     // collar_only：内搭并入外层句，避免单独编号诱导外露
     if (coverInner && isInnerLayer(item.layer)) continue;
 
@@ -645,7 +672,7 @@ export function buildSeedreamImagePrompt(
 /** 无服装参考图时拼进 prompt；有服装图时不拼，避免冲掉短句。 */
 export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '真实摄影街拍穿搭图，禁止插画/3D。',
-  '图1只取脸与身材；保留真实肤质与轻微瑕疵，仅可轻微匀肤，禁止磨皮、美白、网红伪素颜、美颜改五官、换脸、整容变形、改头身比或拉长腿。',
+  '图1只取脸与身材；脸、五官、肤色与真实肤质须与图1一致，保留毛孔与轻微瑕疵，禁止磨皮、匀肤、美白、网红伪素颜、美颜改五官、换脸、整容变形、改头身比或拉长腿。',
   '正常两只手、两只脚，禁止多余肢体或手臂分叉。',
   '有图单品跟参考图；没有参考图的单品以穿着描述为准，衣长裙长袖长必须与描述一致。',
   '配饰小尺寸点缀，禁止巨物化。',

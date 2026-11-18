@@ -526,11 +526,14 @@ describe('buildSeedreamImagePrompt', () => {
     };
     const prompt = buildSeedreamImagePrompt(hanfuWalk, undefined, [PERSON_REFERENCE_LABEL], null);
     const full = `${SEEDREAM_SYSTEM_INSTRUCTION}\n${prompt}`;
-    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /保留真实肤质与轻微瑕疵，仅可轻微匀肤/);
-    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /禁止磨皮、美白、网红伪素颜、美颜改五官/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /脸、五官、肤色与真实肤质须与图1一致/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /保留毛孔与轻微瑕疵/);
+    assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /禁止磨皮、匀肤、美白、网红伪素颜、美颜改五官/);
     assert.match(SEEDREAM_SYSTEM_INSTRUCTION, /正常两只手、两只脚，禁止多余肢体/);
+    assert.doesNotMatch(SEEDREAM_SYSTEM_INSTRUCTION, /仅可轻微匀肤/);
     assert.doesNotMatch(SEEDREAM_SYSTEM_INSTRUCTION, /允许自然美肤/);
     assert.doesNotMatch(SEEDREAM_SYSTEM_INSTRUCTION, /允许自然美颜美肤/);
+    assert.match(prompt, /禁止磨皮、匀肤、美白、美颜与改五官/);
     assert.match(prompt, /禁止膝上特写裁切/);
     assert.match(prompt, /裙长\/裤长必须到脚踝，禁止及膝/);
     assert.match(prompt, /窄袖须长袖收口及腕/);

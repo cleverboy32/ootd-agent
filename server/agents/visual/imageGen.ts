@@ -15,6 +15,7 @@ import type { ClothingItem } from '@prisma/client';
 import { scaleAccessoryReferenceImages } from '@/server/utils/accessoryScaleRef';
 import {
   buildSeedreamImagePrompt,
+  hiddenInnermostTop,
   isPersonReferenceLabel,
   listTextOnlyItems,
   PERSON_REFERENCE_LABEL,
@@ -65,7 +66,11 @@ export function buildOutfitReferenceInputs(
 ): { referenceUrls: string[]; referenceLabels: string[] } {
   const referenceUrls: string[] = [];
   const referenceLabels: string[] = [];
-  const wardrobeItems = outfit.selected_items.filter((i) => i.id !== 'new_item');
+  const hiddenInner = hiddenInnermostTop(outfit);
+  const hiddenInnerImageUrl = hiddenInner ? ragCache?.get(hiddenInner.id)?.imageUrl : undefined;
+  const wardrobeItems = outfit.selected_items.filter(
+    (i) => i.id !== 'new_item' && i.id !== hiddenInner?.id
+  );
 
   const resolvedAnchorUrl =
     anchorImageUrl?.trim() ||
@@ -73,17 +78,19 @@ export function buildOutfitReferenceInputs(
       ? `data:${anchorImageData.mimeType};base64,${anchorImageData.data}`
       : undefined);
 
+  const anchorItem =
+    outfit.selected_items.find((i) => i.id === 'new_item') ?? wardrobeItems[0];
+  const anchorIsHiddenInner = Boolean(hiddenInner && anchorItem?.id === hiddenInner.id);
+
   const purchaseLabelByUrl = new Map(
     (additionalPurchaseRefs ?? [])
       .filter((ref) => ref.url?.trim() && ref.label?.trim())
       .map((ref) => [ref.url.trim(), ref.label.trim()])
   );
 
-  if (resolvedAnchorUrl) {
+  if (resolvedAnchorUrl && !anchorIsHiddenInner) {
     referenceUrls.push(resolvedAnchorUrl);
     const providedLabel = purchaseLabelByUrl.get(resolvedAnchorUrl);
-    const anchorItem =
-      outfit.selected_items.find((i) => i.id === 'new_item') ?? wardrobeItems[0];
     referenceLabels.push(
       providedLabel ||
         (anchorItem
@@ -96,6 +103,10 @@ export function buildOutfitReferenceInputs(
     if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) break;
     const url = extra.url?.trim();
     if (!url || referenceUrls.includes(url)) continue;
+    if (
+      hiddenInner &&
+      (extra.label.toLowerCase().includes('inner_top') || extra.label.includes(hiddenInner.name))
+    ) continue;
     referenceUrls.push(url);
     referenceLabels.push(extra.label || 'additional purchase garment');
   }
@@ -107,32 +118,34 @@ export function buildOutfitReferenceInputs(
     if (url && !wardrobeItemByUrl.has(url)) wardrobeItemByUrl.set(url, item);
   }
 
-  wardrobeImageUrls.forEach((url, idx) => {
-    if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) return;
-    const item = wardrobeItemByUrl.get(url);
-    const cached = item ? ragCache?.get(item.id) : undefined;
-    const isAccessory = isAccessoryReferenceItem(item?.layer, cached?.mainCategory);
-    // 有配饰产品图必须进 refs（款式/颜色）；小首饰巨物化由 scaleAccessoryReferenceImages 预处理消化。
-    referenceUrls.push(url);
-    const displayName = item?.name
-      ? isAccessory
-        ? `${item.name} ${ACCESSORY_SCALE_HINT}`
-        : item.name
-      : isAccessory
-        ? `配饰 ${ACCESSORY_SCALE_HINT}`
-        : undefined;
-    const parts = [
-      displayName,
-      item?.layer,
-      // description 紧跟名称，避免后续字段把结构细节挤出截断窗口
-      cached?.description,
-      cached?.mainCategory,
-      cached?.subCategory,
-      cached?.colors?.length ? `colors: ${cached.colors.join(', ')}` : undefined,
-      cached?.silhouette?.length ? `silhouette: ${cached.silhouette.join(', ')}` : undefined,
-    ].filter(Boolean);
-    referenceLabels.push(parts.join(' | ') || `wardrobe item ${idx + 1}`);
-  });
+  wardrobeImageUrls
+    .filter((url) => !hiddenInnerImageUrl || url !== hiddenInnerImageUrl)
+    .forEach((url, idx) => {
+      if (referenceUrls.length >= SEEDREAM_MAX_REFERENCE_IMAGES) return;
+      const item = wardrobeItemByUrl.get(url);
+      const cached = item ? ragCache?.get(item.id) : undefined;
+      const isAccessory = isAccessoryReferenceItem(item?.layer, cached?.mainCategory);
+      // 有配饰产品图必须进 refs（款式/颜色）；小首饰巨物化由 scaleAccessoryReferenceImages 预处理消化。
+      referenceUrls.push(url);
+      const displayName = item?.name
+        ? isAccessory
+          ? `${item.name} ${ACCESSORY_SCALE_HINT}`
+          : item.name
+        : isAccessory
+          ? `配饰 ${ACCESSORY_SCALE_HINT}`
+          : undefined;
+      const parts = [
+        displayName,
+        item?.layer,
+        // description 紧跟名称，避免后续字段把结构细节挤出截断窗口
+        cached?.description,
+        cached?.mainCategory,
+        cached?.subCategory,
+        cached?.colors?.length ? `colors: ${cached.colors.join(', ')}` : undefined,
+        cached?.silhouette?.length ? `silhouette: ${cached.silhouette.join(', ')}` : undefined,
+      ].filter(Boolean);
+      referenceLabels.push(parts.join(' | ') || `wardrobe item ${idx + 1}`);
+    });
 
   const portraitUrl = portraitImageUrl?.trim();
   if (portraitUrl) {
@@ -159,7 +172,8 @@ export function buildImagePrompt(
   referenceLabels?: string[]
 ): string {
   const labels = referenceLabels ?? [];
-  const itemLines = outfit.selected_items.map((i) => {
+  const hiddenInner = hiddenInnermostTop(outfit);
+  const itemLines = outfit.selected_items.filter((i) => i.id !== hiddenInner?.id).map((i) => {
     const cached = ragCache?.get(i.id);
     const parts: string[] = [`${i.name} (${i.layer})`];
     if (i.id === 'new_item') parts.push('NEW / purchase item — must be clearly visible');
@@ -180,6 +194,10 @@ export function buildImagePrompt(
     );
   }
 
+  if (hiddenInner) {
+    lines.push('三层上装：最里面的内搭完全被中层和外套遮住，不显示、不露领口/前襟/袖口；只画中层和外套。');
+  }
+
   const textOnly = listTextOnlyItems(outfit, labels);
   if (textOnly.length > 0) {
     lines.push(
@@ -198,7 +216,7 @@ export function buildImagePrompt(
 
   lines.push(
     `Pose: ${outfit.visual_composition.model_pose}`,
-    `Outfit: ${outfit.visual_composition.outfit_details}`,
+    `Outfit: ${hiddenInner ? '外套+中层构成三层上装；最里面内搭完全遮挡，不显示。' : outfit.visual_composition.outfit_details}`,
     'Wardrobe items:',
     ...itemLines,
     `Scene: ${outfit.visual_composition.background}`
@@ -305,10 +323,15 @@ export async function attemptGenerateOutfitImage(
   signal?: AbortSignal
 ): Promise<{ data: string; mimeType: string; mode: 'multimodal' | 'text-only' }> {
   throwIfAborted(signal);
+  const hiddenInner = hiddenInnermostTop(outfit);
+  const hiddenInnerImageUrl = hiddenInner ? ragCache?.get(hiddenInner.id)?.imageUrl : undefined;
+  const visibleWardrobeImageUrls = wardrobeImageUrls.filter(
+    (url) => !hiddenInnerImageUrl || url !== hiddenInnerImageUrl
+  );
   if (isSeedreamImageVendor()) {
     return generateWithSeedream(
       outfit,
-      wardrobeImageUrls,
+      visibleWardrobeImageUrls,
       anchorImageData,
       imgPrompt,
       ragCache,
@@ -330,7 +353,7 @@ export async function attemptGenerateOutfitImage(
   );
 
   try {
-    if (wardrobeImageUrls.length > 0 || hasAnchor) {
+    if (visibleWardrobeImageUrls.length > 0 || hasAnchor) {
       mode = 'multimodal';
       const multiModalParts: Part[] = [];
       if (portraitUrl) {
@@ -363,7 +386,7 @@ export async function attemptGenerateOutfitImage(
           console.warn(`[VISUAL_DIRECTOR] Failed to convert extra purchase URL, skipping: ${url} (${message})`);
         }
       }
-      for (const url of wardrobeImageUrls) {
+      for (const url of visibleWardrobeImageUrls) {
         try {
           multiModalParts.push(await urlToGenerativePart(url));
         } catch (e) {

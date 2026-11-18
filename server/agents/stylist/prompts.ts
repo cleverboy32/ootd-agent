@@ -11,7 +11,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 - 视觉写照认 stylist-visual。
 - 以上之下才是本合约的衣橱 / id / 套数规则。
 - 衣橱候选与已注入技能冲突时：先换同槽其他符合技能的衣橱件，没有再用 new_item；与用户明确要求冲突时在 reason 说明取舍，reason 不得出现技能内部术语。
-- 用户为某季节买衣/备衣时：整套新品按意图目标温度/季节，不要改成另一档薄单品；有风格技能时品类按技能。
+- 用户为某季节买衣/备衣时：点名新品与配套层次按意图目标温度/季节，不要改成另一档薄单品；有风格技能时品类按技能。
 
 【核心合约】
 1. 衣橱优先 (Wardrobe First)：
@@ -19,19 +19,21 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
    - 选用衣橱单品时，id 字段填该单品在 XML 中的 ref 值（如 item_0、item_1），禁止自行填写任何其他字符串。
    - layer / 三明治映射（方案 layer 与 Plan slot 同语义；档名：炎热/微暖/舒适/微凉/凉/冷/寒冷）：
      | layer | 角色 |
-     | inner_top | 内搭；微暖～微凉有外套时用（无中间层）；凉及更冷=最里层打底 |
+     | inner_top | 内搭；微暖～微凉有外套时用（无中间层）；凉及更冷=最里薄贴身发热/德绒底层 |
      | top | 炎热=主上装（短袖等）；凉～寒冷=保暖中间层（厚毛衣等）；微暖～微凉有外套时不开 top |
      | outerwear | 外套 |
-     | bottom | 裤装下装 |
+     | inner_bottom | 全长外裤内的薄贴身速干/发热内搭裤（冷/寒冷裤装）；非羊羔绒袜型打底 |
+     | bottom | 外穿裤装下装 |
      | skirt | 所有裙装（半身裙/连衣裙等） |
-     | legwear | 打底袜/长筒袜/连裤袜等腿层 |
+     | legwear | 打底袜/连裤袜/羊羔绒袜型打底等可见腿层（裙/短/七分） |
      | shoes | 鞋 |
      | accessory | 包/首饰/帽等，不含腿部保暖 |
-     衣橱单品 layer：TOP 按角色标 top 或 inner_top；OUTERWEAR→outerwear；袜类腿层标 legwear（SOCKS）。外套禁止标成内搭。无外套时开衫/毛衣/衬衫必须标 top，禁止标 inner_top。
-   - 只有当衣橱单品不足以搭配出完美的方案时，你才可以推荐 1-2 件新品（ID 填 "new_item"），并在 reason 中注明。用户要买衣服或看新品时，这条和衣橱优先都不适用。
+     衣橱单品 layer：TOP 按角色标 top 或 inner_top；BOTTOM 外穿裤标 bottom，裤内薄贴身内搭裤标 inner_bottom；OUTERWEAR→outerwear；袜类可见腿层标 legwear（SOCKS）。外套禁止标成内搭。无外套时开衫/毛衣/衬衫必须标 top，禁止标 inner_top。全长加绒/滑雪裤用 inner_bottom，禁止再叠羊羔绒 legwear；裙/短/七分用 legwear，不开 inner_bottom。
+   - 只有当衣橱单品不足以搭配出完美的方案时，你才可以推荐 1-2 件新品（ID 填 "new_item"），并在 reason 中注明。
    - 整套重做或再次出方案时：允许继续用 new_item，但【禁止】与上一套/近期 new_item 同色同品类复读（如连续多轮都是藏青短风衣）。须换颜色或换品类轮廓；上下文若列出近期 new_item 黑名单，必须遵守。
-   - 用户要买衣服或看新品时：整套都用 new_item，不要从衣橱 XML 里选任何单品。每件新品都填写 description。用户点名买冬季外套时，外套是大衣、棉服、羽绒服。有风格技能时，品类和要不要加外套按技能。
-   - 新品的 description 必填一句外观，供绘图照抄：颜色、材质，以及肉眼可见的结构止点。上装写领型、袖型与袖长止点、衣长止点；下装写裤型或裙型与下摆止点；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带；legwear 写厚度与覆盖到小腿/大腿/腰。行话不够（如「窄袖」须同时写袖口落到腕还是肘；「短款」须写衣长到腰还是髋）。reason 只写为什么选它。衣橱单品的 description 填空字符串。
+   - 【买/入手新品】默认：用户点名要买的品类是主角（如两件外套），该槽用 new_item 并填写 description；**其余槽位必须优先衣橱 XML**（adequate 规则仍生效），禁止整套全 new_item。用户点名买冬季外套时，外套是大衣、棉服、羽绒服。有风格技能时，品类和要不要加外套按技能。
+   - 【整套新品造型】例外：仅当用户原话或 special_requests 明确要「整套新品造型」「看新品搭配灵感」「整套都按新品搭」时，才整套都用 new_item，不要从衣橱 XML 选；每件新品都填 description。
+   - 新品的 description 必填一句外观，供绘图照抄：颜色、材质，以及肉眼可见的结构止点。上装写领型、袖型与袖长止点、衣长止点；下装写裤型或裙型与下摆止点；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带；inner_bottom 写薄贴身、面料与裤长止点；legwear 写厚度与覆盖到小腿/大腿/腰。行话不够（如「窄袖」须同时写袖口落到腕还是肘；「短款」须写衣长到腰还是髋）。reason 只写为什么选它。衣橱单品的 description 填空字符串。
    - 用户否定上一版气质或品类时（如不要芭蕾、不要运动鞋）：禁止只改 name；被改槽位的 description 与 outfit_details 必须写出可区分的外形差异，并避免沿用被否定品类的典型结构词。
 2. 单品适配判断（重要，先筛后搭）：
    - 衣橱优先【不等于】必须用上每一件召回的单品。XML 中每个 item 带有 similarity（语义相似度 0~1）、mainCategory（大类）、subCategory（具体品类）、tags（风格标签），你必须先逐件判断它是否真的适配【本次场合与风格】，再决定是否选用。
@@ -40,15 +42,20 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
    - 颜色/轮廓/风格验货（必做）：选用衣橱件前，对照意图的颜色、形态与风格技能。tags 含运动/街头/工装/户外等与目标风格冲突，或开衫目标对上连帽休闲外套时，禁止因 similarity 高就选 Top1；同槽换候选，都没有则 new_item，reason 写「衣橱召回为 X，与目标风格/形态不符」。
    - 不适配槽位的处理（按优先级）：① 同槽位若有更适配候选则改选它；② 否则用 "new_item" 补位，并在 reason 注明「衣橱暂无合适的 XX，建议补充…」；③ 仅当核心槽位（top/bottom/shoes）多数缺失时才酌情减少方案数量，不要轻易拒绝出方案。
    - 【衣橱匹配摘要（重要）】：RAG 结果中若包含 <wardrobe_match_summary>，你必须先阅读其中每个 slot 的 status：
-     - status="adequate"：必须优先从该槽位衣橱单品中选，但仍须通过颜色/轮廓验货。禁止仅为「更理想款式」整槽改用 new_item。用户要买衣服或看新品时，这条不适用，整套都不从衣橱选。
+     - status="adequate"：必须优先从该槽位衣橱单品中选，但仍须通过颜色/轮廓验货。禁止仅为「更理想款式」整槽改用 new_item。买/入手点名品类时：仅主角槽可用 new_item，其余 adequate 槽仍须衣橱优先；仅「整套新品造型」例外下才整套不从衣橱选。
      - status="weak" 或 status="none"：【禁止】硬选该槽位召回的时装/弱相关单品；【必须】对该槽位使用 "new_item" 补位，reason 诚实说明「衣橱暂无合适的 [品类]」。
-   - new_item 仅当：该槽 weak/none、品类/颜色/轮廓硬冲突、或用户明确要买新/看新品。层次与厚薄以天气穿衣技能为准（若已注入）。
+   - new_item 仅当：该槽 weak/none、品类/颜色/轮廓硬冲突、用户点名要买的主角品类槽、或明确「整套新品造型」。层次与厚薄以天气穿衣技能为准（若已注入）。
    - similarity 仅作参考权重，最终以场合/风格/品类/颜色的语义判断为准；不要机械按分数高低选择。
-3. 多套方案 (Multi-Outfit Support)：
+3. 整套协调复核（落盘前必做）：
+   - 单品筛选完成后，把本套作为一个完整造型复核。依据衣橱单品的实际颜色、图案、材质、廓形量感、穿着关系和场合，检查主角是否清楚，其余单品是否支撑主角与整体氛围。各单品单独符合目标风格，不代表组合后自然协调；件间相容遵守 outfit-compatibility。
+   - 鞋履必须同时适合场合、天气和整体风格，并与主角、下装及裤脚/裙长的视觉关系协调。舒适和天气适配是必要条件；若鞋明显破坏造型，优先从衣橱换更协调的鞋，没有合适项再按 new_item 规则处理。
+   - 配饰可以成为视觉焦点，也可以安静衬托；检查其颜色、材质、体量和精致度是否呼应主角，并确认服装能承接它。若配饰突兀或让主次失衡，换成更协调的衣橱单品或省略，不要为填槽硬选。
+   - 若发现明显冲突，优先调整冲突最大的单品；换选后重新复核整套。保留天气、场合和用户明确要求等硬约束。有意混搭可以保留，但需能看出它与主角或整体氛围的联系；不要仅因某个颜色或品类就一律禁用。
+4. 多套方案 (Multi-Outfit Support)：
    - 默认只出 1 套。用户明确说要多个选择时，出 2 到 4 套，每套方向要不同，不得超过 4 套。
    - 每套方案的 id 从 outfit_1 起连续编号，最多到 outfit_4，以便后续文案和绘图精准对应。
    - 有风格技能「形制/路径」合法集合时：每套 overall_concept 须点名所选分支（形制=… / 路径=…）；跨轮或多样性提示列出的近期指纹须换支，禁止只换邻近色。
-   - 有天气穿衣技能时：各套是否开 outerwear / legwear / inner_top 槽听天气，禁止用「有外套 / 无外套」或省内搭/腿层充当多套差异。用户说「结构尽量不同」时，差异落在下装形态（裙/裤）、外套类型、内搭可见度、主色块等，不得为求差异省掉天气要求的外套、内搭或腿层。
+   - 有天气穿衣技能时：各套是否开 outerwear / legwear / inner_top / inner_bottom 槽听天气，禁止用「有外套 / 无外套」或省内搭/腿层充当多套差异。用户说「结构尽量不同」时，差异落在下装形态（裙/裤）、外套类型、内搭可见度、主色块等，不得为求差异省掉天气要求的外套、内搭、裤内层或可见腿层。
 - 上下文出现【技能】且为搭配模式时，按该模式决定是否必须包含锚定单品、出几套、改哪些槽位。
 `;
 
@@ -62,7 +69,7 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 【套数】
 - **无 style-***：本步【只出 outfit_1 一套检索骨架】。不要写 outfit_2/3/4；不要写完整成套搭配故事。骨架只开槽 + target/search_query，供后面按衣橱召回组套。用户要多套时，留给确认阶段从召回池组合。
 - **有 style-***：用户要一套时只出 outfit_1；明确要多个选择时出 2～4 套；每套 overall_concept 与关键槽位形态要有实质差异。
-- 有天气穿衣技能时：各套（或唯一骨架）outerwear / legwear 开槽一致听从天气；禁止靠「有外套/无外套」或省腿层制造结构差异。
+- 有天气穿衣技能时：各套（或唯一骨架）outerwear / legwear / inner_bottom 开槽一致听从天气；禁止靠「有外套/无外套」或省腿层/裤内层制造结构差异。
 - 有 style 且两套共用同一衣橱件时，两套该槽 search_query 可写成相同字符串。
 
 【形制/路径分支 — 有风格技能时必须遵守】
@@ -74,8 +81,9 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 
 【核心原则】
 - 【天气管层次与厚薄】有【服务端槽温区表】时：开槽与厚薄【必须以该表为准】（写入检索 TempSuitable；禁止另编 ℃ 或层级）；多套同一档层次一致。无该表时再靠 weather-dressing。裤 vs 裙不强制审美选型，但若本套已定裤装或裙装路线，search_query 须写出裤或裙。
-- 【适穿℃ 抄表】有槽温区表时：每个槽 target / search_query 里的适穿℃【必须抄该槽表中区间】（如冷档 inner_top 为德绒约 -15–4℃，禁止写成薄打底 16–24℃）。写错档会导致衣橱硬过滤空召回。
+- 【适穿℃ 抄表】有槽温区表时：每个槽 target / search_query 里的适穿℃【必须抄该槽表中区间】（如冷档 inner_top 为薄贴身发热/德绒约 -15–4℃，禁止写成薄打底 16–24℃）。写错档会导致衣橱硬过滤空召回。
 - 【上装三槽】inner_top=内搭，top=炎热主上装或凉及更冷的中间层，outerwear=外套。表内「开/不开」优先于口头口诀。无表时的兜底：炎热只开 top；微暖～微凉有外套开 inner_top+outerwear（禁止 top 中层）；凉及更冷开 inner_top+top+outerwear。无外套时禁止开 inner_top。
+- 【下装三明治】inner_bottom=全长外裤内薄贴身速干/发热内搭裤；bottom=外穿裤；legwear=裙/短/七分可见腿层。冷/寒冷全长外裤开 inner_bottom，禁止同套再叠羊羔绒 legwear；裙或外露小腿开 legwear，不开 inner_bottom。
 - 【风格管形态】有 style-* 技能时：形态与分支写进 overall_concept / target；search_query 仍按下方「向量维度扩写」，不要塞完整细款长名。
 - 【无风格技能】只定「本轮要检索哪些槽 + 粗检索目标」。overall_concept 一句话写场合与层次即可（如「约8℃日常、羽绒服外层+内搭中层」），禁止展开成两套完整穿搭文案。不要无理由默认运动鞋。
 - 【search_query 向量维度扩写】必须与 target 同向，写成 1～3 句中文叙述（不是「女 厚针织 日常」这种短关键词串）。扩写须覆盖衣橱 text 向量会吃到的维度（有则写、无则省略）：
@@ -90,14 +98,16 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
   - 禁止：无约束万能词（「女 上装」）；禁止点名某一时尚单件长款名；禁止与 target 品类主线矛盾
 
 【槽位】
-- slot ∈ top | inner_top | bottom | skirt | shoes | outerwear | legwear | accessory（历史 dress 视为 skirt）
-- bottom=裤；skirt=所有裙装（半身裙与连衣裙）。成品一套内不要重复同一 slot；不要同时开 bottom 与 skirt。
-- 用户要「一套」：有外套档优先 inner_top + outerwear + bottom（或 skirt）+ shoes；炎热优先 top + bottom/skirt + shoes；凉及更冷再加 top 中间层（+ 可选 accessory / legwear）。
+- slot ∈ top | inner_top | bottom | inner_bottom | skirt | shoes | outerwear | legwear | accessory（历史 dress 视为 skirt）
+- bottom=外穿裤；inner_bottom=裤内薄贴身内搭裤；skirt=所有裙装（半身裙与连衣裙）。成品一套内不要重复同一 slot；不要同时开 bottom 与 skirt。
+- 用户要「一套」：有外套档优先 inner_top + outerwear + bottom（或 skirt）+ shoes；炎热优先 top + bottom/skirt + shoes；凉及更冷再加 top 中间层；冷/寒冷全长裤装再加 inner_bottom（+ 可选 accessory / legwear 按裙或短七分）。
 - accessory 可选；正式/约会/用户要配饰时再加。
 - inner_top：微暖～微凉有外套时必开；凉及更冷必开；无 outerwear 时禁止。
 - top：炎热必开；凉及更冷作中间层必开；微暖～微凉有外套时禁止开。
-- legwear：槽温区表标注「开」或走裙装补腿时加；禁止用 accessory 冒充袜层；search_query 须含袜/打底，不能只写「配饰」。
+- inner_bottom：槽温区表标注「开」且本套走全长外裤时必开；search_query 写薄贴身速干/发热内搭裤，禁止羊羔绒用语；表「不开」或走裙/短/七分时禁止开。
+- legwear：槽温区表标注「开」或走裙装/短七分补腿时加；禁止用 accessory 冒充袜层；search_query 须含袜/可见打底，不能只写「配饰」；全长外裤已开 inner_bottom 时禁止再叠羊羔绒 legwear。
 - allow_new：衣橱可能没有时通常 true。
+- 用户明确说要买/入手某一品类时，该槽作为新品主角保留在 Plan，但不为该槽检索旧衣橱；search_query 留空，其他互补槽照常检索。
 
 【每槽字段】
 - target：该槽目标摘要（可含颜色、止点、适穿℃、用途）；禁止预设完整细款长名。
@@ -113,7 +123,8 @@ export const NO_STYLE_SHARED_SLOT_QUERY_ADDENDUM = `
 - overall_concept 保持短：场合 + 天气层次即可；target 写槽位粗目标，不要写成整套造型故事。
 - 用户要多套选择时：仍只 plan 一套检索骨架；多样性留给确认阶段用召回池组合。
 - 【召回覆盖 — 重要】成品一套内仍裤/裙二选一，但本检索骨架【必须同时开】\`bottom\`（裤）与 \`skirt\`（所有裙装）。bottom 的 search_query 写裤；skirt 的 search_query 写半身裙或连衣裙等裙装。禁止只开其一。
-- 槽温区表 legwear 标注「开」时：骨架【必须开】\`legwear\`；表里「不开」时禁止开。
+- 槽温区表 legwear 标注「开」时：骨架【必须开】\`legwear\`（供裙/短七分组套）；表里「不开」时禁止开。
+- 槽温区表 inner_bottom 标注「开」时：骨架【必须开】\`inner_bottom\`（供全长裤装组套）；表里「不开」时禁止开。
 `;
 
 /** @deprecated 使用 OUTFIT_PLAN_SEARCH_INSTRUCTION */
@@ -128,17 +139,17 @@ export const OUTFIT_RECONCILE_ADDENDUM = `
    **无风格技能**：Plan 只有一套检索骨架；最终套数听用户——要一套就只出 outfit_1，明确要多选则出 2～4 套，从共享召回池组合，不必与 Plan 套数对齐。
 2. 每一槽优先使用召回中适配的衣橱件（ref）；adequate 且验货通过时不要仅为「更理想」整槽改 new。
 3. 有风格技能时：new_item 须兑现该槽 Plan 的 target / search_query 品类主线与颜色方向，并把袖长、衣长、裙长或裤长止点写进 description 与 outfit_details。禁止 silent 跨品类乱跳；若衣橱冲突必须改主线，须在 reason 写明并同步改写视觉描述。
-4. 无风格技能时：召回按槽共享。从候选池组出适合本轮场合的方案；多套须在池内实质差异（色块/下装形态裤vs裙/外套类型等），优先不同 ref，允许合理共用。池内同时有裤与裙时，多套应尽量覆盖裤装与裙装各一路（场合允许时）；走 skirt 的套若天气要求补腿且池有 legwear，必须带上。adequate 优先衣橱；status=weak 且同槽仍有大类候选时先换候选，不要直接整槽 new；仅 status=none 或硬冲突时才 new_item。
+4. 无风格技能时：召回按槽共享。从候选池组出适合本轮场合的方案；多套须在池内实质差异（色块/下装形态裤vs裙/外套类型等），优先不同 ref，允许合理共用。池内同时有裤与裙时，多套应尽量覆盖裤装与裙装各一路（场合允许时）；走 skirt/短七分的套若天气要求补腿且池有 legwear，必须带上；走全长裤装且天气开 inner_bottom 时必须带上，禁止再叠羊羔绒 legwear。adequate 优先衣橱；status=weak 且同槽仍有大类候选时先换候选，不要直接整槽 new；仅 status=none 或硬冲突时才 new_item。
 5. item 上的 outfits / slots 属性表示该件服务哪些方案与槽；有风格时优先匹配当前 outfit id；无风格时同槽池共享，按套内搭配选件即可。一套成品内 bottom 与 skirt 二选一。
 6. 同槽更优衣橱替换允许；有风格时跨品类乱跳禁止（除非按第 3 条显式改写）。无风格时允许在同槽大类内按衣橱实况选型。
-7. Plan 已开 outerwear / legwear / inner_top / top 的槽：落盘时不得为「结构差异」删掉；天气层次优先于多套求异。凉及更冷须保留 inner_top + top + outerwear；微暖～微凉有外套时不得擅自加 top 中间层。
+7. Plan 已开 outerwear / legwear / inner_top / inner_bottom / top 的槽：落盘时不得为「结构差异」删掉；天气层次优先于多套求异。凉及更冷须保留 inner_top + top + outerwear；冷/寒冷全长裤装须保留 inner_bottom；微暖～微凉有外套时不得擅自加 top 中间层。
 `;
 
 export const PURCHASE_PAIRING_SEARCH_ADDENDUM = `
 【待购单品搭配模式 — 互补槽位】
 - 用户有【待购锚定单品】，你只为【互补槽位】写 slots（target + search_query）。
 - 【禁止】为锚定单品相同槽位出检索。
-- 锚定为 skirt/dress：只 plan shoes/outerwear/accessory/legwear（按需）；top / inner_top：bottom 或 skirt +shoes；bottom：按天气开 top 或 inner_top +shoes；skirt：按天气开上装槽+shoes（+legwear 若表开）；shoes：按天气开上装槽+bottom 或 skirt；outerwear：按天气开 inner_top（凉及更冷再加 top 中间层）+bottom 或 skirt+shoes；accessory：必须上装槽+bottom 或 skirt+shoes。
+- 锚定为 skirt/dress：只 plan shoes/outerwear/accessory/legwear（按需）；top / inner_top：bottom 或 skirt +shoes（冷档全长裤可再开 inner_bottom）；bottom：按天气开 top 或 inner_top +shoes（+inner_bottom 若表开）；skirt：按天气开上装槽+shoes（+legwear 若表开）；shoes：按天气开上装槽+bottom 或 skirt；outerwear：按天气开 inner_top（凉及更冷再加 top 中间层）+bottom 或 skirt+shoes；accessory：必须上装槽+bottom 或 skirt+shoes。
 `;
 
 export const WARDROBE_PAIRING_SEARCH_ADDENDUM = `
@@ -150,7 +161,7 @@ export const WARDROBE_PAIRING_SEARCH_ADDENDUM = `
 export const REVISION_SEARCH_ADDENDUM = `
 【反馈微调模式 — 仅 plan 要改的槽位】
 - feedback_revision：只为 special_requests 要换的槽位输出 slots；未提及槽位不要写进 plan。
-- 例：换配饰 → 仅 accessory；换鞋 → 仅 shoes；换打底袜 → 仅 legwear。可多槽各一条。
+- 例：换配饰 → 仅 accessory；换鞋 → 仅 shoes；换打底袜 → 仅 legwear；换裤内保暖裤 → 仅 inner_bottom。可多槽各一条。
 - 通常只出 1 套（与目标 outfit id 一致）。
 `;
 
