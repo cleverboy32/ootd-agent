@@ -1,4 +1,8 @@
-import { searchWardrobeItemsByText, WardrobeSearchResult } from '@/server/services/wardrobeService';
+import {
+  searchWardrobeItemsByText,
+  type WardrobeSearchDiagnostics,
+  type WardrobeSearchResult,
+} from '@/server/services/wardrobeService';
 import { buildRagSearchLogEntry, logRagSearch } from '@/server/logging/rag';
 import {
   collapseQueriesForRound,
@@ -6,7 +10,6 @@ import {
   parseWardrobeSearchSlot,
   resolveMainCategoryForSlot,
   WardrobeSearchInput,
-  WardrobeSearchQuery,
 } from '@/server/utils/ragSearchSlots';
 import {
   applySlotTemperatureFilter,
@@ -19,6 +22,13 @@ import {
   isAthleticOccasion,
 } from '@/server/utils/ragMatchQuality';
 import { filterResultsByStyleSkill } from '@/server/utils/queryStyleFilter';
+import {
+  resolveSlotRetrievalEmptyReason,
+  serializeSearchError,
+  type RagRetrievalStageCounts,
+  type RagSlotEmptyReason,
+  type WardrobeSearchFailureReason,
+} from '@/server/utils/ragSearchDiagnostics';
 import { ClothingItem } from '@prisma/client';
 import type { AnchorItemInfo, GatekeeperIntent } from '../intent';
 
@@ -45,7 +55,9 @@ export type RagSlotSnapshot = {
     similarity: number;
     mainCategory?: string;
     colors?: string[];
+    tags?: string[];
     material?: string[];
+    silhouette?: string[];
     occasions?: string[];
     formality?: string | null;
     description?: string | null;
@@ -55,6 +67,13 @@ export type RagSlotSnapshot = {
   }>;
   query?: string;
   target?: string;
+  /** Evaluation-only candidates at each retrieval/filter stage. */
+  candidate_stages?: Record<string, Array<{ id: string; subCategory: string; similarity: number }>>;
+  /** 各过滤阶段候选数（生产 audit 也写） */
+  retrieval_stage_counts?: RagRetrievalStageCounts;
+  /** 该槽最终无召回时的原因 */
+  empty_reason?: RagSlotEmptyReason | null;
+  search_error?: { name: string; message: string };
 };
 
 function escapeXmlAttr(value: string): string {
@@ -119,29 +138,59 @@ async function runOneSlotSearch(
   resultLimit: number,
   weather: string,
   athletic: boolean,
-  skillNames: string[] | undefined
-): Promise<WardrobeSearchResult[]> {
+  skillNames: string[] | undefined,
+  captureDiagnostics: boolean
+): Promise<{
+  results: WardrobeSearchResult[];
+  candidateStages?: Record<string, WardrobeSearchResult[]>;
+  retrievalStageCounts: RagRetrievalStageCounts;
+  emptyReason: RagSlotEmptyReason | null;
+  searchError?: { name: string; message: string };
+  similarityThreshold?: number;
+}> {
+  const emptyStages = (): RagRetrievalStageCounts => ({
+    db_top_k_after_category_and_sql_temp_filters: 0,
+    post_similarity_threshold: 0,
+    post_slot_temperature_filter: 0,
+    post_result_limit: 0,
+    post_athletic_filter: 0,
+    final_after_style_filter: 0,
+  });
+
   const mainCategory = resolveMainCategoryForSlot(slot);
   const parsedSlot = parseWardrobeSearchSlot(slot);
   if (!mainCategory) {
     console.warn(
       `[RAG_HANDLER] Skipping search: slot="${slot ?? ''}" did not resolve to mainCategory (query="${query.slice(0, 48)}")`
     );
-    return [];
+    return {
+      results: [],
+      retrievalStageCounts: emptyStages(),
+      emptyReason: 'skipped_no_main_category',
+    };
   }
   const searchQuery = query;
   const slotTempRange =
     resolveDressingFromWeather(weather)?.slotRange(parsedSlot ?? slot) ?? null;
+  let databaseCandidates: WardrobeSearchResult[] = [];
+  let searchFailureReason: WardrobeSearchFailureReason | null = null;
+  let searchError: { name: string; message: string } | undefined;
+  let similarityThreshold: number | undefined;
+
   const rawResults = await searchWardrobeItemsByText(searchQuery, userId, fetchLimit, mainCategory, {
     slot: parsedSlot,
     slotTempRange,
+    onSearchDiagnostics: (diagnostics: WardrobeSearchDiagnostics) => {
+      databaseCandidates = diagnostics.databaseCandidates;
+      searchFailureReason = diagnostics.failureReason;
+      searchError = diagnostics.error;
+      similarityThreshold = diagnostics.similarityThreshold;
+    },
   });
-  const temperatureFiltered = applySlotTemperatureFilter(rawResults, slotTempRange).slice(
-    0,
-    resultLimit
-  );
+  const postTemperatureFilter = applySlotTemperatureFilter(rawResults, slotTempRange);
+  const postResultLimit = postTemperatureFilter.slice(0, resultLimit);
   const athleticFiltered = filterResultsForAthleticContext(
-    temperatureFiltered,
+    postResultLimit,
     parsedSlot,
     athletic
   );
@@ -156,7 +205,46 @@ async function runOneSlotSearch(
     );
   }
 
-  return searchResults;
+  const retrievalStageCounts: RagRetrievalStageCounts = {
+    db_top_k_after_category_and_sql_temp_filters: databaseCandidates.length,
+    post_similarity_threshold: rawResults.length,
+    post_slot_temperature_filter: postTemperatureFilter.length,
+    post_result_limit: postResultLimit.length,
+    post_athletic_filter: athleticFiltered.length,
+    final_after_style_filter: searchResults.length,
+  };
+  const emptyReason = resolveSlotRetrievalEmptyReason({
+    finalCount: searchResults.length,
+    searchFailureReason,
+    stageCounts: retrievalStageCounts,
+  });
+  if (emptyReason) {
+    console.warn(
+      `[RAG_HANDLER] slot=${parsedSlot ?? slot ?? '?'} emptyReason=${emptyReason}` +
+        (searchError ? ` error=${searchError.name}:${searchError.message}` : '') +
+        ` stages=${JSON.stringify(retrievalStageCounts)}`
+    );
+  }
+
+  return {
+    results: searchResults,
+    retrievalStageCounts,
+    emptyReason,
+    ...(searchError ? { searchError } : {}),
+    ...(similarityThreshold != null ? { similarityThreshold } : {}),
+    ...(captureDiagnostics
+      ? {
+          candidateStages: {
+            db_top_k_after_category_and_sql_temp_filters: databaseCandidates,
+            post_similarity_threshold: rawResults,
+            post_slot_temperature_filter: postTemperatureFilter,
+            post_result_limit: postResultLimit,
+            post_athletic_filter: athleticFiltered,
+            final_after_style_filter: searchResults,
+          },
+        }
+      : {}),
+  };
 }
 
 /**
@@ -227,7 +315,7 @@ export async function performRagSearch(
 
     const collapsedResults = await Promise.all(
       collapsed.map(async (group) => {
-        const results = await runOneSlotSearch(
+        const search = await runOneSlotSearch(
           group.query,
           group.slot,
           userId,
@@ -235,9 +323,10 @@ export async function performRagSearch(
           resultLimit,
           weather,
           athletic,
-          logContext?.skillNames
+          logContext?.skillNames,
+          logContext?.source === 'eval-retrieve'
         );
-        return { group, results };
+        return { group, ...search };
       })
     );
 
@@ -249,9 +338,22 @@ export async function performRagSearch(
       target?: string;
       mainCategory?: ReturnType<typeof resolveMainCategoryForSlot>;
       results: WardrobeSearchResult[];
+      candidateStages?: Record<string, WardrobeSearchResult[]>;
+      retrievalStageCounts: RagRetrievalStageCounts;
+      emptyReason: RagSlotEmptyReason | null;
+      searchError?: { name: string; message: string };
+      similarityThreshold?: number;
     }> = [];
 
-    for (const { group, results } of collapsedResults) {
+    for (const {
+      group,
+      results,
+      candidateStages,
+      retrievalStageCounts,
+      emptyReason,
+      searchError,
+      similarityThreshold,
+    } of collapsedResults) {
       const outfitIds = group.outfitIds.length > 0 ? group.outfitIds : [undefined];
       for (const outfitId of outfitIds) {
         perQueryResults.push({
@@ -261,6 +363,11 @@ export async function performRagSearch(
           target: group.target,
           mainCategory: resolveMainCategoryForSlot(group.slot),
           results,
+          candidateStages,
+          retrievalStageCounts,
+          emptyReason,
+          ...(searchError ? { searchError } : {}),
+          ...(similarityThreshold != null ? { similarityThreshold } : {}),
         });
       }
     }
@@ -308,6 +415,7 @@ export async function performRagSearch(
           isWarmWeather: dressing !== null ? dressing.feelsLikeCelsius >= 23 : false,
           strictColdActivity: false,
         },
+        skillNames: logContext?.skillNames,
       })
     );
 
@@ -333,7 +441,9 @@ export async function performRagSearch(
           similarity: item.similarity,
           mainCategory: item.mainCategory,
           colors: item.colors,
+          tags: item.tags ?? [],
           material: item.material ?? [],
+          silhouette: item.silhouette ?? [],
           occasions: item.occasions ?? [],
           formality: item.formality ?? null,
           description: item.description ?? null,
@@ -343,11 +453,33 @@ export async function performRagSearch(
         })),
         query: row.query,
         target: row.target,
+        retrieval_stage_counts: row.retrievalStageCounts,
+        empty_reason: row.emptyReason,
+        ...(row.searchError ? { search_error: row.searchError } : {}),
+        ...(row.candidateStages
+          ? {
+              candidate_stages: Object.fromEntries(
+                Object.entries(row.candidateStages).map(([stage, stageItems]) => [
+                  stage,
+                  stageItems.map((item) => ({
+                    id: item.id,
+                    subCategory: item.subCategory,
+                    similarity: item.similarity,
+                  })),
+                ])
+              ),
+            }
+          : {}),
       };
     });
 
     if (mergedResults.length === 0) {
-      console.log('[RAG_HANDLER] No relevant items found in wardrobe.');
+      const reasons = perQueryResults.map(
+        (row) => `${row.slot ?? '?'}:${row.emptyReason ?? 'unknown_empty'}`
+      );
+      console.log(
+        `[RAG_HANDLER] No relevant items found in wardrobe. emptyReasons=[${reasons.join(', ')}]`
+      );
       return { ...empty, slotSnapshots };
     }
 
@@ -414,7 +546,35 @@ export async function performRagSearch(
       slotSnapshots,
     };
   } catch (error) {
-    console.error('[RAG_HANDLER] Error during RAG search:', error);
+    const serialized = serializeSearchError(error);
+    console.error('[RAG_HANDLER] Error during RAG search:', serialized, error);
+    try {
+      await logRagSearch(
+        buildRagSearchLogEntry({
+          userId,
+          queries: searchQueries
+            .map(normalizeWardrobeSearchInput)
+            .filter((item) => item.query.length > 0)
+            .map(({ query, slot, outfitId }) => ({
+              query,
+              slot,
+              outfitId,
+              mainCategory: resolveMainCategoryForSlot(slot),
+            })),
+          perQueryResults: [],
+          mergedResults: [],
+          source: logContext?.source,
+          conversationId: logContext?.conversationId,
+          userMessage: logContext?.userMessage,
+          intent: logContext?.intent,
+          anchorItem: logContext?.anchorItem,
+          skillNames: logContext?.skillNames,
+          handlerError: serialized,
+        })
+      );
+    } catch (logError) {
+      console.error('[RAG_HANDLER] Failed to write RAG error audit:', logError);
+    }
     return {
       xmlString: '',
       indexMap: new Map(),

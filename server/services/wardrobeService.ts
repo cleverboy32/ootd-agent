@@ -20,12 +20,25 @@ import {
   getTextSimilarityThresholds,
 } from './embedding';
 import { withRetryOn429 } from '@/server/utils/retryOn429';
+import {
+  serializeSearchError,
+  type WardrobeSearchFailureReason,
+} from '@/server/utils/ragSearchDiagnostics';
 import { ClothingMainCategory, type ClothingItem, type ClothingItemStatus, type Prisma } from '@prisma/client';
 
 export interface WardrobeSearchEmbeddingContext extends WardrobeQueryEmbeddingContext {
   /** 脚本对比用：跳过 query 文本格式化，使用原始 query 生成向量 */
   useRawQueryEmbedding?: boolean;
 }
+
+export type WardrobeSearchDiagnostics = {
+  databaseCandidates: WardrobeSearchResult[];
+  thresholdCandidates: WardrobeSearchResult[];
+  similarityThreshold: number;
+  /** 阈值后仍为空时给出原因；有命中时为 null */
+  failureReason: WardrobeSearchFailureReason | null;
+  error?: { name: string; message: string };
+};
 
 export interface WardrobeSearchOptions {
   slot?: WardrobeSearchSlot;
@@ -36,6 +49,8 @@ export interface WardrobeSearchOptions {
    * 双空旧单品保留。
    */
   slotTempRange?: TempRange | null;
+  /** Observer for DB top-K / threshold / failure reason（audit 与 eval 共用）. */
+  onSearchDiagnostics?: (diagnostics: WardrobeSearchDiagnostics) => void;
 }
 
 export type WardrobeSearchResult = {
@@ -85,8 +100,27 @@ export async function searchWardrobeItemsByText(
       (hasSlotRange ? `, slotTempRange: [${rangeMin ?? 'null'},${rangeMax ?? 'null'}]` : '')
   );
 
+  const reportDiagnostics = (
+    partial: Omit<WardrobeSearchDiagnostics, 'similarityThreshold'> & {
+      similarityThreshold?: number;
+    }
+  ) => {
+    options?.onSearchDiagnostics?.({
+      similarityThreshold: partial.similarityThreshold ?? getTextSimilarityThresholds().search,
+      databaseCandidates: partial.databaseCandidates,
+      thresholdCandidates: partial.thresholdCandidates,
+      failureReason: partial.failureReason,
+      ...(partial.error ? { error: partial.error } : {}),
+    });
+  };
+
   if (!searchText.trim()) {
     console.log('[RAG-SEARCH] SearchText is empty, returning empty array.');
+    reportDiagnostics({
+      databaseCandidates: [],
+      thresholdCandidates: [],
+      failureReason: 'empty_query',
+    });
     return [];
   }
 
@@ -94,6 +128,11 @@ export async function searchWardrobeItemsByText(
     console.warn(
       `[RAG-SEARCH] Refusing unscoped search (missing mainCategory) query="${searchText.slice(0, 48)}" slot=${options?.slot ?? ''}`
     );
+    reportDiagnostics({
+      databaseCandidates: [],
+      thresholdCandidates: [],
+      failureReason: 'missing_main_category',
+    });
     return [];
   }
 
@@ -112,6 +151,11 @@ export async function searchWardrobeItemsByText(
     const queryEmbedding = await generateTextEmbedding(textForEmbedding);
     if (!queryEmbedding || queryEmbedding.length === 0) {
       console.error('[RAG-SEARCH] Failed to generate query embedding.');
+      reportDiagnostics({
+        databaseCandidates: [],
+        thresholdCandidates: [],
+        failureReason: 'embedding_empty',
+      });
       return [];
     }
 
@@ -185,13 +229,26 @@ export async function searchWardrobeItemsByText(
 
     console.log('[RAG-SEARCH] Raw search results from DB:', JSON.stringify(results, null, 2));
 
+    const SIMILARITY_THRESHOLD = getTextSimilarityThresholds().search;
+
     if (!results || results.length === 0) {
       console.log('[RAG-SEARCH] No items found in the database for this user.');
+      reportDiagnostics({
+        databaseCandidates: [],
+        thresholdCandidates: [],
+        similarityThreshold: SIMILARITY_THRESHOLD,
+        failureReason: 'no_db_rows',
+      });
       return [];
     }
 
-    const SIMILARITY_THRESHOLD = getTextSimilarityThresholds().search;
     const filteredResults = results.filter((item) => item.similarity > SIMILARITY_THRESHOLD);
+    reportDiagnostics({
+      databaseCandidates: results,
+      thresholdCandidates: filteredResults,
+      similarityThreshold: SIMILARITY_THRESHOLD,
+      failureReason: filteredResults.length === 0 ? 'all_below_threshold' : null,
+    });
 
     console.log(
       `[RAG-SEARCH] Found ${filteredResults.length} items after filtering by threshold (${SIMILARITY_THRESHOLD}).`
@@ -199,7 +256,23 @@ export async function searchWardrobeItemsByText(
 
     return filteredResults;
   } catch (error) {
-    console.error('Error during wardrobe search:', error);
+    const serialized = serializeSearchError(error);
+    console.error('[RAG-SEARCH] Error during wardrobe search:', {
+      userId,
+      mainCategory,
+      slot: options?.slot ?? null,
+      query: searchText.slice(0, 120),
+      hasSlotRange,
+      slotTempRange,
+      error: serialized,
+      raw: error,
+    });
+    reportDiagnostics({
+      databaseCandidates: [],
+      thresholdCandidates: [],
+      failureReason: 'search_exception',
+      error: serialized,
+    });
     return [];
   }
 }

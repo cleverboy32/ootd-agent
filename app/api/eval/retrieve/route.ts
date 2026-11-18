@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import type { ClothingItem } from '@prisma/client';
 import { planOutfitsAndQueries } from '@/server/agents/stylist/agent';
+import type { OutfitPlanResult } from '@/server/utils/outfitPlanSearch';
+import type { WardrobeSearchQuery } from '@/server/utils/ragSearchSlots';
 import { performRagSearch } from '@/server/agents/rag/search';
 import { normalizeStylistSkillNames } from '@/server/agents/stylist/skillSelection';
 import { selectStylistSkills } from '@/server/agents/stylist/selectSkills';
@@ -25,6 +27,8 @@ type EvalRetrieveBody = {
   profile?: Partial<UserProfileResult>;
   skillOverride?: string[];
   userId?: string;
+  /** Fixed retrieval queries for controlled embedding/retrieval comparisons. */
+  queries_override?: WardrobeSearchQuery[];
 };
 
 const DEFAULT_PROFILE: UserProfileResult = {
@@ -71,6 +75,30 @@ function resolveEvalUserId(bodyUserId?: string): string {
   const fromEnv = (process.env.EVAL_WARDROBE_USER_ID ?? '').trim();
   if (fromEnv) return fromEnv;
   return DEFAULT_EVAL_USER_ID;
+}
+
+function planFromFixedQueries(queries: WardrobeSearchQuery[]): OutfitPlanResult {
+  const outfits = new Map<string, OutfitPlanResult['outfits'][number]>();
+  for (const query of queries) {
+    if (!query.query?.trim() || !query.slot) {
+      throw new Error('Fixed retrieval queries require a non-empty query and slot');
+    }
+    const id = query.outfitId?.trim() || 'outfit_1';
+    const outfit = outfits.get(id) ?? {
+      id,
+      overall_concept: '固定检索 query 评测',
+      slots: [],
+    };
+    outfit.slots.push({
+      slot: query.slot,
+      target: query.target ?? '',
+      search_query: query.query.trim(),
+      allow_new: query.allowNew !== false,
+    });
+    outfits.set(id, outfit);
+  }
+  if (outfits.size === 0) throw new Error('queries_override must contain at least one query');
+  return { outfits: [...outfits.values()] };
 }
 
 export async function POST(req: NextRequest) {
@@ -130,17 +158,20 @@ export async function POST(req: NextRequest) {
       : null;
     const purchaseAnchors = isPurchasePairingIntent(intent) ? listPurchaseAnchors(intent) : [];
 
-    const planned = await planOutfitsAndQueries(
-      [],
-      intent,
-      profile,
-      userMessage,
-      anchorItem,
-      undefined,
-      purchaseAnchors,
-      skillNames,
-      { messageId: `eval-retrieve-${Date.now()}` }
-    );
+    const fixedQueries = body.queries_override;
+    const planned = fixedQueries
+      ? { plan: planFromFixedQueries(fixedQueries), queries: fixedQueries }
+      : await planOutfitsAndQueries(
+          [],
+          intent,
+          profile,
+          userMessage,
+          anchorItem,
+          undefined,
+          purchaseAnchors,
+          skillNames,
+          { messageId: `eval-retrieve-${Date.now()}` }
+        );
 
     const searchResults = await performRagSearch(planned.queries, userId, ragCache, {
       source: 'eval-retrieve',
@@ -160,6 +191,7 @@ export async function POST(req: NextRequest) {
       intent,
       profile,
       user_message: userMessage,
+      query_mode: fixedQueries ? 'fixed' : 'planner',
       plan: planned.plan,
       queries: planned.queries,
       slots: searchResults.slotSnapshots,

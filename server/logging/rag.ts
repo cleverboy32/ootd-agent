@@ -1,4 +1,8 @@
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
+import type {
+  RagRetrievalStageCounts,
+  RagSlotEmptyReason,
+} from '@/server/utils/ragSearchDiagnostics';
 import { auditLogPath } from './paths';
 import { appendJsonlEntry } from './jsonl';
 
@@ -38,6 +42,7 @@ export interface RagSearchLogEntry {
   userMessage?: string;
   intent?: RagSearchIntentLog;
   anchorItem?: RagSearchAnchorLog;
+  skillNames?: string[];
   queries: Array<{
     query: string;
     slot?: string;
@@ -51,6 +56,10 @@ export interface RagSearchLogEntry {
     mainCategory?: string;
     resultCount: number;
     results: RagSearchResultItem[];
+    emptyReason?: RagSlotEmptyReason | null;
+    retrievalStageCounts?: RagRetrievalStageCounts;
+    similarityThreshold?: number;
+    searchError?: { name: string; message: string };
   }>;
   mergedResults: RagSearchResultItem[];
   totalUniqueItems: number;
@@ -60,6 +69,8 @@ export interface RagSearchLogEntry {
     isWarmWeather: boolean;
     strictColdActivity: boolean;
   };
+  /** performRagSearch 外层 catch */
+  handlerError?: { name: string; message: string };
 }
 
 const RAG_LOG_PATH = auditLogPath('rag-search.jsonl');
@@ -93,6 +104,10 @@ export function buildRagSearchLogEntry(params: {
     outfitId?: string;
     mainCategory?: string;
     results: WardrobeSearchResult[];
+    emptyReason?: RagSlotEmptyReason | null;
+    retrievalStageCounts?: RagRetrievalStageCounts;
+    similarityThreshold?: number;
+    searchError?: { name: string; message: string };
   }>;
   mergedResults: WardrobeSearchResult[];
   source?: string;
@@ -100,12 +115,14 @@ export function buildRagSearchLogEntry(params: {
   userMessage?: string;
   intent?: RagSearchIntentLog;
   anchorItem?: RagSearchAnchorLog;
+  skillNames?: string[];
   seasonFilter?: {
     dressingClimate?: string;
     targetSeasons: string[];
     isWarmWeather: boolean;
     strictColdActivity: boolean;
   };
+  handlerError?: { name: string; message: string };
 }): RagSearchLogEntry {
   return {
     timestamp: new Date().toISOString(),
@@ -115,7 +132,9 @@ export function buildRagSearchLogEntry(params: {
     userMessage: params.userMessage,
     intent: params.intent,
     anchorItem: params.anchorItem,
+    skillNames: params.skillNames,
     seasonFilter: params.seasonFilter,
+    ...(params.handlerError ? { handlerError: params.handlerError } : {}),
     queries: params.queries.map(({ query, slot, outfitId, mainCategory }) => ({
       query,
       slot,
@@ -123,13 +142,27 @@ export function buildRagSearchLogEntry(params: {
       mainCategory,
     })),
     perQueryResults: params.perQueryResults.map(
-      ({ query, slot, outfitId, mainCategory, results }) => ({
+      ({
+        query,
+        slot,
+        outfitId,
+        mainCategory,
+        results,
+        emptyReason,
+        retrievalStageCounts,
+        similarityThreshold,
+        searchError,
+      }) => ({
         query,
         slot,
         outfitId,
         mainCategory,
         resultCount: results.length,
         results: results.map(toResultItem),
+        ...(emptyReason != null ? { emptyReason } : {}),
+        ...(retrievalStageCounts ? { retrievalStageCounts } : {}),
+        ...(similarityThreshold != null ? { similarityThreshold } : {}),
+        ...(searchError ? { searchError } : {}),
       })
     ),
     mergedResults: params.mergedResults.map(toResultItem),
