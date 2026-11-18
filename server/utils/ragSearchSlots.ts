@@ -5,6 +5,7 @@ export type WardrobeSearchSlot =
   | 'top'
   | 'inner_top'
   | 'bottom'
+  | 'inner_bottom'
   | 'skirt'
   | 'shoes'
   | 'outerwear'
@@ -28,6 +29,8 @@ const SLOT_ALIASES: Record<string, WardrobeSearchSlot> = {
   /** 内搭：与 top 同为大类 TOP，但是独立检索槽（温区可不同） */
   inner_top: 'inner_top',
   bottom: 'bottom',
+  /** 裤内贴身层：与 bottom 同为大类 BOTTOM，独立检索槽（温区可不同） */
+  inner_bottom: 'inner_bottom',
   /** 所有裙装（半身裙+连衣裙）；历史 dress/one_piece 别名 */
   skirt: 'skirt',
   dress: 'skirt',
@@ -42,6 +45,7 @@ const SLOT_TO_MAIN_CATEGORY: Record<WardrobeSearchSlot, ClothingMainCategory> = 
   top: ClothingMainCategory.TOP,
   inner_top: ClothingMainCategory.TOP,
   bottom: ClothingMainCategory.BOTTOM,
+  inner_bottom: ClothingMainCategory.BOTTOM,
   /** 裙装统一 ONE_PIECE（含半身裙迁移后） */
   skirt: ClothingMainCategory.ONE_PIECE,
   shoes: ClothingMainCategory.FOOTWEAR,

@@ -60,6 +60,7 @@ const LAYER_TO_SLOT: Record<string, WardrobeSearchSlot> = {
   top: 'top',
   inner_top: 'inner_top',
   bottom: 'bottom',
+  inner_bottom: 'inner_bottom',
   skirt: 'skirt',
   dress: 'skirt',
   one_piece: 'skirt',

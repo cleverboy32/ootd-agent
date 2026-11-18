@@ -127,7 +127,7 @@ export function clampNoStyleOutfitPlan(plan: OutfitPlanResult): OutfitPlanResult
 }
 
 function coverageSlotTemplate(
-  slot: 'bottom' | 'skirt' | 'legwear',
+  slot: 'bottom' | 'skirt' | 'legwear' | 'inner_bottom',
   range: TempRange | null
 ): OutfitPlanSlot {
   const temp = range ? formatSlotTempSuitablePhrase(range) : null;
@@ -145,6 +145,14 @@ function coverageSlotTemplate(
       slot,
       target: `裙装（半身裙或连衣裙）${temp ? `，${temp}` : ''}`,
       search_query: `女装半身裙或连衣裙，长度过膝或及小腿，适合日常出行与通勤${tempClause}。`,
+      allow_new: true,
+    };
+  }
+  if (slot === 'inner_bottom') {
+    return {
+      slot,
+      target: `裤内薄贴身速干或发热内搭裤${temp ? `，${temp}` : ''}`,
+      search_query: `薄贴身速干或发热内搭裤，修身不臃肿，穿在全长外裤里面作为保暖底层${tempClause}。`,
       allow_new: true,
     };
   }
@@ -191,6 +199,11 @@ export function expandNoStyleCoverageSlots(
     additions.push(coverageSlotTemplate('legwear', legwearRange));
   }
 
+  const innerBottomRange = dressing?.slotRange('inner_bottom') ?? null;
+  if (innerBottomRange && !present.has('inner_bottom')) {
+    additions.push(coverageSlotTemplate('inner_bottom', innerBottomRange));
+  }
+
   if (additions.length === 0) return plan;
 
   return {
@@ -225,6 +238,21 @@ export function flattenOutfitPlanToQueries(plan: OutfitPlanResult): WardrobeSear
     }
   }
   return out;
+}
+
+/** Do not search the closet for a slot the user explicitly plans to buy new. */
+export function omitExplicitPurchaseSlotQueries(
+  queries: WardrobeSearchQuery[],
+  userMessage: string,
+  specialRequests = ''
+): WardrobeSearchQuery[] {
+  const request = `${userMessage}\n${specialRequests}`;
+  const explicitlyBuyingOuterwear =
+    /(?:想|要|打算|准备|计划).{0,12}(?:买|入手|购入|添置|购买)|(?:买|入手|购入|添置|购买).{0,8}(?:新|两件|几件)/u.test(request) &&
+    /外套|大衣|羽绒服|棉服|风衣|夹克/u.test(request);
+  if (!explicitlyBuyingOuterwear) return queries;
+
+  return queries.filter((query) => query.slot !== 'outerwear');
 }
 
 /**

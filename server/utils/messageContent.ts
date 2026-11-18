@@ -46,6 +46,7 @@ const HISTORY_LAYER_ORDER = [
   'top',
   'inner_top',
   'outerwear',
+  'inner_bottom',
   'bottom',
   'skirt',
   'dress',

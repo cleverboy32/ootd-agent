@@ -30,6 +30,12 @@ describe('resolveMainCategoryForSlot', () => {
     assert.notEqual(parseWardrobeSearchSlot('inner_top'), 'top');
   });
 
+  it('maps inner_bottom as first-class slot to BOTTOM (not collapsed to bottom)', () => {
+    assert.equal(parseWardrobeSearchSlot('inner_bottom'), 'inner_bottom');
+    assert.equal(resolveMainCategoryForSlot('inner_bottom'), ClothingMainCategory.BOTTOM);
+    assert.notEqual(parseWardrobeSearchSlot('inner_bottom'), 'bottom');
+  });
+
   it('returns undefined for unknown / empty slot (caller must not unscoped-search)', () => {
     assert.equal(resolveMainCategoryForSlot(undefined), undefined);
     assert.equal(resolveMainCategoryForSlot(''), undefined);

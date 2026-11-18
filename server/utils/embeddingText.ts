@@ -30,6 +30,7 @@ const SLOT_CATEGORY_HINT: Record<WardrobeSearchSlot, string> = {
   top: 'top',
   inner_top: 'top',
   bottom: 'bottom',
+  inner_bottom: 'bottom',
   skirt: 'skirt',
   shoes: 'footwear',
   outerwear: 'outerwear',
