@@ -34,6 +34,7 @@ import {
   clampNoStyleOutfitPlan,
   expandNoStyleCoverageSlots,
   flattenOutfitPlanToQueries,
+  omitExplicitPurchaseSlotQueries,
   type OutfitPlanResult,
 } from '@/server/utils/outfitPlanSearch';
 import { ClothingItem } from '@prisma/client';
@@ -184,6 +185,7 @@ function anchorSlotToLayer(slot: string): string {
     top: 'top',
     inner_top: 'inner_top',
     bottom: 'bottom',
+    inner_bottom: 'inner_bottom',
     skirt: 'skirt',
     shoes: 'shoes',
     outerwear: 'outerwear',
@@ -357,6 +359,16 @@ ${diversityBlock}
   plan.outfits = aligned.outfits;
 
   let queries = flattenOutfitPlanToQueries(plan);
+
+  if (!isPairing && !isRevision) {
+    const beforePurchaseFilter = queries.length;
+    queries = omitExplicitPurchaseSlotQueries(queries, userMessage, intent.special_requests);
+    if (queries.length < beforePurchaseFilter) {
+      console.log(
+        `[STYLIST_AGENT] Skipped wardrobe retrieval for explicitly purchased outerwear slot (${beforePurchaseFilter - queries.length} queries)`
+      );
+    }
+  }
 
   if (isPairing) {
     const slots =
@@ -676,6 +688,7 @@ export async function callStylistAgent(
         anchorItem: anchorItem ?? undefined,
         skillNames,
       });
+      options.onRagSnapshots?.(searchResults.slotSnapshots);
       wardrobeXml = searchResults.xmlString;
       ragIndexMap = searchResults.indexMap;
       slotSnapshots = searchResults.slotSnapshots;

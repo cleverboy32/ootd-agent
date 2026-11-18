@@ -124,6 +124,20 @@ describe('resolveSlotTempFilter cold 0–5℃ and freezing <0℃', () => {
     assert.deepEqual(resolveSlotTempFilter('cold', 'outerwear'), THICKNESS_TEMP_RANGES.winter_outer);
   });
 
+  it('cold/freezing open inner_bottom thermal pants base; warmer bands closed', () => {
+    assert.deepEqual(
+      resolveSlotTempFilter('cold', 'inner_bottom'),
+      THICKNESS_TEMP_RANGES.thermal_bottom_base
+    );
+    assert.deepEqual(
+      resolveSlotTempFilter('freezing', 'inner_bottom'),
+      THICKNESS_TEMP_RANGES.thermal_bottom_base
+    );
+    assert.equal(resolveSlotTempFilter('cool', 'inner_bottom'), null);
+    assert.equal(resolveSlotTempFilter('mild_cool', 'inner_bottom'), null);
+    assert.equal(resolveSlotTempFilter('hot', 'inner_bottom'), null);
+  });
+
   it('freezing keeps three upper slots with winter_outer', () => {
     assert.deepEqual(resolveSlotTempFilter('freezing', 'inner_top'), THICKNESS_TEMP_RANGES.thermal_base);
     assert.deepEqual(resolveSlotTempFilter('freezing', 'top'), THICKNESS_TEMP_RANGES.warm_top);

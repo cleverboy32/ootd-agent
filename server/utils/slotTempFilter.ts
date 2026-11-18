@@ -26,7 +26,7 @@ export const THICKNESS_TEMP_RANGES = {
   thin_top_long: { min: 16, max: 23 }, // 薄长袖打底/薄衬衫（与短袖在 24℃ 切开，无交叠）
   knit_top: { min: 12, max: 20 }, // 薄针织/卫衣（微凉中层或内搭）
   warm_top: { min: 5, max: 14 }, // 加绒卫衣/重磅厚毛衣（初冬～严冬中层）
-  thermal_base: { min: -15, max: 4 }, // 德绒/发热内衣（严冬～极寒贴身；与 warm_top 在 5℃ 切开）
+  thermal_base: { min: -15, max: 4 }, // 薄贴身发热/德绒内衣（严冬～极寒贴身；与 warm_top 在 5℃ 切开）
   thin_outer: { min: 18, max: 25 }, // 薄开衫/薄西装
   spring_jacket: { min: 13, max: 21 }, // 牛仔夹克/垫肩西装（微凉）
   mid_outer: { min: 11, max: 19 }, // 风衣（凉）
@@ -36,6 +36,7 @@ export const THICKNESS_TEMP_RANGES = {
   regular_bottom: { min: 12, max: 23 }, // 常规牛仔裤/休闲西裤（与短裤在 24℃ 切开）
   thick_bottom: { min: 4, max: 11 }, // 羊毛西裤/灯芯绒/毛呢裙（与常规下装 12℃ 切开）
   winter_bottom: { min: -8, max: 6 }, // 加绒裤（冷/寒冷可选）
+  thermal_bottom_base: { min: -15, max: 4 }, // 薄贴身速干/发热内搭裤（全长外裤内层；非羊羔绒）
   thin_tights: { min: 15, max: 21 }, // 半透微压～薄丝袜
   thick_tights: { min: -8, max: 14 }, // 加厚春秋袜～加绒打底裤（与 SOCKS 厚腿层对齐）
   thin_shoes: { min: 25, max: 38 }, // 凉鞋/拖鞋/洞洞鞋
@@ -49,7 +50,16 @@ export type ThicknessTier = keyof typeof THICKNESS_TEMP_RANGES;
 
 type SlotTierMap = Partial<
   Record<
-    WardrobeSearchSlot | 'top' | 'inner_top' | 'bottom' | 'skirt' | 'outerwear' | 'shoes' | 'legwear' | 'accessory',
+    | WardrobeSearchSlot
+    | 'top'
+    | 'inner_top'
+    | 'bottom'
+    | 'inner_bottom'
+    | 'skirt'
+    | 'outerwear'
+    | 'shoes'
+    | 'legwear'
+    | 'accessory',
     ThicknessTier | null
   >
 >;
@@ -57,11 +67,13 @@ type SlotTierMap = Partial<
 /** 环境档 → 各槽选用的厚薄层级（null = 该槽本档不检索/不过滤） */
 const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
   // hot：1 层只开 top；warm～mild_cool：2 层 inner+外（无 mid top）；cool～freezing：三层。
+  // cold/freezing：开 inner_bottom（全长外裤内薄贴身层）；legwear 留给裙/短/七分可见腿层召回。
   // 鞋：仅炎热/冷极收紧；暖～凉统一 regular_shoes。
   hot: {
     top: 'thin_top_short',
     inner_top: null,
     bottom: 'thin_bottom',
+    inner_bottom: null,
     skirt: 'thin_bottom',
     outerwear: null,
     legwear: null,
@@ -72,6 +84,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: null,
     inner_top: 'thin_top_short',
     bottom: 'thin_bottom',
+    inner_bottom: null,
     skirt: 'thin_bottom',
     outerwear: 'thin_outer',
     legwear: null,
@@ -82,6 +95,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: null,
     inner_top: 'thin_top_long',
     bottom: 'regular_bottom',
+    inner_bottom: null,
     skirt: 'regular_bottom',
     outerwear: 'thin_outer',
     legwear: null,
@@ -92,6 +106,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: null, // 两层：打底 + 春秋夹克，不开中层
     inner_top: 'thin_top_long',
     bottom: 'regular_bottom',
+    inner_bottom: null,
     skirt: 'regular_bottom',
     outerwear: 'spring_jacket',
     legwear: 'thin_tights',
@@ -102,6 +117,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: 'warm_top',
     inner_top: 'thin_top_long',
     bottom: 'thick_bottom',
+    inner_bottom: null,
     skirt: 'thick_bottom',
     outerwear: 'thick_outer',
     legwear: 'thick_tights',
@@ -112,6 +128,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: 'warm_top',
     inner_top: 'thermal_base',
     bottom: 'winter_bottom',
+    inner_bottom: 'thermal_bottom_base',
     skirt: 'winter_bottom',
     outerwear: 'winter_outer',
     legwear: 'thick_tights',
@@ -122,6 +139,7 @@ const BAND_SLOT_TIERS: Record<WeatherDressBand, SlotTierMap> = {
     top: 'warm_top',
     inner_top: 'thermal_base',
     bottom: 'winter_bottom',
+    inner_bottom: 'thermal_bottom_base',
     skirt: 'winter_bottom',
     outerwear: 'winter_outer',
     legwear: 'thick_tights',
@@ -145,6 +163,7 @@ const PLAN_HINT_SLOTS: WardrobeSearchSlot[] = [
   'inner_top',
   'top',
   'outerwear',
+  'inner_bottom',
   'bottom',
   'skirt',
   'legwear',
@@ -156,6 +175,7 @@ const WEATHER_GATE_SLOTS = new Set<WardrobeSearchSlot>([
   'inner_top',
   'top',
   'outerwear',
+  'inner_bottom',
   'legwear',
 ]);
 
@@ -164,7 +184,7 @@ const TIER_THICKNESS_HINT: Record<ThicknessTier, string> = {
   thin_top_long: '薄长袖打底/薄衬衫（约16-23℃）',
   knit_top: '薄针织/卫衣（约12-20℃）',
   warm_top: '加绒卫衣/厚毛衣中层（约5-14℃）',
-  thermal_base: '德绒/发热贴身底层（约-15-4℃）',
+  thermal_base: '薄贴身发热/德绒底层（约-15-4℃）',
   thin_outer: '薄开衫/薄西装（约18-25℃）',
   spring_jacket: '牛仔夹克/垫肩西装（约13-21℃）',
   mid_outer: '风衣等中厚外套（约11-19℃）',
@@ -174,6 +194,7 @@ const TIER_THICKNESS_HINT: Record<ThicknessTier, string> = {
   regular_bottom: '常规牛仔裤/西裤（约12-23℃）',
   thick_bottom: '羊毛西裤/毛呢裙（约4-11℃）',
   winter_bottom: '加绒裤（约-8-6℃）',
+  thermal_bottom_base: '薄贴身速干/发热内搭裤（约-15-4℃）',
   thin_tights: '薄～半透丝袜（约15-21℃）',
   thick_tights: '加厚春秋袜～加绒打底裤（约-8-14℃）',
   thin_shoes: '凉鞋/拖鞋/洞洞鞋（约25-38℃）',
@@ -294,7 +315,7 @@ function buildPlanHintFromBand(
     '【服务端槽温区表 — 只管天气层次/厚薄】',
     feelLine,
     ...lines,
-    '规则：标注「开」的天气槽（上装层次、下装厚薄、腿层、鞋温区）须遵守；标注「不开」的上装/腿层槽禁止开。成品一套内 bottom（裤）与 skirt（裙装）二选一；无 style 检索骨架可为召回池同时开 bottom+skirt（及表内 legwear）。shoes 本表只管厚薄温区，槽仍须开。accessory 不在本表：按场合/风格照常可开。target 与 search_query 厚薄用词须与层级一致；禁止自编另一套 ℃。',
+    '规则：标注「开」的天气槽（上装层次、下装厚薄、裤内层、腿层、鞋温区）须遵守；标注「不开」的上装/裤内层/腿层槽禁止开。成品一套内 bottom（裤）与 skirt（裙装）二选一。全长加绒/滑雪等外裤用 inner_bottom（薄速干/发热内搭裤），禁止再叠羊羔绒 legwear；裙装/短裤/七分裤等外露小腿用 legwear，不开 inner_bottom。无 style 检索骨架可为召回池同时开 bottom+skirt（及表内 inner_bottom/legwear）。shoes 本表只管厚薄温区，槽仍须开。accessory 不在本表：按场合/风格照常可开。target 与 search_query 厚薄用词须与层级一致；禁止自编另一套 ℃。',
   ].join('\n');
 }
 

@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {
   coerceLegwearMainCategory,
   coerceSkirtMainCategory,
+  looksLikeThermalInnerBottomPants,
   normalizeMainCategory,
   normalizeSeasonList,
   normalizeWardrobeAnalysis,
+  sanitizeThermalInnerBottomFields,
   WARDROBE_ANALYSIS_PROMPT,
 } from '@/server/utils/wardrobeAnalysis';
 
@@ -30,9 +32,17 @@ describe('WARDROBE_ANALYSIS_PROMPT', () => {
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止自创 12-25/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /全皮板鞋\/德训\/复古跑鞋.*8-30/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /超薄隐形丝袜 5-10D：24-35/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /加绒\/羊羔绒打底裤.*mainCategory=SOCKS/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /羊羔绒\/加厚加绒\*\*袜型\*\*腿层/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /SOCKS 与 BOTTOM 分界/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把打底裤\/光腿神器标成 BOTTOM/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /必须 BOTTOM/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止擅自写成「打底裤\/贴身打底裤」/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄贴身速干\/发热内搭裤.*HEATTECH.*-15-4/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄贴身发热\/德绒内衣：-15-4/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /保暖内衣或裤内保暖层必须写明是内搭，不得推荐单穿\/当外层/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /电商\/淘宝模特图几乎总是单穿摆拍/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把光腿神器\/连裤袜\/羊羔绒袜型腿层标成 BOTTOM/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止因「看起来像打底」就标 SOCKS/);
+
     assert.match(WARDROBE_ANALYSIS_PROMPT, /ONE_PIECE 与 BOTTOM 分界/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把半身裙标成 BOTTOM/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把任何裙装标成 BOTTOM/);
@@ -103,7 +113,7 @@ describe('normalizeMainCategory', () => {
 });
 
 describe('coerceLegwearMainCategory', () => {
-  it('moves 打底裤 from BOTTOM to SOCKS', () => {
+  it('moves 袜型打底裤 from BOTTOM to SOCKS', () => {
     assert.equal(coerceLegwearMainCategory('BOTTOM', '羊羔绒打底裤'), 'SOCKS');
     assert.equal(coerceLegwearMainCategory('BOTTOM', '加绒长款打底裤'), 'SOCKS');
     assert.equal(coerceLegwearMainCategory('BOTTOM', '光腿神器'), 'SOCKS');
@@ -112,6 +122,56 @@ describe('coerceLegwearMainCategory', () => {
   it('keeps wearable yoga/sport tights as BOTTOM', () => {
     assert.equal(coerceLegwearMainCategory('BOTTOM', '瑜伽裤'), 'BOTTOM');
     assert.equal(coerceLegwearMainCategory('BOTTOM', '运动紧身长裤'), 'BOTTOM');
+  });
+
+  it('keeps 速干/发热内搭裤 as BOTTOM (pants sandwich inner)', () => {
+    assert.equal(coerceLegwearMainCategory('BOTTOM', '速干保暖裤'), 'BOTTOM');
+    assert.equal(coerceLegwearMainCategory('BOTTOM', '发热内衣裤'), 'BOTTOM');
+    assert.equal(coerceLegwearMainCategory('BOTTOM', '滑雪底层裤'), 'BOTTOM');
+    assert.equal(
+      coerceLegwearMainCategory('BOTTOM', '贴身保暖裤', '薄速干面料，穿在外裤内'),
+      'BOTTOM'
+    );
+  });
+
+  it('recognizes plain fitted full-length fine-knit thermal pants without relying on a function word', () => {
+    const description = '深灰混色弹力针织紧身长裤，高腰贴合腿部，表面有细密混色针织纹理，运动弹力面料。';
+    assert.equal(looksLikeThermalInnerBottomPants('运动紧身长裤', description), true);
+    assert.equal(coerceLegwearMainCategory('BOTTOM', '运动紧身长裤', description), 'BOTTOM');
+    assert.deepEqual(
+      sanitizeThermalInnerBottomFields('运动紧身长裤', description, 12, 23),
+      { subCategory: '薄针织保暖长裤', tempMin: -15, tempMax: 4 }
+    );
+  });
+
+  it('does not infer a thermal inner layer from concrete sportswear features', () => {
+    assert.equal(
+      looksLikeThermalInnerBottomPants('紧身长裤', '弹力针织长裤，侧边有反光条和拉链口袋。'),
+      false
+    );
+  });
+
+  it('does not treat explicitly absent pockets or belt loops as sportswear evidence', () => {
+    assert.equal(
+      looksLikeThermalInnerBottomPants(
+        '运动紧身长裤',
+        '细密平针织全长长裤，高腰贴合腿部，无口袋和裤袢。'
+      ),
+      true
+    );
+  });
+
+  it('moves mislabeled HEATTECH/发热贴身打底裤 from SOCKS to BOTTOM', () => {
+    assert.equal(
+      coerceLegwearMainCategory(
+        'SOCKS',
+        '米白色贴身打底裤',
+        '米白色贴身打底裤，HEATTECH 发热针织面料，柔软有弹力，裤脚收口贴合脚踝。'
+      ),
+      'BOTTOM'
+    );
+    assert.equal(coerceLegwearMainCategory('SOCKS', '发热保暖裤'), 'BOTTOM');
+    assert.equal(coerceLegwearMainCategory('SOCKS', '发热打底裤'), 'BOTTOM');
   });
 });
 
@@ -186,6 +246,164 @@ describe('normalizeWardrobeAnalysis', () => {
       tempMax: 6,
     });
     assert.equal(normalized?.mainCategory, 'SOCKS');
+  });
+
+  it('rewrites prod 发热打底裤 SOCKS into BOTTOM + thermal band', () => {
+    const normalized = normalizeWardrobeAnalysis({
+      mainCategory: 'SOCKS',
+      subCategory: '发热打底裤',
+      season: ['秋', '冬'],
+      material: ['针织'],
+      colors: ['米白'],
+      tags: ['保暖', '打底', '贴身'],
+      description:
+        '米白色贴身长款打底裤，针织弹力面料平整无痕，腰头为同色细松紧，裤型紧贴腿部并延伸至脚踝。',
+      searchDescription: '这条米白色发热打底裤是腿部的保暖底层',
+      tempMin: 12,
+      tempMax: 17,
+    });
+    assert.equal(normalized?.mainCategory, 'BOTTOM');
+    assert.equal(normalized?.subCategory, '发热保暖裤');
+    assert.equal(normalized?.tempMin, -15);
+    assert.equal(normalized?.tempMax, 4);
+  });
+
+  it('rewrites 大圆领打底衫 TOP into 发热内衣 thermal band', () => {
+    const normalized = normalizeWardrobeAnalysis({
+      mainCategory: 'TOP',
+      subCategory: '大圆领长袖打底衫',
+      season: ['春', '秋'],
+      material: ['弹力针织', '莫代尔'],
+      colors: ['深灰'],
+      tags: ['打底', '修身', '基础款'],
+      description: '深灰色长袖打底衫，大圆领露出锁骨，针织弹力面料柔软服帖，版型收身不松垮。',
+      tempMin: 16,
+      tempMax: 23,
+    });
+    assert.equal(normalized?.mainCategory, 'TOP');
+    assert.equal(normalized?.subCategory, '发热内衣');
+    assert.equal(normalized?.tempMin, -15);
+    assert.equal(normalized?.tempMax, 4);
+  });
+
+  it('rewrites 长袖大圆领T恤 with 打底 tags into 发热内衣', () => {
+    const normalized = normalizeWardrobeAnalysis({
+      mainCategory: 'TOP',
+      subCategory: '长袖大圆领T恤',
+      season: ['春', '秋'],
+      material: ['细针织'],
+      colors: ['浅米色'],
+      tags: ['基础款', '打底', '修身'],
+      description: '浅米色长袖T恤，大圆领修身剪裁，面料呈柔软细针织感。',
+      tempMin: 16,
+      tempMax: 23,
+    });
+    assert.equal(normalized?.subCategory, '发热内衣');
+    assert.equal(normalized?.tempMin, -15);
+    assert.equal(normalized?.tempMax, 4);
+  });
+
+  it('corrects an explicit thermal underwear top mislabeled as BOTTOM', () => {
+    const normalized = normalizeWardrobeAnalysis({
+      mainCategory: 'BOTTOM',
+      subCategory: '发热内衣',
+      description: '深灰色大圆领长袖上衣，薄弹力平针织面料，贴身修身。',
+      tempMin: -15,
+      tempMax: 4,
+    });
+    assert.equal(normalized?.mainCategory, 'TOP');
+  });
+
+  it('uses fitted long-sleeve neckline evidence to correct a mislabeled top category', () => {
+    const normalized = normalizeWardrobeAnalysis({
+      mainCategory: 'BOTTOM',
+      subCategory: '大圆领长袖T恤',
+      description: '深灰色大圆领长袖上衣，细密弹力针织，修身贴身。',
+      tags: ['贴身内搭'],
+      tempMin: 16,
+      tempMax: 23,
+    });
+    assert.equal(normalized?.mainCategory, 'TOP');
+    assert.equal(normalized?.subCategory, '发热内衣');
+    assert.equal(normalized?.tempMin, -15);
+    assert.equal(normalized?.tempMax, 4);
+  });
+
+  it('normalizes thermal inner-layer season, occasions and search semantics', () => {
+    const top = normalizeWardrobeAnalysis({
+      mainCategory: 'TOP',
+      subCategory: '发热内衣',
+      season: ['春', '秋'],
+      material: ['针织'],
+      colors: ['米色'],
+      tags: ['基础款', '修身', '叠穿'],
+      description: '米色大圆领长袖针织上衣，贴身修身。',
+      occasions: ['休闲日常', '通勤'],
+      searchDescription: '春秋可以单穿，下装搭配牛仔裤。',
+      tempMin: 16,
+      tempMax: 23,
+    });
+    assert.deepEqual(top?.season, ['autumn', 'winter']);
+    assert.deepEqual(top?.occasions, ['寒冷天气', '冬季通勤']);
+    assert.ok(top?.tags.includes('保暖'));
+    assert.ok(top?.tags.includes('内搭'));
+    assert.match(top?.searchDescription ?? '', /贴身保暖内层/);
+    assert.doesNotMatch(top?.searchDescription ?? '', /单穿/);
+    assert.equal(top?.tempMin, -15);
+    assert.equal(top?.tempMax, 4);
+
+    const bottom = normalizeWardrobeAnalysis({
+      mainCategory: 'BOTTOM',
+      subCategory: '运动紧身长裤',
+      season: ['春', '秋'],
+      material: ['针织'],
+      colors: ['灰'],
+      tags: ['修身'],
+      description: '灰色细密平针织全长长裤，高腰贴合腿部，无口袋和裤袢。',
+      occasions: ['日常休闲'],
+      searchDescription: '适合单穿搭配裙装。',
+      tempMin: 12,
+      tempMax: 23,
+    });
+    assert.deepEqual(bottom?.occasions, ['寒冷天气', '冬季通勤']);
+    assert.match(bottom?.searchDescription ?? '', /全长外裤里面/);
+    assert.doesNotMatch(bottom?.searchDescription ?? '', /裙装|单穿/);
+    assert.equal(bottom?.tempMin, -15);
+    assert.equal(bottom?.tempMax, 4);
+  });
+
+  it('recognizes fitted large-neck thermal base tops without explicit HEATTECH text', () => {
+    const samples = [
+      {
+        subCategory: '大圆领长袖T恤',
+        description: '深灰色大圆领长袖上衣，弹力针织面料贴合身形，领口开阔露出锁骨。',
+      },
+      {
+        subCategory: '大圆领薄针织长袖',
+        description: '浅米色薄针织长袖，宽大圆领露出锁骨，衣身柔软贴肤、版型微收腰。',
+      },
+      {
+        subCategory: '宽领长袖针织衫',
+        description: '浅米色宽领长袖上衣，大圆领设计，修身剪裁，面料呈细密平针织纹理。',
+      },
+    ];
+
+    for (const sample of samples) {
+      const normalized = normalizeWardrobeAnalysis({
+        mainCategory: 'TOP',
+        ...sample,
+        season: ['冬'],
+        material: ['弹力针织'],
+        colors: ['灰'],
+        tags: [],
+        tempMin: 16,
+        tempMax: 23,
+      });
+      assert.equal(normalized?.mainCategory, 'TOP');
+      assert.equal(normalized?.subCategory, '发热内衣');
+      assert.equal(normalized?.tempMin, -15);
+      assert.equal(normalized?.tempMax, 4);
+    }
   });
 
   it('coerces mislabeled 半身裙 BOTTOM into ONE_PIECE', () => {

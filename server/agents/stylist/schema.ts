@@ -87,6 +87,8 @@ export interface StylistAgentOptions {
   evalWardrobeItems?: import('./evalWardrobe').EvalWardrobeItem[];
   /** 评测用：强制注入 skill 名单（经 normalizeStylistSkillNames） */
   skillOverride?: string[];
+  /** 评测用：返回本轮真实 RAG 的逐槽候选快照。 */
+  onRagSnapshots?: (snapshots: import('../rag/search').RagSlotSnapshot[]) => void;
 }
 
 export const stylistSchema: Schema = {
@@ -113,7 +115,7 @@ export const stylistSchema: Schema = {
                 layer: {
                   type: Type.STRING,
                   description:
-                    '穿搭层级，只能是：top（炎热主上装；或凉～寒冷的保暖中间层）| inner_top（有外套时的内搭；微暖～微凉无中间层时上装标此层；凉及更冷为最里打底）| outerwear（外套）| bottom（裤）| skirt（半身裙/连衣裙等所有裙装）| legwear（打底袜/长筒袜/连裤袜等腿层）| shoes | accessory（包/首饰/帽等，不含腿部保暖）。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。微暖～微凉有外套时禁止再标一层 top 中间层；凉及更冷须可有 top 中间层。一套内 bottom 与 skirt 二选一。',
+                    '穿搭层级，只能是：top（炎热主上装；或凉～寒冷的保暖中间层）| inner_top（有外套时的内搭；微暖～微凉无中间层时上装标此层；凉及更冷为最里薄贴身打底）| outerwear（外套）| inner_bottom（全长外裤内的薄贴身速干/发热内搭裤）| bottom（外穿裤）| skirt（半身裙/连衣裙等所有裙装）| legwear（打底袜/长筒袜/连裤袜/羊羔绒袜型打底等可见腿层）| shoes | accessory（包/首饰/帽等，不含腿部保暖）。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。微暖～微凉有外套时禁止再标一层 top 中间层；凉及更冷须可有 top 中间层。一套内 bottom 与 skirt 二选一。全长加绒/滑雪裤用 inner_bottom，禁止再叠羊羔绒 legwear；裙/短/七分外露小腿用 legwear，不开 inner_bottom。',
                 },
                 reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
                 description: {
@@ -134,7 +136,7 @@ export const stylistSchema: Schema = {
               inner_visibility: {
                 type: Type.STRING,
                 description:
-                  '内搭可见程度，只能填 collar_only 或 open。仅当 selected_items 里同时有 outerwear 与 inner_top 时有意义：外层扣合只露领缘填 collar_only；外层敞开要看清内搭前片填 open。没有外套或没有内搭时填 open。',
+                  '内搭可见程度，只能填 collar_only 或 open。仅当 selected_items 里同时有 outerwear 与 inner_top 且没有 top 中间层时控制内搭可见度：外层扣合只露领缘填 collar_only；外层敞开要看清内搭前片填 open。若同时有 top 中间层（外套+中层+最里内搭三层），最里 inner_top 必须被中层完全遮住，不可见；此规则优先于本字段。没有外套或没有内搭时填 open。',
               },
             },
             required: ['model_pose', 'outfit_details', 'background', 'inner_visibility'],
@@ -157,7 +159,7 @@ export const wardrobeSearchSchema: Schema = {
       items: {
         type: Type.OBJECT,
         properties: {
-          slot: { type: Type.STRING, description: '穿搭槽位，必须是以下之一：top | inner_top | bottom | skirt | shoes | outerwear | legwear | accessory（dress 视为 skirt 别名）' },
+          slot: { type: Type.STRING, description: '穿搭槽位，必须是以下之一：top | inner_top | bottom | inner_bottom | skirt | shoes | outerwear | legwear | accessory（dress 视为 skirt 别名）' },
           query: {
             type: Type.STRING,
             description: '中文语义检索 query，用品类级短词（与衣橱中文描述对齐），不要整句英文',
@@ -201,7 +203,7 @@ export const outfitPlanSearchSchema: Schema = {
                 slot: {
                   type: Type.STRING,
                   description:
-                    'top | inner_top | bottom | skirt | shoes | outerwear | legwear | accessory。bottom=裤；skirt=所有裙装（半身裙+连衣裙）。inner_top=内搭：微暖～微凉有外套时与 outerwear 同开（不开 top）；凉及更冷与 top、outerwear 同开。无外套时禁止 inner_top。成品一套内 bottom 与 skirt 二选一。',
+                    'top | inner_top | bottom | inner_bottom | skirt | shoes | outerwear | legwear | accessory。bottom=外穿裤；inner_bottom=全长外裤内薄贴身速干/发热内搭裤（冷/寒冷裤装开）；skirt=所有裙装；legwear=可见腿层（裙/短/七分）。inner_top=内搭：微暖～微凉有外套时与 outerwear 同开（不开 top）；凉及更冷与 top、outerwear 同开。无外套时禁止 inner_top。成品一套内 bottom 与 skirt 二选一；全长外裤用 inner_bottom 时禁止同套再开羊羔绒 legwear。',
                 },
                 target: {
                   type: Type.STRING,
@@ -211,7 +213,7 @@ export const outfitPlanSearchSchema: Schema = {
                 search_query: {
                   type: Type.STRING,
                   description:
-                    '向量检索叙述（1～3句中文），须与 target 同向并按衣橱 text 向量维度扩写：品类/袖长或鞋型、面料、层次角色（内搭/中层/外套等）、风格与正式度、场合、廓形、单件适穿℃；颜色仅强约束时写。禁止短关键词串（如「女 厚针织 日常」）；禁止万能词与完整细款长名。',
+                    '向量检索叙述（1～3句中文），须与 target 同向并按衣橱 text 向量维度扩写：品类/袖长或鞋型、面料、层次角色（内搭/中层/外套等）、风格与正式度、场合、廓形、单件适穿℃；颜色仅强约束时写。禁止短关键词串（如「女 厚针织 日常」）；禁止万能词与完整细款长名。用户明确要购买该槽新品时留空，不搜衣橱旧单品。',
                 },
                 allow_new: {
                   type: Type.BOOLEAN,
