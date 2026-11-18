@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Sparkles, Ticket } from 'lucide-react';
@@ -15,6 +15,8 @@ import {
   type CreditLedgerItem,
 } from '@/lib/api/billing';
 import { cn } from '@/lib/utils';
+
+const LEDGER_PAGE_SIZE = 20;
 
 function formatTime(iso: string): string {
   try {
@@ -35,10 +37,21 @@ export default function CreditsSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState(0);
   const [ledger, setLedger] = useState<CreditLedgerItem[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [code, setCode] = useState('');
   const [redeemError, setRedeemError] = useState('');
   const [redeemOk, setRedeemOk] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+  const loadMoreRef = useRef<HTMLLIElement | null>(null);
+  const loadingMoreRef = useRef(false);
+
+  const reloadFirstPage = useCallback(async () => {
+    const data = await fetchCredits(LEDGER_PAGE_SIZE, 0);
+    setBalance(data.balance);
+    setLedger(data.ledger);
+    setHasMore(data.hasMore);
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -47,11 +60,12 @@ export default function CreditsSettingsPage() {
       return;
     }
     let cancelled = false;
-    fetchCredits(50)
+    void fetchCredits(LEDGER_PAGE_SIZE, 0)
       .then((data) => {
         if (cancelled) return;
         setBalance(data.balance);
         setLedger(data.ledger);
+        setHasMore(data.hasMore);
         setLoading(false);
       })
       .catch(() => {
@@ -61,6 +75,41 @@ export default function CreditsSettingsPage() {
       cancelled = true;
     };
   }, [ready, authenticated, router]);
+
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const data = await fetchCredits(LEDGER_PAGE_SIZE, ledger.length);
+      setLedger((prev) => {
+        const seen = new Set(prev.map((row) => row.id));
+        const appended = data.ledger.filter((row) => !seen.has(row.id));
+        return appended.length ? [...prev, ...appended] : prev;
+      });
+      setHasMore(data.hasMore);
+    } catch {
+      // 保持现有列表，下次滚动再试
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [hasMore, ledger.length]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMore();
+        }
+      },
+      { root: node.closest('[data-ledger-scroll]') as Element | null, rootMargin: '80px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, ledger.length]);
 
   async function onRedeem(e: FormEvent) {
     e.preventDefault();
@@ -72,8 +121,7 @@ export default function CreditsSettingsPage() {
       setBalance(result.balance);
       setRedeemOk(`已加 ${result.creditsAdded} 次，当前剩余 ${result.balance} 次`);
       setCode('');
-      const data = await fetchCredits(50);
-      setLedger(data.ledger);
+      await reloadFirstPage();
     } catch (err) {
       setRedeemError(err instanceof Error ? err.message : '兑换失败');
     } finally {
@@ -96,8 +144,8 @@ export default function CreditsSettingsPage() {
           <h1 className="text-lg font-semibold">账单</h1>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
-          <div className="w-full space-y-4">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30 p-4 lg:p-6">
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
             {loading ? (
               <div className="space-y-4">
                 <Skeleton className="h-36 w-full rounded-2xl" />
@@ -107,7 +155,7 @@ export default function CreditsSettingsPage() {
             ) : (
               <>
                 {/* 余额 + 兑换 */}
-                <section className="overflow-hidden rounded-2xl border border-[var(--gold)]/25 bg-gradient-to-br from-[var(--gold)]/18 via-background to-background shadow-sm">
+                <section className="shrink-0 overflow-hidden rounded-2xl border border-[var(--gold)]/25 bg-gradient-to-br from-[var(--gold)]/18 via-background to-background shadow-sm">
                   <div className="flex items-end gap-x-3 px-5 py-3 sm:px-6">
                     <p className="pb-0.5 text-sm leading-none text-muted-foreground">当前剩余</p>
                     <p className="text-3xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
@@ -157,11 +205,13 @@ export default function CreditsSettingsPage() {
                   </div>
                 </section>
 
-                {/* 流水 */}
-                <section className="rounded-2xl border bg-background shadow-sm">
-                  <div className="flex items-baseline justify-between gap-3 border-b px-5 py-4 sm:px-6">
+                {/* 流水：占满剩余高度 + 区内滚动加载 */}
+                <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
+                  <div className="flex shrink-0 items-baseline justify-between gap-3 border-b px-5 py-4 sm:px-6">
                     <h2 className="text-sm font-semibold">次数流水</h2>
-                    <p className="text-xs text-muted-foreground">最近 50 条</p>
+                    <p className="text-xs text-muted-foreground">
+                      {hasMore ? '下滑加载更多' : ledger.length > 0 ? `共 ${ledger.length} 条` : '最近流水'}
+                    </p>
                   </div>
 
                   {ledger.length === 0 ? (
@@ -169,7 +219,10 @@ export default function CreditsSettingsPage() {
                       暂无流水
                     </p>
                   ) : (
-                    <ul>
+                    <ul
+                      data-ledger-scroll
+                      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+                    >
                       {ledger.map((row, index) => (
                         <li
                           key={row.id}
@@ -196,6 +249,14 @@ export default function CreditsSettingsPage() {
                           </span>
                         </li>
                       ))}
+                      {hasMore && (
+                        <li
+                          ref={loadMoreRef}
+                          className="px-5 py-3 text-center text-xs text-muted-foreground sm:px-6"
+                        >
+                          {loadingMore ? '加载中…' : '下滑加载更多'}
+                        </li>
+                      )}
                     </ul>
                   )}
                 </section>

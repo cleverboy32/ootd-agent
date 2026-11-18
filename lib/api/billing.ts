@@ -16,6 +16,7 @@ export interface CreditLedgerItem {
 export interface CreditsResponse {
   balance: number;
   ledger: CreditLedgerItem[];
+  hasMore: boolean;
 }
 
 async function parseOrThrow<T>(res: Response): Promise<T> {
@@ -26,8 +27,15 @@ async function parseOrThrow<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function fetchCredits(limit = 50): Promise<CreditsResponse> {
-  const res = await fetch(withBasePath(`/api/billing/credits?limit=${limit}`), {
+export async function fetchCredits(
+  limit = 20,
+  offset = 0
+): Promise<CreditsResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const res = await fetch(withBasePath(`/api/billing/credits?${params}`), {
     credentials: 'same-origin',
     cache: 'no-store',
   });

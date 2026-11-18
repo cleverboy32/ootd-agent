@@ -256,12 +256,21 @@ export async function redeemCreditCode(userId: string, rawCode: string): Promise
   });
 }
 
-export async function listCreditLedger(userId: string, limit = 50) {
-  return prismadb.creditLedger.findMany({
+export async function listCreditLedger(
+  userId: string,
+  limit = 50,
+  offset = 0
+) {
+  const take = Math.min(100, Math.max(1, limit));
+  const skip = Math.max(0, Math.floor(offset));
+  const rows = await prismadb.creditLedger.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
-    take: Math.min(100, Math.max(1, limit)),
+    take: take + 1,
+    skip,
   });
+  const hasMore = rows.length > take;
+  return { rows: hasMore ? rows.slice(0, take) : rows, hasMore };
 }
 
 /** 创建兑换码（后台）。明文只返回一次。 */

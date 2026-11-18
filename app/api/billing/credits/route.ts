@@ -10,17 +10,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: '未登录', code: 'UNAUTHORIZED' }, { status: 401 });
   }
 
-  const limitRaw = Number(req.nextUrl.searchParams.get('limit') ?? '50');
-  const limit = Number.isFinite(limitRaw) ? limitRaw : 50;
+  const limitRaw = Number(req.nextUrl.searchParams.get('limit') ?? '20');
+  const offsetRaw = Number(req.nextUrl.searchParams.get('offset') ?? '0');
+  const limit = Number.isFinite(limitRaw) ? limitRaw : 20;
+  const offset = Number.isFinite(offsetRaw) ? offsetRaw : 0;
 
-  const [balance, ledger] = await Promise.all([
+  const [balance, page] = await Promise.all([
     getCreditBalance(user.id),
-    listCreditLedger(user.id, limit),
+    listCreditLedger(user.id, limit, offset),
   ]);
 
   return NextResponse.json({
     balance,
-    ledger: ledger.map((row) => ({
+    hasMore: page.hasMore,
+    ledger: page.rows.map((row) => ({
       id: row.id,
       delta: row.delta,
       reason: row.reason,
