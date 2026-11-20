@@ -122,17 +122,30 @@ export function WardrobeGrid({
                     />
                   </button>
                 </TooltipTrigger>
-                {item.description || item.tempMin != null || item.tempMax != null ? (
-                  <TooltipContent className="max-w-xs whitespace-normal">
-                    {[item.description, formatWearingTemperature(item.tempMin, item.tempMax)]
-                      .filter(Boolean)
-                      .join(' ')}
-                  </TooltipContent>
-                ) : null}
+                <TooltipContent className="max-w-xs whitespace-normal">
+                  <div className="space-y-1">
+                    <p className="font-mono text-[11px] leading-snug break-all select-all">
+                      id: {item.id}
+                    </p>
+                    {item.description || item.tempMin != null || item.tempMax != null ? (
+                      <p className="text-xs leading-snug">
+                        {[item.description, formatWearingTemperature(item.tempMin, item.tempMax)]
+                          .filter(Boolean)
+                          .join(' ')}
+                      </p>
+                    ) : null}
+                  </div>
+                </TooltipContent>
               </Tooltip>
 
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 pb-2 pt-6">
                 <p className="truncate text-xs text-white">{item.subCategory}</p>
+                <p
+                  className="mt-0.5 truncate font-mono text-[10px] text-white/80 opacity-0 transition-opacity group-hover:opacity-100 select-all"
+                  title={item.id}
+                >
+                  {item.id}
+                </p>
               </div>
             </CardContent>
           </Card>
