@@ -287,11 +287,12 @@ export function createImageRetryStream(
       });
     },
     cancel(reason) {
-      console.warn('[ORCHESTRATOR] 单图重试流被客户端取消，原因:', reason);
+      // 与主 generate 一致：断 SSE 不 abort，避免刷新打断出图。
+      console.warn(
+        '[ORCHESTRATOR] 单图重试客户端断开 SSE（不中止）:',
+        reason instanceof Error ? reason.message : reason
+      );
       trace.markCancelled(reason);
-      if (!abortController.signal.aborted) {
-        abortController.abort(reason ?? new DOMException('Client cancelled', 'AbortError'));
-      }
     },
   });
 }

@@ -9,6 +9,21 @@ import {
 } from '@/server/utils/messageContent';
 import { mergeLocationIntoProfileData } from '@/server/utils/profileMetadata';
 
+/** 超车时把同会话仍在 generating 的 assistant 标为 cancelled（保留已有 content）。 */
+export async function cancelGeneratingAssistantMessages(
+  conversationId: string
+): Promise<number> {
+  const result = await prismadb.message.updateMany({
+    where: {
+      conversationId,
+      role: 'assistant',
+      status: 'generating',
+    },
+    data: { status: 'cancelled' },
+  });
+  return result.count;
+}
+
 /** 当前消息之前的搭配结果，从旧到新。 */
 export async function getPriorStylistResults(
   conversationId: string,
@@ -115,7 +130,7 @@ export async function persistMessageContent(
     failedImageIds: Set<string>;
     creditsRequiredIds?: Set<string>;
     outfitIds: string[];
-    status: 'completed' | 'failed' | 'generating';
+    status: 'completed' | 'failed' | 'generating' | 'cancelled';
     wardrobeCandidates?: WardrobeCandidatesNode | null;
   }
 ): Promise<void> {

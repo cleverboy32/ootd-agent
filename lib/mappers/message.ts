@@ -51,10 +51,19 @@ export function mapDbMessageToClient(db: DbMessage): Message {
   const role: Message['role'] =
     db.role === 'assistant' || db.role === 'ai' || db.role === 'model' ? 'ai' : 'user';
 
+  const rawStatus = typeof db.status === 'string' ? db.status : 'completed';
+  const status: Message['status'] =
+    rawStatus === 'generating' ||
+    rawStatus === 'completed' ||
+    rawStatus === 'failed' ||
+    rawStatus === 'cancelled'
+      ? rawStatus
+      : 'completed';
+
   return {
     id: db.id,
     role,
-    status: (db.status as Message['status']) ?? 'completed',
+    status,
     content,
     timestamp,
     imageStates,

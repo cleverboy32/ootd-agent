@@ -25,13 +25,13 @@ export type MessageProgress = {
   thinking?: string;
 };
 
-export type MessageStatus = 'generating' | 'completed' | 'failed';
+export type MessageStatus = 'generating' | 'completed' | 'failed' | 'cancelled';
 
 export type ImageState = 'loading' | 'failed' | 'credits_required' | string;
 
 export type Message = {
   id: string;
-  status: 'generating' | 'completed' | 'failed';
+  status: MessageStatus;
   role: 'user' | 'ai';
   content: MessageContentPart[];
   timestamp: number;

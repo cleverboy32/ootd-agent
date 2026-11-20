@@ -37,3 +37,13 @@ export function isAbortError(error: unknown): boolean {
 export function createShutdownAbortError(signal: NodeJS.Signals): DOMException {
   return new DOMException(`Server shutting down (${signal})`, 'AbortError');
 }
+
+export function createSupersededAbortError(): DOMException {
+  return new DOMException('Superseded by newer conversation generate', 'AbortError');
+}
+
+export function isSupersededAbortError(error: unknown): boolean {
+  if (!isAbortError(error)) return false;
+  const message = error instanceof Error ? error.message : '';
+  return message.includes('Superseded');
+}

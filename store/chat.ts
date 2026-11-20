@@ -1,6 +1,24 @@
 import { create } from 'zustand';
+import { getActiveGenerationId } from '@/lib/chat/activeGeneration';
+import { maybeResumeGeneratingMessage } from '@/lib/chat/resumeGenerating';
 import { Conversation, Message, MessageContentPart } from '@/lib/types';
 import * as chatApi from '@/lib/api/chat';
+
+const GENERATING_POLL_MS = 2000;
+let generatingPollTimer: ReturnType<typeof setInterval> | null = null;
+let generatingPollConversationId: string | null = null;
+
+function stopGeneratingPoll(): void {
+  if (generatingPollTimer) {
+    clearInterval(generatingPollTimer);
+    generatingPollTimer = null;
+  }
+  generatingPollConversationId = null;
+}
+
+function hasGeneratingAi(messages: Message[]): boolean {
+  return messages.some((m) => m.role === 'ai' && m.status === 'generating');
+}
 
 /** 会话级消息缓存：切走再回来时直接还原，避免重复全屏 loading */
 interface CachedConversationMessages {
@@ -62,6 +80,91 @@ function withActiveCache(
       [activeConversationId]: { messages, nextCursor },
     },
   };
+}
+
+/**
+ * resume 404（他机 / buffer 已丢）时的短轮询兜底：直到非 generating。
+ * 本 Tab 正在 live/resume SSE 时不轮询，避免空 DB 草稿盖掉已流式内容。
+ */
+async function pollGeneratingOnce(
+  get: () => ChatState & ChatActions,
+  set: (partial: Partial<ChatState> | ((s: ChatState & ChatActions) => Partial<ChatState>)) => void,
+  conversationId: string
+): Promise<boolean> {
+  if (getActiveGenerationId() !== 0) return true;
+  if (get().activeConversationId !== conversationId) return false;
+
+  try {
+    const page = await chatApi.getMessages(conversationId);
+    if (get().activeConversationId !== conversationId) return false;
+    if (getActiveGenerationId() !== 0) return true;
+
+    const still = hasGeneratingAi(page.messages);
+    set((state) => ({
+      ...withActiveCache(state, page.messages, page.nextCursor ?? state.nextCursor),
+      waitReply: still,
+    }));
+    return still;
+  } catch (error) {
+    console.warn('[CHAT] generating poll failed:', error);
+    return get().activeConversationId === conversationId && hasGeneratingAi(get().messages);
+  }
+}
+
+function startGeneratingPoll(
+  get: () => ChatState & ChatActions,
+  set: (partial: Partial<ChatState> | ((s: ChatState & ChatActions) => Partial<ChatState>)) => void,
+  conversationId: string
+): void {
+  stopGeneratingPoll();
+  generatingPollConversationId = conversationId;
+
+  const tick = () => {
+    void pollGeneratingOnce(get, set, conversationId).then((still) => {
+      if (!still && generatingPollConversationId === conversationId) {
+        stopGeneratingPoll();
+      }
+    });
+  };
+
+  void tick();
+  generatingPollTimer = setInterval(tick, GENERATING_POLL_MS);
+}
+
+/** 主路径：resume SSE；失败再轮询。本 Tab 已有 live 流则跳过。 */
+function resumeOrPollGenerating(
+  get: () => ChatState & ChatActions,
+  set: (partial: Partial<ChatState> | ((s: ChatState & ChatActions) => Partial<ChatState>)) => void,
+  conversationId: string
+): void {
+  if (getActiveGenerationId() !== 0) return;
+  if (!hasGeneratingAi(get().messages)) return;
+
+  void maybeResumeGeneratingMessage({
+    getMessages: () => get().messages,
+    updateMessages: (updater) => {
+      set((state) => withActiveCache(state, updater(state.messages)));
+    },
+    setWaitReply: (waiting) => set({ waitReply: waiting }),
+    startPollFallback: () => {
+      if (get().activeConversationId === conversationId) {
+        startGeneratingPoll(get, set, conversationId);
+      }
+    },
+    refreshMessages: async () => {
+      if (get().activeConversationId !== conversationId) return;
+      try {
+        const page = await chatApi.getMessages(conversationId);
+        if (get().activeConversationId !== conversationId) return;
+        set((state) => ({
+          ...withActiveCache(state, page.messages, page.nextCursor ?? state.nextCursor),
+          waitReply: hasGeneratingAi(page.messages),
+        }));
+      } catch (error) {
+        console.warn('[CHAT] refresh after resume terminal failed:', error);
+      }
+    },
+  });
 }
 
 export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
@@ -127,6 +230,8 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   setActiveConversationId: async (id) => {
     if (id === get().activeConversationId) return;
 
+    stopGeneratingPoll();
+
     // 切走前把当前会话写入缓存
     const prev = get();
     let messageCache = prev.messageCache;
@@ -155,15 +260,17 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
     const cached = messageCache[id];
     if (cached) {
+      const cachedGenerating = hasGeneratingAi(cached.messages);
       set({
         activeConversationId: id,
         messages: cached.messages,
         nextCursor: cached.nextCursor,
         isLoading: false,
         isLoadingOlder: false,
-        waitReply: false,
+        waitReply: cachedGenerating,
         messageCache,
       });
+      if (cachedGenerating) resumeOrPollGenerating(get, set, id);
       return;
     }
 
@@ -178,10 +285,13 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     });
     const { messages, nextCursor } = await chatApi.getMessages(id);
     if (get().activeConversationId === id) {
+      const generating = hasGeneratingAi(messages);
       set(state => ({
         ...withActiveCache(state, messages, nextCursor),
         isLoading: false,
+        waitReply: generating,
       }));
+      if (generating) resumeOrPollGenerating(get, set, id);
     }
   },
 

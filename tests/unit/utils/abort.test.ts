@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   createShutdownAbortError,
+  createSupersededAbortError,
   isAbortError,
+  isSupersededAbortError,
   throwIfAborted,
 } from '@/server/utils/abort';
 
@@ -22,5 +24,12 @@ describe('abort utils', () => {
     const error = createShutdownAbortError('SIGTERM');
     assert.equal(error.name, 'AbortError');
     assert.match(error.message, /SIGTERM/);
+  });
+
+  it('createSupersededAbortError is an AbortError recognizable as supersede', () => {
+    const error = createSupersededAbortError();
+    assert.equal(isAbortError(error), true);
+    assert.equal(isSupersededAbortError(error), true);
+    assert.equal(isSupersededAbortError(new DOMException('Client cancelled', 'AbortError')), false);
   });
 });

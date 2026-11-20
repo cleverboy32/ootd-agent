@@ -8,6 +8,34 @@ import { Message, MessageContentPart } from '@/lib/types';
 import { useAccess } from '@/components/access/AccessProvider';
 import { useOnboardingStore } from '@/store/onboarding';
 import { markProfileCacheDirty } from '@/lib/api/profile';
+import {
+  beginGeneration,
+  endGeneration,
+  isCurrentGeneration,
+  setActiveAiMessageId,
+} from '@/lib/chat/activeGeneration';
+
+function markGeneratingAiCancelled(
+  updateMessages: (updater: (messages: Message[]) => Message[]) => void,
+  preferredId?: string | null
+): void {
+  updateMessages((messages) => {
+    let targetId = preferredId ?? null;
+    if (!targetId) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.role === 'ai' && m.status === 'generating') {
+          targetId = m.id;
+          break;
+        }
+      }
+    }
+    if (!targetId) return messages;
+    return messages.map((m) =>
+      m.id === targetId && m.status === 'generating' ? { ...m, status: 'cancelled' as const } : m
+    );
+  });
+}
 
 export const useChatHandler = () => {
   const { canInvokeAI } = useAccess();
@@ -26,39 +54,25 @@ export const useChatHandler = () => {
   ) => {
     if (!canInvokeAI) return;
 
-    // 用户开始发消息：穿搭引导气泡自动消失
     const onboarding = useOnboardingStore.getState();
     if (onboarding.step === 'chat') {
       onboarding.completeChat();
     }
 
-    setWaitReply(true);
     let conversationId = activeConversationId;
     let messageToRetry: Message | undefined = undefined;
+    let pendingUserMessage: Message | undefined;
 
-    // --- 1. 确定是新消息还是重试消息 ---
     if (typeof promptOrMessage !== 'string') {
       messageToRetry = promptOrMessage;
       if (!conversationId) {
         console.error("Retry failed: activeConversationId is missing.");
-        setWaitReply(false);
         return;
       }
-      console.log(`[HANDLER] Retrying message with ID: ${messageToRetry.id}`);
-      
-      // 对于重试，将消息状态重置为 'generating'
-      updateMessages(messages => messages.map(m => 
-        m.id === messageToRetry!.id ? { ...m, status: 'generating' } : m
-      ));
-
     } else {
-      // 这是新消息
       const prompt = promptOrMessage;
       const imageUrls = takePurchaseUploadUrls(Array.isArray(imageUrl) ? imageUrl : [imageUrl]);
-      if (!prompt.trim() && imageUrls.length === 0) {
-          setWaitReply(false);
-          return;
-      };
+      if (!prompt.trim() && imageUrls.length === 0) return;
 
       const userMessageContent: MessageContentPart[] = [];
       if (prompt.trim()) {
@@ -68,38 +82,64 @@ export const useChatHandler = () => {
         userMessageContent.push({ type: 'image', content: url });
       }
 
-      // 注意：现在创建用户消息也需要 id 和 status
-      const userMessage: Message = {
-        id: `user-${Date.now()}`, // 临时但唯一的 ID
+      pendingUserMessage = {
+        id: `user-${Date.now()}`,
         status: 'completed',
         role: 'user',
         content: userMessageContent,
         timestamp: Date.now(),
         imageUrl: imageUrls[0],
       };
+    }
 
+    // 校验通过后再打断上一轮
+    const prevAiId = (() => {
+      const messages = useChatStore.getState().messages;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.role === 'ai' && m.status === 'generating') return m.id;
+      }
+      return null;
+    })();
+    const { generationId, signal } = beginGeneration();
+    if (prevAiId) markGeneratingAiCancelled(updateMessages, prevAiId);
+    setWaitReply(true);
+
+    if (messageToRetry) {
+      console.log(`[HANDLER] Retrying message with ID: ${messageToRetry.id}`);
+      updateMessages(messages => messages.map(m =>
+        m.id === messageToRetry!.id ? { ...m, status: 'generating' } : m
+      ));
+      setActiveAiMessageId(messageToRetry.id);
+    } else if (pendingUserMessage) {
       if (!conversationId) {
-        conversationId = await startNewConversation(userMessage);
+        conversationId = await startNewConversation(pendingUserMessage);
       } else {
-        await addUserMessage(userMessage);
+        await addUserMessage(pendingUserMessage);
       }
     }
-    
+
+    if (!isCurrentGeneration(generationId)) return;
+
     if (!conversationId) {
       console.error("无法获取有效的会话ID。");
       setWaitReply(false);
+      endGeneration(generationId);
       return;
     }
 
-    // --- 2. 定义流处理程序 ---
     let currentAiMessageId = messageToRetry ? messageToRetry.id : '';
     let streamHasError = false;
+
+    const stillCurrent = () => isCurrentGeneration(generationId);
+
     const handlers = {
       onMetadata: (data: { messageId: string }) => {
+        if (!stillCurrent()) return;
         console.log(`[METADATA RECEIVED] AI Message ID is: ${data.messageId}`);
         currentAiMessageId = data.messageId;
+        setActiveAiMessageId(data.messageId);
 
-        // 如果是新消息（重试时不会走这里），就在收到 metadata 后创建 AI 消息
         if (!messageToRetry) {
           const initialAiMessage: Message = {
             id: currentAiMessageId,
@@ -112,18 +152,18 @@ export const useChatHandler = () => {
         }
       },
       onTextChunk: (text: string) => {
+        if (!stillCurrent()) return;
         updateMessages(currentMessages => currentMessages.map(msg => {
           if (msg.id === currentAiMessageId && msg.role === 'ai' && Array.isArray(msg.content)) {
             const lastPart = msg.content.at(-1);
             let newContent: MessageContentPart[];
-      
+
             if (lastPart && lastPart.type === 'text') {
               newContent = [
                 ...msg.content.slice(0, -1),
                 { ...lastPart, content: lastPart.content + text }
               ];
             } else {
-              // 明确地告诉 TS，这个新对象就是 MessageContentPart 类型
               const newTextPart: MessageContentPart = { type: 'text', content: text };
               newContent = [...msg.content, newTextPart];
             }
@@ -139,10 +179,9 @@ export const useChatHandler = () => {
           return msg;
         }));
       },
-      onImagePlaceholder: () => {
-        // 占位符改由文本内 [IMAGE=...] 标记内联渲染，此事件不再使用
-      },
+      onImagePlaceholder: () => {},
       onImageGenerated: (data: { id: string; imageUrl: string; alt: string }) => {
+        if (!stillCurrent()) return;
         updateMessages(messages => messages.map(msg => {
           if (msg.id === currentAiMessageId && msg.role === 'ai') {
             return {
@@ -154,6 +193,7 @@ export const useChatHandler = () => {
         }));
       },
       onImageGenerationFailed: (data: { id: string; message: string; alt: string }) => {
+        if (!stillCurrent()) return;
         updateMessages(messages => messages.map(msg => {
           if (msg.id === currentAiMessageId && msg.role === 'ai') {
             return {
@@ -165,6 +205,7 @@ export const useChatHandler = () => {
         }));
       },
       onImageCreditsRequired: (data: { id: string; message: string; alt: string }) => {
+        if (!stillCurrent()) return;
         updateMessages(messages => messages.map(msg => {
           if (msg.id === currentAiMessageId && msg.role === 'ai') {
             return {
@@ -176,6 +217,7 @@ export const useChatHandler = () => {
         }));
       },
       onProgress: (data: { stage: string; label?: string; done?: boolean; thinking?: string }) => {
+        if (!stillCurrent()) return;
         updateMessages(messages => messages.map(msg => {
           if (msg.id !== currentAiMessageId || msg.role !== 'ai') return msg;
           const existing = msg.progress ?? { stages: [] };
@@ -200,6 +242,7 @@ export const useChatHandler = () => {
         }));
       },
       onWardrobeCandidates: (data: { items: Array<{ id: string; imageUrl: string; subCategory: string; colors: string[] }> }) => {
+        if (!stillCurrent()) return;
         updateMessages(messages => messages.map(msg => {
           if (msg.id === currentAiMessageId && msg.role === 'ai') {
             const withoutOld = msg.content.filter((p) => p.type !== 'wardrobe_candidates');
@@ -219,19 +262,14 @@ export const useChatHandler = () => {
         }));
       },
       onError: (message: string) => {
+        if (!stillCurrent()) return;
         streamHasError = true;
         if (currentAiMessageId) {
           updateMessages(messages => messages.map(m => {
             if (m.id !== currentAiMessageId) return m;
-            // 只把「尚未完成」的阶段留给失败态展示；不要全部标 done，否则会全变绿勾
-            return {
-              ...m,
-              status: 'failed' as const,
-            };
+            return { ...m, status: 'failed' as const };
           }));
         } else {
-          // 请求在收到 metadata 前就失败（网络断开等）
-          // 标记最后一条用户消息为 sendFailed，让用户在原消息下方看到错误和重试按钮
           updateMessages(messages => {
             const lastUserIdx = [...messages].map((m, i) => ({ m, i })).reverse().find(({ m }) => m.role === 'user')?.i;
             if (lastUserIdx == null) return messages;
@@ -240,15 +278,27 @@ export const useChatHandler = () => {
         }
         console.error("Stream error:", message);
         setWaitReply(false);
+        endGeneration(generationId);
+      },
+      onCancelled: () => {
+        if (!stillCurrent()) return;
+        if (currentAiMessageId) {
+          markGeneratingAiCancelled(updateMessages, currentAiMessageId);
+        }
+        setWaitReply(false);
+        endGeneration(generationId);
       },
       onStreamEnd: () => {
+        if (!stillCurrent()) return;
         if (streamHasError) {
           console.log("[HANDLER] Stream ended, but an error was flagged. Skipping 'completed' status update.");
+          endGeneration(generationId);
           return;
         }
         if (currentAiMessageId) {
           updateMessages(messages => messages.map(m => {
             if (m.id !== currentAiMessageId) return m;
+            if (m.status === 'cancelled') return m;
             return {
               ...m,
               status: 'completed' as const,
@@ -258,19 +308,18 @@ export const useChatHandler = () => {
             };
           }));
         }
-        // Gate 可能异步写档；打脏后进「我的档案」会 bust 一次，平时仍 force-cache
         markProfileCacheDirty();
         setWaitReply(false);
+        endGeneration(generationId);
       },
     };
 
-    // --- 3. 构建请求体并开始流式请求 ---
     const payload: {
       conversationId: string;
       messageId?: string;
       content?: { text: string; imageUrl?: string; imageUrls?: string[] };
     } = { conversationId };
-    
+
     let textPrompt = '';
     let imageUrlsForPayload = takePurchaseUploadUrls(
       Array.isArray(imageUrl) ? imageUrl : [imageUrl]
@@ -280,7 +329,7 @@ export const useChatHandler = () => {
       payload.messageId = messageToRetry.id;
       const messages = useChatStore.getState().messages;
       const retryMsgIndex = messages.findIndex(m => m.id === messageToRetry?.id);
-      const originalUserMessage = messages[retryMsgIndex - 1]; 
+      const originalUserMessage = messages[retryMsgIndex - 1];
 
       if (originalUserMessage && originalUserMessage.role === 'user') {
           const media = extractUserMessageMedia(originalUserMessage);
@@ -305,7 +354,7 @@ export const useChatHandler = () => {
       imageUrl: imageUrlsForPayload[0],
       imageUrls: imageUrlsForPayload,
     };
-    await streamResponse(payload as Parameters<typeof streamResponse>[0], handlers);
+    await streamResponse(payload as Parameters<typeof streamResponse>[0], handlers, { signal });
 
   }, [
     activeConversationId,
@@ -316,41 +365,51 @@ export const useChatHandler = () => {
     canInvokeAI,
   ]);
 
-  /**
-   * 重发一条标记为 sendFailed 的用户消息。
-   * 与 handleSend 的区别：不新建用户消息，直接以原始内容重起请求。
-   */
   const handleRetrySend = useCallback(async (failedUserMsg: Message) => {
     if (!canInvokeAI) return;
 
-    // 清除错误标记
     updateMessages(messages =>
       messages.map(m => m.id === failedUserMsg.id ? { ...m, sendFailed: false } : m)
     );
 
     const { text: textPrompt, imageUrl, imageUrls } = extractUserMessageMedia(failedUserMsg);
 
+    const prevAiId = (() => {
+      const messages = useChatStore.getState().messages;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.role === 'ai' && m.status === 'generating') return m.id;
+      }
+      return null;
+    })();
+    const { generationId, signal } = beginGeneration();
+    if (prevAiId) markGeneratingAiCancelled(updateMessages, prevAiId);
+
     setWaitReply(true);
 
-    // 首条消息建会话失败：先补建会话（失败时 store 会重新标记 sendFailed）
     const conversationId = activeConversationId ?? await persistNewConversation(failedUserMsg);
+    if (!isCurrentGeneration(generationId)) return;
     if (!conversationId) {
       setWaitReply(false);
+      endGeneration(generationId);
       return;
     }
 
     let currentAiMessageId = '';
+    const stillCurrent = () => isCurrentGeneration(generationId);
 
     const handlers = {
       onMetadata: (data: { messageId: string }) => {
+        if (!stillCurrent()) return;
         currentAiMessageId = data.messageId;
+        setActiveAiMessageId(data.messageId);
         updateMessages(messages => [
           ...messages,
           { id: currentAiMessageId, role: 'ai' as const, status: 'generating' as const, content: [], timestamp: Date.now() },
         ]);
       },
       onTextChunk: (text: string) => {
-        if (!currentAiMessageId) return;
+        if (!stillCurrent() || !currentAiMessageId) return;
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId) return m;
           const lastPart = m.content[m.content.length - 1];
@@ -360,42 +419,43 @@ export const useChatHandler = () => {
           return { ...m, content: [...m.content, { type: 'text' as const, content: text }] };
         }));
       },
-      onImagePlaceholder: () => {
-        // 占位符改由文本内 [IMAGE=...] 标记内联渲染，此事件不再使用
-      },
+      onImagePlaceholder: () => {},
       onImageGenerated: (data: { id: string; imageUrl: string; alt: string }) => {
-        if (!currentAiMessageId) return;
+        if (!stillCurrent() || !currentAiMessageId) return;
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId || m.role !== 'ai') return m;
           return { ...m, imageStates: { ...m.imageStates, [data.id]: data.imageUrl } };
         }));
       },
       onImageGenerationFailed: (data: { id: string; message: string; alt: string }) => {
-        if (!currentAiMessageId) return;
+        if (!stillCurrent() || !currentAiMessageId) return;
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId || m.role !== 'ai') return m;
           return { ...m, imageStates: { ...m.imageStates, [data.id]: 'failed' as const } };
         }));
       },
       onImageCreditsRequired: (data: { id: string; message: string; alt: string }) => {
-        if (!currentAiMessageId) return;
+        if (!stillCurrent() || !currentAiMessageId) return;
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId || m.role !== 'ai') return m;
           return { ...m, imageStates: { ...m.imageStates, [data.id]: 'credits_required' as const } };
         }));
       },
-      onStreamEnd: (finalMessage?: Message) => {
+      onStreamEnd: () => {
+        if (!stillCurrent()) return;
         markProfileCacheDirty();
         setWaitReply(false);
-        if (!currentAiMessageId) return;
-        if (finalMessage) {
-          updateMessages(messages => messages.map(m => m.id !== currentAiMessageId ? m : { ...finalMessage }));
-        } else {
-          updateMessages(messages => messages.map(m => m.id !== currentAiMessageId ? m : { ...m, status: 'completed' as const }));
+        if (currentAiMessageId) {
+          updateMessages(messages => messages.map(m =>
+            m.id !== currentAiMessageId || m.status === 'cancelled'
+              ? m
+              : { ...m, status: 'completed' as const }
+          ));
         }
+        endGeneration(generationId);
       },
       onProgress: (data: { stage: string; label?: string; done?: boolean; thinking?: string }) => {
-        if (!currentAiMessageId) return;
+        if (!stillCurrent() || !currentAiMessageId) return;
         updateMessages(messages => messages.map(m => {
           if (m.id !== currentAiMessageId) return m;
           const existing = m.progress?.stages ?? [];
@@ -406,17 +466,26 @@ export const useChatHandler = () => {
           return { ...m, progress: { stages, thinking: data.thinking !== undefined ? data.thinking : m.progress?.thinking } };
         }));
       },
+      onCancelled: () => {
+        if (!stillCurrent()) return;
+        if (currentAiMessageId) markGeneratingAiCancelled(updateMessages, currentAiMessageId);
+        setWaitReply(false);
+        endGeneration(generationId);
+      },
       onError: () => {
+        if (!stillCurrent()) return;
         setWaitReply(false);
         updateMessages(messages =>
           messages.map(m => m.id === failedUserMsg.id ? { ...m, sendFailed: true } : m)
         );
+        endGeneration(generationId);
       },
     };
 
     await streamResponse(
       { conversationId, content: { text: textPrompt, imageUrl, imageUrls } } as Parameters<typeof streamResponse>[0],
       handlers,
+      { signal },
     );
   }, [activeConversationId, canInvokeAI, persistNewConversation, updateMessages, setWaitReply]);
 

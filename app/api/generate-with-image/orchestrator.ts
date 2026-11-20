@@ -1,6 +1,12 @@
 import { Part } from '@google/genai';
 import { ClothingItem } from '@prisma/client';
-import { sendEvent, handleStreamError, startSseHeartbeat } from '@/server/utils/stream-helpers';
+import {
+  bindControllerToGenerationFanout,
+  sendEvent,
+  handleStreamError,
+  startSseHeartbeat,
+  unbindControllerFromGenerationFanout,
+} from '@/server/utils/stream-helpers';
 import type { UserProfileResult } from '@/server/agents/user-profile';
 import type { StylistResult } from '@/server/agents/stylist';
 import type { GatekeeperIntent } from '@/server/agents/intent';
@@ -19,7 +25,7 @@ import {
   StylistCacheNode,
   WardrobeCandidatesNode,
 } from '@/server/utils/messageContent';
-import { getProfileLocation, persistMessageContent } from './helpers';
+import { cancelGeneratingAssistantMessages, getProfileLocation, persistMessageContent } from './helpers';
 import { outfitCachePipeline, outfitFreshPipeline } from './graph/outfitPipeline';
 import {
   buildPipelineInvokeConfig,
@@ -30,6 +36,19 @@ import {
   registerInFlight,
   unregisterInFlight,
 } from '@/server/lifecycle/shutdown';
+import {
+  registerConversationGeneration,
+  supersedeConversationGeneration,
+  unregisterConversationGeneration,
+} from '@/server/lifecycle/conversationGeneration';
+import {
+  attachFanoutMessageId,
+  completeGenerationFanoutEntry,
+  openGenerationFanout,
+  subscribeGenerationFanoutByConversation,
+  unsubscribeGenerationFanout,
+  type FanoutEntry,
+} from '@/server/lifecycle/generationFanout';
 import { isAbortError } from '@/server/utils/abort';
 import prismadb from '@/server/db';
 
@@ -97,6 +116,9 @@ function createRuntime(params: {
     setMessageId: (id) => {
       messageId = id;
       params.trace.setMessageId(id);
+      if (params.conversationId) {
+        attachFanoutMessageId(params.conversationId, id);
+      }
     },
     getMessageId: () => messageId,
     setStylistCache: (value) => {
@@ -150,12 +172,41 @@ export function createMultiAgentStream(
   });
   registerInFlight(inFlightId, abortController, done);
 
+  if (conversationId) {
+    supersedeConversationGeneration(conversationId);
+    registerConversationGeneration(conversationId, inFlightId, abortController);
+  }
+
+  let streamController: ReadableStreamDefaultController | null = null;
+  let fanoutEntry: FanoutEntry | null = null;
+
   return new ReadableStream({
     async start(controller) {
+      streamController = controller;
+      if (conversationId) {
+        fanoutEntry = openGenerationFanout(conversationId);
+        bindControllerToGenerationFanout(controller, conversationId);
+        subscribeGenerationFanoutByConversation(conversationId, controller);
+        if (messageId) attachFanoutMessageId(conversationId, messageId);
+      }
+
       const stopHeartbeat = startSseHeartbeat(controller, abortController.signal);
       await runWithRequestTrace(trace, async () => {
       console.log('[ORCHESTRATOR:LANGGRAPH] --- 启动 Multi-Agent 编排流 ---');
       logLangSmithStatusOnce();
+
+      if (conversationId) {
+        try {
+          const cancelled = await cancelGeneratingAssistantMessages(conversationId);
+          if (cancelled > 0) {
+            console.log(
+              `[ORCHESTRATOR:LANGGRAPH] superseded ${cancelled} generating assistant message(s) for ${conversationId}`
+            );
+          }
+        } catch (error) {
+          console.warn('[ORCHESTRATOR:LANGGRAPH] cancel generating assistants failed:', error);
+        }
+      }
 
       const { resolveUserIdByClientId } = await import('@/server/billing/credits');
       const resolvedUserId = (await resolveUserIdByClientId(userId)) ?? undefined;
@@ -258,7 +309,8 @@ export function createMultiAgentStream(
         const aborted =
           abortController.signal.aborted ||
           (mainError != null && isAbortError(mainError));
-        const failed = Boolean(mainError) || aborted;
+        const failed = Boolean(mainError) && !aborted;
+        const finalStatus = aborted ? 'cancelled' : failed ? 'failed' : 'completed';
 
         if (aborted) {
           trace.markCancelled(abortController.signal.reason ?? mainError?.message ?? 'aborted');
@@ -291,13 +343,11 @@ export function createMultiAgentStream(
               failedImageIds: runtime.failedImageIds,
               creditsRequiredIds: runtime.creditsRequiredIds,
               outfitIds,
-              status: failed ? 'failed' : 'completed',
+              status: finalStatus,
               wardrobeCandidates: wardrobeCandidatesNode,
             });
             console.log(
-              `[ORCHESTRATOR:LANGGRAPH] 数据库记录 ${finalMessageId} 已更新，状态: ${
-                failed ? 'failed' : 'completed'
-              }`
+              `[ORCHESTRATOR:LANGGRAPH] 数据库记录 ${finalMessageId} 已更新，状态: ${finalStatus}`
             );
           } catch (dbError) {
             console.error('[ORCHESTRATOR:LANGGRAPH] 更新数据库最终状态失败:', dbError);
@@ -311,7 +361,7 @@ export function createMultiAgentStream(
 
         void logRequestAudit(
           runtime.trace.finalize({
-            outcome: failed ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
+            outcome: aborted || failed ? RequestAuditOutcome.Failed : RequestAuditOutcome.Completed,
             errorMessage: mainError?.message,
             messageId: finalMessageId,
             summary: {
@@ -329,8 +379,13 @@ export function createMultiAgentStream(
 
         if (mainError && !aborted) {
           handleStreamError(controller, [], mainError, 'OrchestratorProcess');
-        } else if (!failed) {
+        } else if (!aborted && !failed) {
           sendEvent(controller, 'stream_end', { message: '所有内容已加载完毕' });
+        }
+
+        if (fanoutEntry) {
+          completeGenerationFanoutEntry(fanoutEntry);
+        } else if (!aborted && !failed) {
           try {
             controller.close();
           } catch (e) {
@@ -341,18 +396,31 @@ export function createMultiAgentStream(
           }
         }
 
+        if (conversationId) {
+          unbindControllerFromGenerationFanout(controller);
+        }
+
         resolveDone();
         unregisterInFlight(inFlightId);
+        if (conversationId) {
+          unregisterConversationGeneration(conversationId, inFlightId);
+        }
         stopHeartbeat();
       }
       });
     },
     cancel(reason) {
-      console.warn('[ORCHESTRATOR:LANGGRAPH] 流被客户端取消，原因:', reason);
-      trace.markCancelled(reason);
-      if (!abortController.signal.aborted) {
-        abortController.abort(reason ?? new DOMException('Client cancelled', 'AbortError'));
+      // 刷新/关页只断 SSE，不 abort 流水线：后台继续写库。
+      // 真取消只走会话超车（supersede）或进程 shutdown。
+      // 只卸订阅、保持 bind：后续 sendEvent 仍 publish 进 buffer，resume 才能续流。
+      if (conversationId && streamController) {
+        unsubscribeGenerationFanout(conversationId, streamController);
       }
+      console.warn(
+        '[ORCHESTRATOR:LANGGRAPH] 客户端断开 SSE（不中止生成）:',
+        reason instanceof Error ? reason.message : reason
+      );
+      // 不断开生成；勿 markCancelled（否则 audit 把刷新当取消）
     },
   });
 }

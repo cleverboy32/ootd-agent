@@ -146,7 +146,7 @@ model Message {
   id             String       @id @default(cuid())
   role           String // "user" or "ai"
   content        Json         @default("{}") // 使用 Json 类型来存储复杂的 content 结构
-  status         String       @default("completed") // "generating", "completed", "failed"
+  status         String       @default("completed") // "generating", "completed", "failed", "cancelled"
   timestamp      DateTime
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
