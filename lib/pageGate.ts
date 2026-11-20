@@ -3,6 +3,12 @@ import { isGuestAllowedPath } from '@/lib/guestAccess';
 /** 登录后的产品首页。未登录的 `/` 是营销页。 */
 export const PRODUCT_HOME = '/home';
 
+/** 会话选中态写入 URL，刷新后可恢复；无会话时回到纯 /home。 */
+export function homeConversationHref(conversationId: string | null | undefined): string {
+  if (!conversationId) return PRODUCT_HOME;
+  return `${PRODUCT_HOME}?c=${encodeURIComponent(conversationId)}`;
+}
+
 export type PageGateDecision =
   | { type: 'next' }
   | { type: 'redirect'; location: string };

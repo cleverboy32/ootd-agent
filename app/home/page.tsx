@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SidebarLeft } from "@/components/chat/SidebarLeft";
 import { ChatHeader } from "@/components/chat/ChatHeader";
@@ -11,7 +11,7 @@ import { useChatStore } from "@/store/chat";
 import type { Message } from "@/lib/types";
 import { useChatHandler } from "@/hooks/useChatHandler";
 import { outfitImageAnchorId } from "@/lib/api/savedOutfits";
-import { PRODUCT_HOME } from "@/lib/pageGate";
+import { homeConversationHref } from "@/lib/pageGate";
 
 function FashionAIPageInner() {
   const { authenticated } = useAccess();
@@ -26,6 +26,8 @@ function FashionAIPageInner() {
   const deepLinkHandledRef = useRef<string | null>(null);
   const pendingScrollMessageIdRef = useRef<string | null>(null);
   const pendingScrollOutfitIdRef = useRef<string | null>(null);
+  /** 避免首屏 active=null 把 URL 上的 ?c= 清掉 */
+  const conversationUrlSyncReadyRef = useRef(false);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -132,6 +134,45 @@ function FashionAIPageInner() {
     return !!resolveOutfitEl(messageId, outfitId);
   }
 
+  // 刷新 / 分享：仅 ?c= 时恢复会话（收藏深链带 m= 时由下方 effect 处理）
+  useEffect(() => {
+    const conversationId = searchParams.get("c");
+    const messageId = searchParams.get("m");
+    if (messageId) {
+      conversationUrlSyncReadyRef.current = true;
+      return;
+    }
+    if (
+      conversationId &&
+      useChatStore.getState().activeConversationId !== conversationId
+    ) {
+      void (async () => {
+        await setActiveConversationId(conversationId);
+        conversationUrlSyncReadyRef.current = true;
+      })();
+      return;
+    }
+    conversationUrlSyncReadyRef.current = true;
+  }, [searchParams, setActiveConversationId]);
+
+  // 选中会话 ↔ URL ?c=（replace，不堆历史）；深链带 m= 时先不动，结束后保留 c=
+  useEffect(() => {
+    if (!conversationUrlSyncReadyRef.current) return;
+    if (searchParams.get("m")) return;
+
+    const urlConversationId = searchParams.get("c");
+    const href = homeConversationHref(activeConversationId);
+    if (activeConversationId) {
+      if (urlConversationId !== activeConversationId) {
+        router.replace(href);
+      }
+      return;
+    }
+    if (urlConversationId) {
+      router.replace(href);
+    }
+  }, [activeConversationId, searchParams, router]);
+
   // 收藏跳转：/?c=&m=&o= → 打开会话并滚到效果图
   // 同会话时 setActiveConversationId 会短路，必须在此处直接滚动
   useEffect(() => {
@@ -208,7 +249,8 @@ function FashionAIPageInner() {
         }
       } finally {
         setDeepLinkPin(false);
-        router.replace(PRODUCT_HOME);
+        // 清掉 m/o，保留 c=，刷新仍停在该会话
+        router.replace(homeConversationHref(conversationId));
       }
     })();
   }, [
@@ -241,7 +283,28 @@ function FashionAIPageInner() {
     // 深链定位中不要被「切会话贴底」抢走
     if (pendingScrollMessageIdRef.current) return;
     stickToBottomRef.current = true;
+    // 换会话后当作首屏，避免仍拿着上一会话的 lastMessage 引用而不贴底
+    prevLastMessageRef.current = undefined;
   }, [activeConversationId]);
+
+  // 会话加载完成（含刷新 ?c=）：强制滚到最后一条。加载中 messagesEndRef 未挂载，单靠 scrollIntoView 会丢。
+  useLayoutEffect(() => {
+    if (pendingScrollMessageIdRef.current) return;
+    if (isLoading || !activeConversationId || messages.length === 0) return;
+    stickToBottomRef.current = true;
+    const scroller = scrollContainerRef.current;
+    if (scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [
+    activeConversationId,
+    isLoading,
+    messages.length,
+    messages[0]?.id,
+    messages.at(-1)?.id,
+  ]);
 
   // 只跟随尾部变化（新消息 / 流式更新）；头部插入历史消息时 lastMessage 引用不变，不触发
   useEffect(() => {
@@ -287,7 +350,11 @@ function FashionAIPageInner() {
           {!activeConversationId && messages.length === 0 ? (
             <GreetingSection handleSend={handleSend} />
           ) : (
-            <ChatMessagesList messagesEndRef={messagesEndRef} scrollContainerRef={scrollContainerRef} />
+            <ChatMessagesList
+              messagesEndRef={messagesEndRef}
+              scrollContainerRef={scrollContainerRef}
+              stickToBottomRef={stickToBottomRef}
+            />
           )}
         </div>
 

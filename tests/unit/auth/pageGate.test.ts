@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PRODUCT_HOME, resolvePageGate } from '@/lib/pageGate';
+import { homeConversationHref, PRODUCT_HOME, resolvePageGate } from '@/lib/pageGate';
+
+describe('homeConversationHref', () => {
+  it('builds /home?c= for an active conversation and plain /home when none', () => {
+    assert.equal(homeConversationHref(null), PRODUCT_HOME);
+    assert.equal(homeConversationHref(undefined), PRODUCT_HOME);
+    assert.equal(homeConversationHref('abc'), '/home?c=abc');
+    assert.equal(homeConversationHref('a b'), '/home?c=a%20b');
+  });
+});
 
 describe('resolvePageGate', () => {
   it('keeps guests on the marketing page and login', () => {

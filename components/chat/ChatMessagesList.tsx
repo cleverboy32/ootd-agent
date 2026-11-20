@@ -6,9 +6,15 @@ import { LOGO_SRC } from '@/lib/utils';
 interface ChatMessagesListProps {
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  /** 为 true 时保持贴底；头部插入历史消息时不要做「读历史」补偿，否则会离开底部 */
+  stickToBottomRef: React.RefObject<boolean>;
 }
 
-export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMessagesListProps) {
+export function ChatMessagesList({
+  messagesEndRef,
+  scrollContainerRef,
+  stickToBottomRef,
+}: ChatMessagesListProps) {
 
   const {
     messages,
@@ -23,26 +29,49 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
   const lastMessage = messages[messages.length - 1];
   const firstMessageId = messages[0]?.id;
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const prevFirstIdRef = useRef(firstMessageId);
   const prevScrollHeightRef = useRef(0);
 
   // 头部插入更早消息后补偿 scrollTop，保持当前阅读位置不动
   // 深链定位期间禁止补偿，否则会顶掉 scrollIntoView
+  // 贴底时改为继续钉在底部（短会话顶栏加载更早消息时补偿会把视图顶离底部）
   useLayoutEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const prevFirstId = prevFirstIdRef.current;
-    if (
+    const prepended =
       !deepLinkPin &&
       prevFirstId &&
       firstMessageId !== prevFirstId &&
-      messages.some(m => m.id === prevFirstId)
-    ) {
-      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+      messages.some((m) => m.id === prevFirstId);
+    if (prepended) {
+      if (stickToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+      }
     }
     prevFirstIdRef.current = firstMessageId;
     prevScrollHeightRef.current = el.scrollHeight;
   });
+
+  // 效果图等异步撑高：贴底时跟着钉住，避免「有时可以有时不行」
+  useEffect(() => {
+    const scroller = scrollContainerRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content || isLoading) return;
+
+    const pin = () => {
+      if (!stickToBottomRef.current || deepLinkPin) return;
+      scroller.scrollTop = scroller.scrollHeight;
+    };
+
+    pin();
+    const ro = new ResizeObserver(pin);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [scrollContainerRef, stickToBottomRef, isLoading, deepLinkPin, firstMessageId, lastMessage?.id]);
 
   // 依赖 firstMessageId 以便每页加载后重建 observer：内容不足一屏时 sentinel 持续可见，需要重新触发
   // 深链翻页中由 page 主动 loadOlder，避免 sentinel 再抢一次
@@ -75,7 +104,7 @@ export function ChatMessagesList({ messagesEndRef, scrollContainerRef }: ChatMes
   }
 
   return (
-    <div className="pt-8 px-6 sm:px-12 flex flex-col gap-6">
+    <div ref={contentRef} className="pt-8 px-6 sm:px-12 flex flex-col gap-6">
       {nextCursor && (
         <div ref={topSentinelRef} className="flex justify-center text-xs text-muted-foreground h-4">
           {isLoadingOlder && <span className="animate-pulse">正在加载更早的消息...</span>}
