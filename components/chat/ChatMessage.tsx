@@ -9,7 +9,10 @@ import { useChatHandler } from "@/hooks/useChatHandler";
 import { useImageRetry } from "@/hooks/useImageRetry";
 import { Button } from "@/components/ui/button";
 import { WardrobeItem } from "./WardrobeItem";
-import { WardrobeCandidatePicker } from "./WardrobeCandidatePicker";
+import {
+  formatWardrobeCandidateLabel,
+  WardrobeCandidatePicker,
+} from "./WardrobeCandidatePicker";
 import { ZoomableOutfitImage } from "./ZoomableOutfitImage";
 import { useAccess } from "@/components/access/AccessProvider";
 import { outfitImageAnchorId } from "@/lib/api/savedOutfits";
@@ -17,6 +20,11 @@ import { LOGO_SRC } from "@/lib/utils";
 import { useSavedOutfitsStore } from "@/store/savedOutfits";
 
 const IMAGE_MARKER_REGEX = /\[IMAGE=([^\]]+)\]/g;
+
+/** 气泡展示用：去掉确认语里的 id=…，后端仍用完整原文解析 */
+function displayUserMessageText(text: string): string {
+  return text.replace(/\s*[（(]id=[a-z0-9]+[）)]/gi, "").trim();
+}
 
 function ImageLoadingPlaceholder() {
   return (
@@ -330,17 +338,20 @@ const ContentRenderer = ({
 function ThinkingPanel({
   progress,
   isFailed,
+  isCancelled = false,
 }: {
   progress: MessageProgress;
   isCompleted: boolean;
   isFailed: boolean;
+  isCancelled?: boolean;
 }) {
   const { stages, thinking } = progress;
 
   if (!stages.length) return null;
 
+  const stopped = isFailed || isCancelled;
   const firstIncompleteIdx = stages.findIndex((s) => !s.done);
-  const showThinking = Boolean(thinking) && !isFailed && firstIncompleteIdx >= 0;
+  const showThinking = Boolean(thinking) && !stopped && firstIncompleteIdx >= 0;
 
   return (
     <div className="mb-2 w-full">
@@ -349,8 +360,9 @@ function ThinkingPanel({
       }`}>
         {stages.map((stage, i) => {
           const isFailedStep = isFailed && !stage.done && i === firstIncompleteIdx;
+          const isCancelledStep = isCancelled && !stage.done && i === firstIncompleteIdx;
           const isDone = stage.done;
-          const isActive = !isFailed && !isDone && i === firstIncompleteIdx;
+          const isActive = !stopped && !isDone && i === firstIncompleteIdx;
 
           return (
             <div key={stage.key} className="space-y-1.5">
@@ -358,6 +370,8 @@ function ThinkingPanel({
                 <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
                   {isFailedStep ? (
                     <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                  ) : isCancelledStep ? (
+                    <Minus className="h-3 w-3 text-muted-foreground/50" />
                   ) : isDone ? (
                     <Check className="h-3.5 w-3.5 text-emerald-500" />
                   ) : isActive ? (
@@ -368,6 +382,7 @@ function ThinkingPanel({
                 </div>
                 <span className={`leading-none ${
                   isFailedStep ? 'text-destructive' :
+                  isCancelledStep ? 'text-muted-foreground/50' :
                   isActive ? 'text-muted-foreground' :
                   isDone ? 'text-muted-foreground/60' :
                   'text-muted-foreground/35'
@@ -445,6 +460,7 @@ export const ChatMessage = memo(
                 progress={msg.progress}
                 isCompleted={msg.status === "completed"}
                 isFailed={msg.status === "failed"}
+                isCancelled={msg.status === "cancelled"}
               />
             )}
 
@@ -455,10 +471,14 @@ export const ChatMessage = memo(
                 {Array.isArray(msg.content) ? (
                   msg.content.map((part, index) => {
                     if (part.type === "text") {
+                      const text =
+                        msg.role === "user"
+                          ? displayUserMessageText(part.content)
+                          : part.content;
                       return (
                         <ContentRenderer
                           key={part.id || index}
-                          text={part.content}
+                          text={text}
                           messageId={msg.id}
                           imageStates={msg.imageStates}
                           onRetryImage={canInvokeAI ? retryOutfitImage : undefined}
@@ -509,8 +529,9 @@ export const ChatMessage = memo(
                           key={part.id || index}
                           items={part.wardrobeCandidates}
                           disabled={isLoading || !canInvokeAI}
-                          onSelect={(itemId) => {
-                            handleSend(`确认选择这件单品（id=${itemId}）`);
+                          onSelect={(item) => {
+                            const label = formatWardrobeCandidateLabel(item);
+                            handleSend(`确认选择这件单品：${label}（id=${item.id}）`);
                           }}
                         />
                       );
@@ -525,7 +546,7 @@ export const ChatMessage = memo(
                     onRetryImage={canInvokeAI ? retryOutfitImage : undefined}
                   />
                 ) : (
-                  msg.content
+                  displayUserMessageText(String(msg.content))
                 )}
               </div>
             )}
@@ -545,6 +566,16 @@ export const ChatMessage = memo(
               <div className="rounded-2xl px-5 py-3.5 bg-muted/40 border border-border/50 text-muted-foreground rounded-tl-sm shadow-sm text-sm">
                 生成中断，请重试
               </div>
+            )}
+
+            {msg.role === "ai" && msg.status === "cancelled" && !shouldRenderBubble && !hasProgress && (
+              <div className="rounded-2xl px-5 py-3.5 bg-muted/40 border border-border/50 text-muted-foreground/70 rounded-tl-sm shadow-sm text-sm">
+                已取消
+              </div>
+            )}
+
+            {msg.role === "ai" && msg.status === "cancelled" && (shouldRenderBubble || hasProgress) && (
+              <div className="mt-1 text-xs text-muted-foreground/60">已取消</div>
             )}
 
             {msg.role === "ai" && msg.status === "failed" && (

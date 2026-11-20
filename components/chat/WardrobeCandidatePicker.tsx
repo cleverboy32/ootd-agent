@@ -11,8 +11,13 @@ export interface WardrobeCandidateItem {
 
 interface WardrobeCandidatePickerProps {
   items: WardrobeCandidateItem[];
-  onSelect: (itemId: string) => void;
+  onSelect: (item: WardrobeCandidateItem) => void;
   disabled?: boolean;
+}
+
+export function formatWardrobeCandidateLabel(item: WardrobeCandidateItem): string {
+  const colorLabel = item.colors?.length ? item.colors.join(' / ') : '';
+  return [item.subCategory, colorLabel].filter(Boolean).join(' · ') || '衣橱单品';
 }
 
 export function WardrobeCandidatePicker({
@@ -25,15 +30,14 @@ export function WardrobeCandidatePicker({
   return (
     <div className="flex flex-wrap gap-3 mt-3">
       {items.map((item) => {
-        const colorLabel = item.colors?.length ? item.colors.join(' / ') : '';
-        const label = [item.subCategory, colorLabel].filter(Boolean).join(' · ');
+        const label = formatWardrobeCandidateLabel(item);
 
         return (
           <button
             key={item.id}
             type="button"
             disabled={disabled}
-            onClick={() => onSelect(item.id)}
+            onClick={() => onSelect(item)}
             className="flex flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background p-2 transition-colors hover:border-primary/50 hover:bg-muted/30 disabled:opacity-50 disabled:pointer-events-none max-w-[120px]"
           >
             <Image

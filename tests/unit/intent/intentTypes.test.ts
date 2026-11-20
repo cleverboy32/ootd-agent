@@ -73,6 +73,15 @@ describe('extractConfirmedWardrobeId', () => {
       'cmqg5ec6b0000pvs8q5kp2358'
     );
   });
+
+  it('extracts id when confirmation includes the item display name', () => {
+    assert.equal(
+      extractConfirmedWardrobeId(
+        '确认选择这件单品：提花百褶半身长裙 · 米白 / 杏色（id=cmweti39g00p4ats8w4zlkbg2）'
+      ),
+      'cmweti39g00p4ats8w4zlkbg2'
+    );
+  });
 });
 
 describe('resolveWardrobeAnchorIdFromHistory', () => {
