@@ -14,7 +14,7 @@ export const WARDROBE_FORMALITY_LEVELS = [
 
 export type WardrobeFormality = (typeof WARDROBE_FORMALITY_LEVELS)[number];
 
-export const WARDROBE_ANALYSIS_RULESET_VERSION = '2026-11-16.2';
+export const WARDROBE_ANALYSIS_RULESET_VERSION = '2026-11-19.13';
 
 /** LLM 分析输出；Part 1 分类字段与旧版一致，Part 2 为检索导向扩展 */
 export interface WardrobeAnalysisResult {
@@ -29,9 +29,9 @@ export interface WardrobeAnalysisResult {
   formality?: string;
   silhouette?: string[];
   searchDescription?: string;
-  /** 合适穿着温度下限（摄氏度）。空表示不设下限 */
+  /** 合适穿着温度下限（摄氏度）。空表示未给出下限 */
   tempMin?: number | null;
-  /** 合适穿着温度上限（摄氏度）。空表示不设上限 */
+  /** 合适穿着温度上限（摄氏度）。空表示未给出上限 */
   tempMax?: number | null;
 }
 
@@ -51,12 +51,14 @@ export interface NormalizedWardrobeAnalysis {
   tempMax: number | null;
 }
 
+// 项目对薄贴身保暖底层的叠穿参考温区。
+const THERMAL_BASE_LAYER = { tempMin: -15, tempMax: 4 } as const;
+
 export const WARDROBE_ANALYSIS_PROMPT = `你是服装识别助手。根据用户给出的衣服图片，只返回一个压缩 JSON，不要 markdown，不要解释。
 
 自由文本全部用中文：subCategory、description、material、colors、tags、silhouette、occasions、searchDescription。
 mainCategory 必须是 TOP、BOTTOM、OUTERWEAR、FOOTWEAR、ACCESSORY、SOCKS、ONE_PIECE 之一。
-打底袜、连裤袜、长筒袜、丝袜、羊羔绒/加厚加绒**袜型**腿层、光腿神器等**可见腿层**归 SOCKS，不要标成 BOTTOM、ACCESSORY 或 FOOTWEAR。耳环项链包帽丝巾等才是 ACCESSORY。
-SOCKS 与 BOTTOM 分界（看外观与穿法，不要臆造品类名）：丝袜/连裤袜/光腿神器/羊羔绒或加厚加绒袜型腿层（多配裙、短裤、七分裤，外露可见）→ SOCKS。牛仔裤、西裤、卫裤、阔腿裤、可独立外穿的瑜伽/运动紧身长裤 → BOTTOM。**薄平针织全长贴身保暖裤**（含 HEATTECH/发热/速干/秋裤型；扁平贴肤、可穿在外裤里面、非羊羔绒蓬松、非丝袜透肉）→ **必须 BOTTOM**，禁止标 SOCKS；subCategory 写「发热保暖裤」或「薄针织保暖长裤」等，**禁止擅自写成「打底裤/贴身打底裤」**（图上没写就别发明），温区用 -15-4，不要抄 SOCKS 的 -8-6。
+SOCKS 与 BOTTOM 分界：按袜型或裤型结构及典型穿法判断。丝袜、连裤袜、长筒袜、光腿神器和裙裤外露的加绒袜型腿层归 SOCKS。牛仔裤、西裤、卫裤及可独立外穿的瑜伽/运动紧身裤归 BOTTOM。穿在全长外裤里的薄平针织贴身保暖裤（如 HEATTECH、发热内衣裤、秋裤）**必须 BOTTOM**；subCategory 用「薄针织保暖长裤」等，有图中文字支持时可写「发热保暖裤」，**禁止擅自写成「打底裤/贴身打底裤」**。
 ONE_PIECE 与 BOTTOM 分界：所有裙装（半身裙、连衣裙、背带裙、裙裤外观以裙为主等）→ ONE_PIECE；BOTTOM 只标裤类。禁止把半身裙标成 BOTTOM。
 season 用「春、夏、秋、冬」。
 formality 必须是下列之一（单选最贴一档，不要将就）：居家、运动训练、户外机能、休闲日常、街头潮酷、商务休闲、商务、正式。
@@ -71,67 +73,24 @@ formality 必须是下列之一（单选最贴一档，不要将就）：居家�
 4. colors：1-3 个穿着时从外面能看到的大面积颜色。领口内侧、翻起来才露出的袖口、里布、线迹、小标，以及和衣身同色的细松紧，不要记成第二种颜色。
 5. tags：1-4 个中文标签，只标风格和用途里最贴的。训练/瑜伽/速干件标运动、瑜伽、健身等，禁止顺手加「休闲」「百搭」「日常」。非训练件也不要用无关标签凑数。内里不要写成镶边、拼接或撞色。
 6. description：一句外观。必须写能看见的面料说话方式或纹理（如梭织衬衫感、针织柔软、摇粒绒颗粒、牛仔硬质、运动弹力）。有罗纹或起毛的有领衣服要写针织或毛呢，不要写成光滑衬衫。衣身蓬起的外套要写棉服，不要写成轻薄夹克。内里不要写成镶边或拼接。
-7. occasions：1-3 个最适合的中文场合。训练件只写运动、健身、瑜伽等，禁止扩写「日常」「通勤」「约会」。保暖内层只写寒冷天气、冬季通勤等叠穿场景，不写单穿场景。日常衬衫不要硬加派对。不要将就凑满。
+7. occasions：1-3 个最适合的中文场合。训练件只写运动、健身、瑜伽等，禁止扩写「日常」「通勤」「约会」。保暖内衣和裤内保暖层只写寒冷天气、冬季通勤等叠穿场景，不写单穿场景。日常衬衫不要硬加派对。不要将就凑满。
 8. formality：上列八档之一。瑜伽裤/运动紧身短裤/速干训练衣必须是「运动训练」，禁止标成「休闲日常」。睡袍家居是「居家」。冲锋衣徒步鞋偏「户外机能」。明显街头潮酷外形可用「街头潮酷」。干净日常出门是「休闲日常」。
 9. silhouette：1-3 个中文廓形，如宽松、直筒、短款。
 10. searchDescription：2-4 句中文，围绕最适合的场合写完整搭配语境（和什么类型上装/下装/鞋怎么搭、什么场景穿）。禁止一句简单带过；禁止写到不适合的场合（训练件不要写「也可日常休闲」）。保暖内衣或裤内保暖层必须写明是内搭，不得推荐单穿/当外层；裤内保暖层只搭配全长外裤。不要只重复外观，也不要把内里颜色写成可检索词。
-11. tempMin、tempMax：单件合适穿着的摄氏度（含边界），不是勉强能穿、也不是叠穿体感。必须落入下列细目档之一，禁止自创更宽档（如 12-22、4-15、5-15、8-26）。某一侧不封时用 null；配饰（非袜）两个都用 null。先看清短袖/长袖、短裤/长裤、短裙/长裙与面料厚度再选档；款式名不决定温度。拿不准选更热（更薄）一档。subCategory 写成带长短的中文品类名。
-    上装 TOP：
-    - 吊带/背心（冰丝/真丝/薄棉）：28-38
-    - 短袖 T/Polo（普通纯棉约180g）：24-35
-    - 重磅短袖 T（260-320g）：24-30
-    - 薄款长袖衬衫（亚麻/天丝/真丝/府绸）：18-23
-    - 重磅牛津纺/法兰绒衬衫：14-22
-    - 薄款长袖打底（莫代尔/精纺棉/冰丝针织）：16-23（仅**外穿成立**的薄长袖：有一点衣身厚度/垂感，日常可当外层；不要把内衣摆拍判进本档）
-    - 薄精纺针织/薄羊毛衫/常规卫衣（毛圈）：12-20
-    - 加绒卫衣/重磅厚毛衣：5-14
-    - 摇粒绒/抓绒套头衫（圆领或立领半开襟/胸前几粒按扣，前襟不能完全解开敞开）：5-14；mainCategory=TOP，subCategory 写「摇粒绒套头衫」等，禁止写「外套/夹克」
-    - 薄贴身发热/德绒内衣：-15-4（仅贴身底层：第二皮肤贴肤、微修身、大圆领等方便叠穿的内衣剪裁；HEATTECH/发热/德绒同档；无品牌字样时，若长袖、宽领/大圆领/U领、修身贴身、薄弹力或平针织且没有衬衫/毛衣/卫衣结构，也按内衣剪裁识别；禁止厚绒蓬松、禁止当中层外穿；与加绒卫衣/摇粒绒中层在 5℃ 切开）。**电商/淘宝模特图几乎总是单穿摆拍，禁止据此写成「可春秋单穿」或改抄 16-23**；subCategory 写「发热内衣」或「薄贴身保暖内衣」，不要写成普通「长袖T恤」
-    外套 OUTERWEAR：
-    - 防晒衣/皮肤风衣：24-36
-    - 薄针织开衫/无里衬薄西装/亚麻西装：18-25（开衫须前襟可完全解开敞开）
-    - 常规垫肩西装/牛仔夹克（12-14oz）：13-21
-    - 经典风衣：11-19
-    - 皮衣/机车夹克：8-17
-    - 摇粒绒/羊羔毛夹克或外套：5-14（须有满开拉链，或整排扣/按扣能把前襟完全解开成敞开式；仅半开襟套头 → TOP）
-    - 轻薄羽绒/绗缝夹棉（充绒约60-100g）：4-12
-    - 双面呢羊毛大衣：2-11
-    - 常规中长羽绒/派克服（充绒约150-250g）：-8-5
-    - 极寒加厚长款羽绒（充绒≥280g）：-25--2
-    棉服看蓬松不看绗缝线；衣身鼓起有填充写成棉服/夹棉，对上 4-12 或更暖档，不要写成轻薄、轻量或薄壳。
-    OUTERWEAR 与 TOP 分界：外套/夹克/开衫必须能把前襟完全敞开（满拉链或可解开到底的门襟）。套头卫衣、套头毛衣、半开襟摇粒绒/抓绒 → TOP，即使面料像外套、searchDescription 写「可当外层」。
-    下装 BOTTOM（仅裤类）：
-    - 短裤（非裙）：24-38
-    - 常规牛仔裤/休闲西裤（10-13oz 等）：12-23
-    - 精纺羊毛西裤/灯芯绒长裤：5-11（与常规裤 12-23 在 12℃ 切开；禁止自创 5-15）
-    - 加绒牛仔裤/羊羔绒卫裤：-8-6（卫裤/牛仔裤等**外穿**下装）
-    - 薄贴身速干/发热内搭裤、HEATTECH 保暖裤、滑雪底层裤、秋裤型保暖裤：-15-4（穿在全长外裤里面；薄平针织、微修身贴肤；禁止羊羔绒蓬松；mainCategory=BOTTOM；subCategory 写「发热保暖裤」等，禁止图上没写却写成「打底裤」）。无品牌字样时，若是全长、贴身的细密平针织弹力长裤，且没有口袋/抽绳/裤袢/侧条纹/反光等运动或外穿结构，也按薄贴身保暖内裤识别；仅「紧身/弹力」不能推断为运动裤。
-    - 加厚羽绒裤/抓绒冲锋裤：-25-0
-    硬折、有型、格纹不等于厚。偏薄下装 season 应含夏或春夏。下装不因外套叠穿压低 tempMin。禁止把光腿神器/连裤袜/羊羔绒袜型腿层标成 BOTTOM。禁止把任何裙装标成 BOTTOM。禁止把薄平针织全长发热/HEATTECH 保暖裤标成 SOCKS 或套用 -8-6；也禁止因「看起来像打底」就标 SOCKS。
-    裙装 ONE_PIECE（半身裙与连衣裙等同大类）：
-    - 迷你短裙：24-38
-    - 无袖睡裙/家居睡裙/吊带连衣裙（薄棉皱褶等）：24-38（更薄真丝吊带可 28-38）；禁止套「薄长裙」或常规裙档
-    - 真丝/雪纺/薄棉麻中长～长裙（有袖或可外穿薄裙）：24-33
-    - 常规厚度中长连衣裙/半身裙（棉质、聚酯混纺垂坠、A字或直筒，约会日常可单穿）：12-23（禁止自创 12-25）；mainCategory=ONE_PIECE
-    - 毛呢半身长裙/针织长裙：4-11（与常规裙 12-23 在 12℃ 切开；禁止自创 4-15）；mainCategory=ONE_PIECE
-    家居/睡裙看袖长与面料薄度，勿因裙长标成常规或偏冷档。
-    鞋 FOOTWEAR：
-    - 凉鞋/拖鞋/洞洞鞋：25-38
-    - 帆布鞋/透气网面运动鞋：16-34
-    - 乐福/玛丽珍/浅口单鞋：14-25
-    - 全皮板鞋/德训/复古跑鞋等休闲厚底：8-30
-    - 切尔西/马丁/短靴：0-15
-    - 过膝长靴/骑士靴：-2-12
-    - 加绒短靴/雪地靴：-20-4
-    袜 SOCKS（按 D 数/是否透肉；含裙下/短裤外可见腿层）：
-    - 超薄隐形丝袜 5-10D：24-35
-    - 常规薄款丝袜 15-30D：19-26
-    - 半透微压丝袜 40-60D：15-21
-    - 不透肉天鹅绒连裤袜 80-120D：12-17
-    - 加厚不透肉春秋袜 150-220D：9-14
-    - 羊羔绒/加厚加绒**袜型**腿层、光腿神器厚腿层：-8-6；mainCategory=SOCKS，subCategory 写「加绒袜裤」或「光腿神器」等（仅当外观确为裙下可见袜型）；禁止写卫裤/牛仔裤。薄平针织全长发热/HEATTECH/速干保暖裤见 BOTTOM（-15-4），勿标 SOCKS、勿用本档 -8-6、勿臆造「打底裤」品类名
+11. tempMin、tempMax 用整数摄氏度表示这件单品在典型穿法下大致舒适的环境温度。普通上衣按独立穿着估，普通外裤和裙装按不加额外保暖腿层估。外套按搭基础内搭估，连裤袜按下文的腿层规则估。
+    薄贴身秋衣、秋裤有专门的参考穿法。秋衣贴身穿在中层或外套里面，秋裤贴身穿在全长外裤里面。确认属于这类保暖底层时，tempMin 填 ${THERMAL_BASE_LAYER.tempMin}，tempMax 填 ${THERMAL_BASE_LAYER.tempMax}，表示作为底层叠穿的参考天气。
+    根据图中可见的面料疏密、厚薄、覆盖长度、开衩、衬里和填充，分别估计上下限。毛呢质感说明表面纹理，厚度要另找依据；同样是长裙，轻薄透光和厚实带绒可以给出不同的范围。克重、充绒量和袜子 D 数只有在图上标明时才可采用。鞋看露肤面积、透气鞋面和可见绒里。某一侧依据不足时该侧填 null，两侧都无法判断时都填 null；配饰（非袜）两个都填 null。
 
-{"mainCategory":"OUTERWEAR","subCategory":"牛仔夹克","season":["春","秋"],"material":["牛仔"],"colors":["蓝"],"tags":["休闲","通勤","叠穿"],"description":"蓝色牛仔夹克，金属扣，衣身是牛仔面料，硬质梭织。","occasions":["休闲","通勤"],"formality":"休闲日常","silhouette":["短款","直筒"],"searchDescription":"牛仔硬质夹克，适合春秋日常通勤和周末出门。可叠在针织或衬衫外，下装配直筒裤或牛仔裤，鞋选德训或短靴，整体偏干净休闲。","tempMin":13,"tempMax":21}`
+补充品类识别：
+- TOP 与 OUTERWEAR 按门襟结构区分：摇粒绒/抓绒套头衫、半开襟套头归 TOP；开衫或夹克有可完全敞开的门襟。棉服看衣身的蓬松填充，绗缝线本身不足以判定厚度。
+- 薄贴身发热/德绒内衣：长袖同时具备宽圆领或 U 领、薄软细针织、衣身贴肤、平直无收口下摆，且没有外穿结构时，按贴身底层填写所有字段：mainCategory=TOP，subCategory 写「薄贴身保暖内衣」，温区按第 11 条的秋衣规则。description 写清可见的领口宽深、贴肤程度和下摆收口结构。领口宽深看不清时，可结合薄贴肤面料、平直无收口下摆和贴身打底用途判断。单凭宽领、修身或可叠穿均不足以定为秋衣。
+- 薄贴身全长针织裤：结合贴肤剪裁、细密弹力针织以及口袋、抽绳、裤袢、反光条等结构，区分裤内保暖层与可外穿运动裤。
+- 连裤袜（SOCKS）：按以下顺序判断透肤、厚薄和穿着温度。
+  1. 透肤看光照相近的大腿、膝部拉伸处与周围袜面。肤色清楚可见时写「透肤」。拉伸区顺着腿部轮廓从袜面本色渐渐透出肉棕、肉粉等暖肤底色时写「微透肤」，即使看不清皮肤细节。整体暖光、仅有明暗变化、离散的花灰织纹，均不足以判断透肤。光线充足的拉伸区若能清楚确认袜面以织物本色遮住肤色，才写「不透肤」。无法确认时直接描述袜面织纹和贴合度，省略所有透肤措辞，包括「看不到透出肤色」「无明显透肤」。透出的肤色不计入 colors。若能看见肤色内衬，按内衬形成的仿透肤效果描述。
+  2. 厚薄按袜层结构判断。袜面细密、平贴腿部或脚背，能看清腿部轮廓且袜层无明显增厚时，可写「薄款」或「偏薄」，透肤看不清也可这样判断。可见绒里、明显厚实的袜层或加绒标识支持厚款判断。深色、哑光、花灰和透肤程度都不能单独用来定厚薄。
+  3. 温区按配裙或短裤时的腿层用途估计。袜面细密贴腿、呈薄针织外观时，按薄款描述，叠穿温区参考 10 至 16℃。羊毛、羊绒等标签只说明材质；单写「羊毛」时不推断混纺或成分比例。只有可见的厚实袜层、内绒，或明确的厚度、加绒结构、保暖等级标注，才支持把下限往更冷调整。「秋冬」「保暖」等宣传词和图中搭配的毛呢裙、外套都不计作袜层的保暖证据。description、tags 和 searchDescription 使用同一厚薄与透肤判断，搭配按腿层用途写。
+- 裤裙的 subCategory 写明可见长短。格纹、硬折和蕾丝花边本身不足以判断厚度。吊带睡裙还要结合肩带、袖型与家居用途识别。
+- 带状首饰（ACCESSORY）：优先根据实际佩戴部位、商品文字或可读尺寸区分贴颈的颈链和戴在手腕的手链。平铺图从一端到另一端沿饰带看完整主体，结合带长、带宽和扣件的相对比例判断；弯折摆放时两段属于同一条带，延长链不计入饰带主体。龙虾扣、延长链和刺绣在颈链和手链上都可能出现，不能单凭这些细节判断戴在手腕。整条主体比例支持贴颈佩戴时，可用「刺绣细带颈链」等中文品类名。证据不足时，用「刺绣带饰」等中性品类名，description、tags 和 searchDescription 保持一致，只写可见特点和搭配风格，不指定颈部或手腕。`
 
 export const WARDROBE_ANALYSIS_JSON_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -215,9 +174,8 @@ export function normalizeMainCategory(value: unknown): ClothingMainCategory | nu
 /** 裤内薄平针织发热/速干全长保暖裤（按功能识别，不依赖「打底裤」品类名） */
 export function looksLikeThermalInnerBottomPants(subCategory: string, description = ''): boolean {
   const text = `${subCategory} ${description}`;
-  if (/羊羔绒|光腿神器|连裤袜|袜裤/.test(text)) return false;
-  // 有发热/速干等明确信号即视为裤内层；裸「打底裤」不算（那是 SOCKS 误写出口）
-  if (/heattech|速干|发热|排汗|秋裤|保暖内衣裤|滑雪底层|内搭裤|贴身保暖裤|发热保暖裤|薄针织保暖/i.test(text)) {
+  if (!/裤/.test(text) || /羊羔绒|光腿神器|连裤袜|袜裤/.test(text)) return false;
+  if (/秋裤|保暖内衣裤|滑雪底层|内搭裤|贴身保暖裤|发热保暖裤|薄针织保暖|速干保暖裤/i.test(text)) {
     return true;
   }
   // 无明确功能词时，只兜底纯平针织全长贴身裤；具体运动/外穿结构优先排除。
@@ -225,13 +183,12 @@ export function looksLikeThermalInnerBottomPants(subCategory: string, descriptio
   if (/瑜伽|健身|跑步|训练|骑行|口袋|抽绳|裤袢|反光|侧条纹|冲锋|牛仔|西裤/.test(positiveEvidence)) {
     return false;
   }
+  if (/heattech|发热/i.test(text)) return true;
   const fullLength = /长裤|全长|长款/.test(text);
   const closeFit = /贴身|贴合|紧身|修身/.test(text);
   const fineKnit = /平针织|薄针织|细密针织|针织.*弹力|弹力.*针织|混色针织/.test(text);
   return fullLength && closeFit && fineKnit;
 }
-
-const THERMAL_INNER_LAYER_TEMP = { tempMin: -15, tempMax: 4 } as const;
 
 function buildThermalInnerLayerSearchDescription(kind: 'top' | 'bottom', subCategory: string): string {
   if (kind === 'top') {
@@ -249,7 +206,7 @@ function normalizeThermalInnerLayerMetadata(tags: string[]) {
   };
 }
 
-/** 纠正发热裤内层的品类名与温区（LLM 常写成「发热打底裤」+ SOCKS 袜档） */
+/** 纠正裤内保暖层的品类名和叠穿参考温区 */
 export function sanitizeThermalInnerBottomFields(
   subCategory: string,
   description: string,
@@ -270,8 +227,7 @@ export function sanitizeThermalInnerBottomFields(
   }
   return {
     subCategory: nextSub,
-    tempMin: THERMAL_INNER_LAYER_TEMP.tempMin,
-    tempMax: THERMAL_INNER_LAYER_TEMP.tempMax,
+    ...THERMAL_BASE_LAYER,
   };
 }
 
@@ -288,19 +244,29 @@ export function looksLikeThermalInnerTop(
   if (/毛衣|卫衣|摇粒|抓绒|衬衫|外套|夹克|开衫|西装|法兰绒|牛津|加绒卫衣/.test(text)) {
     return false;
   }
-  if (/heattech|发热|德绒|保暖内衣|发热内衣|贴身保暖内衣|薄贴身保暖/i.test(text)) {
+  if (/秋衣|heattech|发热|德绒|保暖内衣|发热内衣|贴身保暖内衣|薄贴身保暖/i.test(text)) {
     return true;
   }
-  // 内衣剪裁常见：大圆领长袖 + 打底 + 贴肤措辞（勿因模特单穿判成春秋外穿 T）
+  const openHem = /下摆[^，。；]{0,10}(?:无收口|不收口|无束口)/.test(description);
+  const wideRoundNeck =
+    /大圆领|宽圆领|U领/i.test(text) ||
+    (/圆领/.test(text) && /领口(?:略宽|稍宽|较宽|偏宽|宽松|开阔)/.test(text) && openHem);
+  // 模型有时只写「圆领」。此时需同时有薄针织、无收口下摆和打底用途。
+  const plainBaseLayerCut =
+    /圆领/.test(text) &&
+    !/(?:常规|普通|标准|小|窄)圆领|领口(?:偏窄|较窄|收紧)|口袋|纽扣|拉链|印花/.test(text) &&
+    /薄[软细密]*针织|细薄针织/.test(description) &&
+    openHem &&
+    (/打底衫/.test(subCategory) || tags.some((tag) => /^(?:贴身)?打底$/.test(tag)));
   const underwearCut =
     /长袖/.test(text) &&
-    /(大圆领|宽圆领|U领)/.test(text) &&
+    (wideRoundNeck || plainBaseLayerCut) &&
     /(贴身|服帖|贴肤|修身|收身|贴合)/.test(text) &&
     (/(打底|薄针织|细针织|平针织|弹力针织|弹力面料|贴身针织)/.test(text));
   return underwearCut;
 }
 
-/** 纠正上装发热内衣的品类名与温区 */
+/** 纠正贴身保暖上衣的品类名和叠穿参考温区 */
 export function sanitizeThermalInnerTopFields(
   subCategory: string,
   description: string,
@@ -312,9 +278,8 @@ export function sanitizeThermalInnerTopFields(
     return { subCategory, tempMin, tempMax };
   }
   return {
-    subCategory: /发热|保暖内衣|德绒/.test(subCategory) ? subCategory : '发热内衣',
-    tempMin: THERMAL_INNER_LAYER_TEMP.tempMin,
-    tempMax: THERMAL_INNER_LAYER_TEMP.tempMax,
+    subCategory: /秋衣|发热|保暖内衣|德绒/.test(subCategory) ? subCategory : '发热内衣',
+    ...THERMAL_BASE_LAYER,
   };
 }
 
@@ -474,7 +439,7 @@ export function normalizeWardrobeAnalysis(
   const explicitThermalTop =
     ((/发热内衣|保暖内衣/.test(subCategory) && /长袖|上衣/.test(description)) ||
       looksLikeThermalInnerTop(subCategory, description, tags)) &&
-    !/裤|裙/.test(description);
+    !/裤|裙/.test(subCategory) && !/裤|裙/.test(description);
   const categoryBeforeSkirt = explicitThermalTop
     ? 'TOP'
     : coerceLegwearMainCategory(rawMainCategory, subCategory, description);
@@ -554,7 +519,7 @@ export function normalizeTempRange(
 }
 
 export function wardrobeAnalysisToEmbeddingFields(
-  analysis: NormalizedWardrobeAnalysis
+  analysis: Omit<NormalizedWardrobeAnalysis, 'tempMin' | 'tempMax'>
 ) {
   return {
     mainCategory: analysis.mainCategory,
@@ -568,8 +533,6 @@ export function wardrobeAnalysisToEmbeddingFields(
     occasions: analysis.occasions,
     formality: analysis.formality ?? undefined,
     silhouette: analysis.silhouette,
-    tempMin: analysis.tempMin,
-    tempMax: analysis.tempMax,
   };
 }
 
@@ -585,8 +548,6 @@ export function clothingItemToEmbeddingFields(item: {
   occasions?: string[];
   formality?: string | null;
   silhouette?: string[];
-  tempMin?: number | null;
-  tempMax?: number | null;
 }) {
   return wardrobeAnalysisToEmbeddingFields({
     mainCategory: item.mainCategory,
@@ -610,8 +571,6 @@ export function clothingItemToEmbeddingFields(item: {
     occasions: item.occasions ?? [],
     formality: item.formality ?? null,
     silhouette: item.silhouette ?? [],
-    tempMin: item.tempMin ?? null,
-    tempMax: item.tempMax ?? null,
   });
 }
 

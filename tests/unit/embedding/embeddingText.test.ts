@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildWardrobeDocumentEmbeddingText,
   buildWardrobeQueryEmbeddingText,
+  stripEmbeddingTemperatures,
 } from '@/server/utils/embeddingText';
 
 describe('buildWardrobeQueryEmbeddingText', () => {
@@ -24,7 +25,7 @@ describe('buildWardrobeQueryEmbeddingText', () => {
     assert.match(text, /Season: summer\./);
     assert.match(text, /Tags: office commute, minimal\./);
     assert.match(text, /Occasions: office commute\./);
-    assert.match(text, /Visual: \./);
+    assert.doesNotMatch(text, /Visual:/);
   });
 
   it('does not false-positive red from tailored', () => {
@@ -49,7 +50,7 @@ describe('buildWardrobeQueryEmbeddingText', () => {
 
 describe('buildWardrobeDocumentEmbeddingText', () => {
   it('formats document text with mainCategory aligned to DB enum', () => {
-    const text = buildWardrobeDocumentEmbeddingText({
+    const item = {
       mainCategory: 'BOTTOM',
       subCategory: 'Wide-Leg Trousers',
       description: 'Cream wide-leg pants.',
@@ -60,9 +61,10 @@ describe('buildWardrobeDocumentEmbeddingText', () => {
       material: ['linen'],
       tempMin: 16,
       tempMax: 26,
-    });
+    };
+    const text = buildWardrobeDocumentEmbeddingText(item);
     assert.match(text, /^MainCategory: BOTTOM\. Category: Wide-Leg Trousers\./);
-    assert.match(text, /TempSuitable: 16-26℃\./);
+    assert.doesNotMatch(text, /TempSuitable|16-26/);
   });
 
   it('query injects mainCategory from slot', () => {
@@ -72,22 +74,23 @@ describe('buildWardrobeDocumentEmbeddingText', () => {
     assert.match(text, /^MainCategory: BOTTOM\. Category: bottom\./);
   });
 
-  it('query injects TempSuitable from slotTempRange', () => {
-    const text = buildWardrobeQueryEmbeddingText('厚针织毛衣内搭', {
-      slot: 'top',
-      slotTempRange: { min: 5, max: 14 },
-    });
-    assert.match(text, /TempSuitable: 5-14℃\./);
+  it('removes numeric temperature from fixed queries while keeping fabric and layering', () => {
+    const query = '薄贴身发热内搭裤，穿在全长外裤内，适合温度-15到4度';
+    const plain = '薄贴身发热内搭裤，穿在全长外裤内';
+    assert.equal(stripEmbeddingTemperatures(query), plain);
+    assert.equal(buildWardrobeQueryEmbeddingText(query), buildWardrobeQueryEmbeddingText(plain));
+    assert.equal(stripEmbeddingTemperatures('80-120D 袜裤，适合不低于12度单穿'), '80-120D 袜裤');
+    assert.equal(stripEmbeddingTemperatures('360度裙摆'), '360度裙摆');
   });
 
-  it('omits TempSuitable when both bounds null', () => {
+  it('removes temperatures embedded in item descriptions', () => {
     const text = buildWardrobeDocumentEmbeddingText({
-      mainCategory: 'ACCESSORY',
-      subCategory: '耳环',
-      description: '金耳钉',
-      tempMin: null,
-      tempMax: null,
+      subCategory: '毛呢长裙',
+      description: '格纹长裙，4–11℃，蕾丝裙边',
+      searchDescription: '秋冬通勤，约 4°C 至 11°C 搭配针织衫',
     });
-    assert.doesNotMatch(text, /TempSuitable/);
+    assert.doesNotMatch(text, /℃|°C|4|11/);
+    assert.match(text, /格纹长裙，蕾丝裙边/);
+    assert.match(text, /搭配针织衫/);
   });
 });

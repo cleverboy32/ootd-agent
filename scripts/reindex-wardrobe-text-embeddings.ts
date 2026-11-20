@@ -1,8 +1,14 @@
+import { parseArgs } from 'node:util';
 import prismadb from '@/server/db';
 import { persistTextEmbedding } from '@/server/services/wardrobeService';
 
 async function main(): Promise<void> {
+  const { values } = parseArgs({ options: { 'user-id': { type: 'string' } } });
+  const userId = values['user-id']?.trim();
+  if (values['user-id'] !== undefined && !userId) throw new Error('--user-id needs a user ID');
   const items = await prismadb.clothingItem.findMany({
+    where: userId ? { userId, status: 'completed' } : undefined,
+    select: { id: true, subCategory: true },
     orderBy: { createdAt: 'asc' },
   });
 

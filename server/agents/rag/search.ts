@@ -10,10 +10,12 @@ import {
   parseWardrobeSearchSlot,
   resolveMainCategoryForSlot,
   WardrobeSearchInput,
+  type WardrobeSearchQuery,
 } from '@/server/utils/ragSearchSlots';
 import {
   applySlotTemperatureFilter,
   resolveDressingFromWeather,
+  type TempRange,
 } from '@/server/utils/slotTempFilter';
 import {
   buildSlotMatchAssessments,
@@ -67,6 +69,7 @@ export type RagSlotSnapshot = {
   }>;
   query?: string;
   target?: string;
+  temp_range?: TempRange | null;
   /** Evaluation-only candidates at each retrieval/filter stage. */
   candidate_stages?: Record<string, Array<{ id: string; subCategory: string; similarity: number }>>;
   /** 各过滤阶段候选数（生产 audit 也写） */
@@ -136,7 +139,7 @@ async function runOneSlotSearch(
   userId: string,
   fetchLimit: number,
   resultLimit: number,
-  weather: string,
+  slotTempRange: TempRange | null,
   athletic: boolean,
   skillNames: string[] | undefined,
   captureDiagnostics: boolean
@@ -170,8 +173,6 @@ async function runOneSlotSearch(
     };
   }
   const searchQuery = query;
-  const slotTempRange =
-    resolveDressingFromWeather(weather)?.slotRange(parsedSlot ?? slot) ?? null;
   let databaseCandidates: WardrobeSearchResult[] = [];
   let searchFailureReason: WardrobeSearchFailureReason | null = null;
   let searchError: { name: string; message: string } | undefined;
@@ -286,7 +287,23 @@ export async function performRagSearch(
     name.startsWith('style-')
   );
   const sharedPoolBySlot = !hasStyleSkill;
-  const collapsed = collapseQueriesForRound(queries, { sharedPoolBySlot });
+  const weather = logContext?.intent?.weather?.trim() ?? '';
+  const dressing = resolveDressingFromWeather(weather);
+  const outfitsWithInnerBottom = new Set(
+    queries.filter((item) => parseWardrobeSearchSlot(item.slot) === 'inner_bottom')
+      .map((item) => item.outfitId)
+  );
+  const isLayeredColdBottom = ({
+    slot,
+    outfitId,
+  }: Pick<WardrobeSearchQuery, 'slot' | 'outfitId'>) =>
+    dressing?.band === 'cold' &&
+    parseWardrobeSearchSlot(slot) === 'bottom' &&
+    outfitsWithInnerBottom.has(outfitId);
+  const collapsed = collapseQueriesForRound(queries, {
+    sharedPoolBySlot,
+    filterKey: (item) => (isLayeredColdBottom(item) ? 'layered_bottom' : ''),
+  });
   console.log(
     `[RAG_HANDLER] Searching wardrobe: ${queries.length} slot queries → ${collapsed.length} unique` +
       (sharedPoolBySlot ? ' (by slot, no-style shared pool)' : ' (slot+query)')
@@ -295,8 +312,6 @@ export async function performRagSearch(
   try {
     const resultLimit = 5;
     const fetchLimit = Math.max(resultLimit * 2, 10);
-    const weather = logContext?.intent?.weather?.trim() ?? '';
-    const dressing = resolveDressingFromWeather(weather);
 
     const athletic = isAthleticOccasion(logContext?.intent, logContext?.userMessage);
     if (athletic) {
@@ -315,18 +330,23 @@ export async function performRagSearch(
 
     const collapsedResults = await Promise.all(
       collapsed.map(async (group) => {
+        const withInnerBottom = isLayeredColdBottom({
+          slot: group.slot,
+          outfitId: group.outfitIds[0],
+        });
+        const slotTempRange = dressing?.slotRange(group.slot, withInnerBottom) ?? null;
         const search = await runOneSlotSearch(
           group.query,
           group.slot,
           userId,
           fetchLimit,
           resultLimit,
-          weather,
+          slotTempRange,
           athletic,
           logContext?.skillNames,
           logContext?.source === 'eval-retrieve'
         );
-        return { group, ...search };
+        return { group, slotTempRange, ...search };
       })
     );
 
@@ -336,6 +356,7 @@ export async function performRagSearch(
       slot?: string;
       outfitId?: string;
       target?: string;
+      slotTempRange: TempRange | null;
       mainCategory?: ReturnType<typeof resolveMainCategoryForSlot>;
       results: WardrobeSearchResult[];
       candidateStages?: Record<string, WardrobeSearchResult[]>;
@@ -347,6 +368,7 @@ export async function performRagSearch(
 
     for (const {
       group,
+      slotTempRange,
       results,
       candidateStages,
       retrievalStageCounts,
@@ -361,6 +383,7 @@ export async function performRagSearch(
           slot: group.slot,
           outfitId,
           target: group.target,
+          slotTempRange,
           mainCategory: resolveMainCategoryForSlot(group.slot),
           results,
           candidateStages,
@@ -453,6 +476,7 @@ export async function performRagSearch(
         })),
         query: row.query,
         target: row.target,
+        temp_range: row.slotTempRange,
         retrieval_stage_counts: row.retrievalStageCounts,
         empty_reason: row.emptyReason,
         ...(row.searchError ? { search_error: row.searchError } : {}),

@@ -2,7 +2,6 @@ import type { GatekeeperIntent } from '@/server/agents/intent';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
 import { parseWardrobeSearchSlot, resolveMainCategoryForSlot } from '@/server/utils/ragSearchSlots';
 import { extractQueryEmbeddingColors } from '@/server/utils/queryColorMatch';
-import type { TempRange } from '@/server/utils/slotTempFilter';
 import type { ClothingMainCategory } from '@prisma/client';
 
 /** 与入库时 text embedding 文本字段顺序保持一致，便于 query/document 向量对齐 */
@@ -21,9 +20,6 @@ export interface WardrobeDocumentEmbeddingFields {
   occasions?: string[];
   formality?: string;
   silhouette?: string[];
-  /** 单件适穿 ℃（与 slotTempFilter / 衣橱分析同语义） */
-  tempMin?: number | null;
-  tempMax?: number | null;
 }
 
 const SLOT_CATEGORY_HINT: Record<WardrobeSearchSlot, string> = {
@@ -38,21 +34,29 @@ const SLOT_CATEGORY_HINT: Record<WardrobeSearchSlot, string> = {
   accessory: 'accessory',
 };
 
-function joinField(values?: string[]): string {
-  return values?.filter(Boolean).join(', ') ?? '';
+function joinField(values: string[]): string {
+  return values.map(stripEmbeddingTemperatures).filter(Boolean).join(', ');
 }
 
-/** 写入向量的适穿温区文案；双空返回 null（跳过该段） */
-export function formatTempSuitableForEmbedding(
-  tempMin?: number | null,
-  tempMax?: number | null
-): string | null {
-  const hasMin = tempMin !== null && tempMin !== undefined;
-  const hasMax = tempMax !== null && tempMax !== undefined;
-  if (!hasMin && !hasMax) return null;
-  if (hasMin && hasMax) return `${tempMin}-${tempMax}℃`;
-  if (hasMin) return `≥${tempMin}℃`;
-  return `≤${tempMax}℃`;
+// Plan 和历史描述里也可能含有适穿温区。只在生成向量文本时清理它。
+const temperatureNumber = String.raw`(?:零下|[+−-])?\d{1,2}(?:\.\d+)?`;
+const celsiusUnit = String.raw`(?:摄氏度|℃|°\s*C|度(?!角|旋转))`;
+const temperatureRange = String.raw`${temperatureNumber}(?:\s*${celsiusUnit}?\s*(?:到|至|[-−–—~～])\s*${temperatureNumber})?`;
+const temperaturePrefix = String.raw`(?:TempSuitable\s*[:：]|(?:单件|单穿)?(?:适穿温度|适合温度|温度适合|体感温度|温度|适穿|适合|气温)\s*[:：为]?)`;
+const celsiusExpression = new RegExp(
+  String.raw`(?<![\d.])(?:${temperaturePrefix}\s*)?(?:大约|约)?(?:不低于|不超过|低于|高于|[≥≤<>])?\s*${temperatureRange}\s*${celsiusUnit}(?:以上|以下|左右)?(?:单穿|气温)?`,
+  'gi'
+);
+
+export function stripEmbeddingTemperatures(text: string): string {
+  const stripped = text.replace(celsiusExpression, ' ');
+  if (stripped === text) return text.trim();
+  return stripped
+    .replace(/^\s*[,，;；。.]+\s*/, '')
+    .replace(/\s*([，,；;])\s*(?=[，,；;。.]|$)/g, '')
+    .replace(/\s+([，,；;。.])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 interface BuildEmbeddingTextOptions {
@@ -76,28 +80,25 @@ function buildWardrobeEmbeddingText(
     occasions = [],
     formality,
     silhouette = [],
-    tempMin = null,
-    tempMax = null,
   } = fields;
 
-  const retrievalDescription = searchDescription?.trim() || description;
+  const visualDescription = stripEmbeddingTemperatures(description);
+  const retrievalDescription = stripEmbeddingTemperatures(searchDescription ?? '') || visualDescription;
   const { omitEmptyFields = false } = options;
   const mainCategoryLabel = mainCategory?.toString().trim();
-  const tempSuitable = formatTempSuitableForEmbedding(tempMin, tempMax);
 
   const segments: Array<string | null> = [
     mainCategoryLabel ? `MainCategory: ${mainCategoryLabel}.` : null,
-    `Category: ${subCategory}.`,
+    `Category: ${stripEmbeddingTemperatures(subCategory)}.`,
     retrievalDescription ? `Description: ${retrievalDescription}.` : null,
-    description.trim() ? `Visual: ${description}.` : omitEmptyFields ? null : `Visual: ${description}.`,
+    visualDescription || !omitEmptyFields ? `Visual: ${visualDescription}.` : null,
     colors.length || !omitEmptyFields ? `Colors: ${joinField(colors)}.` : null,
     tags.length || !omitEmptyFields ? `Tags: ${joinField(tags)}.` : null,
     occasions.length || !omitEmptyFields ? `Occasions: ${joinField(occasions)}.` : null,
-    formality?.trim() || !omitEmptyFields ? `Formality: ${formality?.trim() || ''}.` : null,
+    formality?.trim() || !omitEmptyFields ? `Formality: ${stripEmbeddingTemperatures(formality ?? '')}.` : null,
     silhouette.length || !omitEmptyFields ? `Silhouette: ${joinField(silhouette)}.` : null,
     season.length || !omitEmptyFields ? `Season: ${joinField(season)}.` : null,
     material.length || !omitEmptyFields ? `Material: ${joinField(material)}.` : null,
-    tempSuitable ? `TempSuitable: ${tempSuitable}.` : null,
   ];
 
   return segments.filter(Boolean).join(' ');
@@ -113,8 +114,6 @@ export function buildWardrobeDocumentEmbeddingText(
 export interface WardrobeQueryEmbeddingContext {
   slot?: WardrobeSearchSlot;
   intent?: GatekeeperIntent;
-  /** 与检索硬过滤同一套槽温区，写入 query 向量 TempSuitable */
-  slotTempRange?: TempRange | null;
 }
 
 function inferSeasonFromIntent(intent?: GatekeeperIntent): string[] {
@@ -172,7 +171,7 @@ function resolveQueryCategoryLabel(query: string, slot?: WardrobeSearchSlot): st
 }
 
 /**
- * Stylist 检索 query：与 document 同结构；注入可识别颜色与槽温区 TempSuitable。
+ * Stylist 检索 query：与 document 同结构；注入可识别颜色。
  */
 export function buildWardrobeQueryEmbeddingText(
   query: string,
@@ -185,7 +184,6 @@ export function buildWardrobeQueryEmbeddingText(
   const tags = inferTagsFromIntent(context.intent);
   const occasions = inferOccasionsFromIntent(context.intent);
   const colors = extractQueryEmbeddingColors(normalizedQuery);
-  const slotTemp = context.slotTempRange;
 
   return buildWardrobeEmbeddingText({
     mainCategory,
@@ -197,8 +195,6 @@ export function buildWardrobeQueryEmbeddingText(
     occasions,
     season,
     material: [],
-    tempMin: slotTemp?.min ?? null,
-    tempMax: slotTemp?.max ?? null,
   }, { omitEmptyFields: true });
 }
 

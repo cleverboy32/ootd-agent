@@ -71,13 +71,16 @@ export function normalizeWardrobeSearchInput(input: WardrobeSearchInput): Wardro
 export type CollapsedSlotQuery = WardrobeSearchQuery & { outfitIds: string[] };
 
 /** 相同 slot+query 合并为一次向量检索；outfitIds 记录共享方 */
-export function collapseIdenticalSlotQueries(queries: WardrobeSearchQuery[]): CollapsedSlotQuery[] {
+export function collapseIdenticalSlotQueries(
+  queries: WardrobeSearchQuery[],
+  filterKey?: (query: WardrobeSearchQuery) => string
+): CollapsedSlotQuery[] {
   const groups = new Map<string, CollapsedSlotQuery>();
   for (const item of queries) {
     const q = item.query.trim();
     if (!q) continue;
     const slot = item.slot ?? '';
-    const key = `${slot}||${q}`;
+    const key = JSON.stringify([slot, q, filterKey?.(item)]);
     const outfitId = item.outfitId?.trim() || '';
     const existing = groups.get(key);
     if (existing) {
@@ -103,10 +106,10 @@ export function collapseIdenticalSlotQueries(queries: WardrobeSearchQuery[]): Co
  */
 export function collapseQueriesForRound(
   queries: WardrobeSearchQuery[],
-  options: { sharedPoolBySlot: boolean }
+  options: { sharedPoolBySlot: boolean; filterKey?: (query: WardrobeSearchQuery) => string }
 ): CollapsedSlotQuery[] {
   if (!options.sharedPoolBySlot) {
-    return collapseIdenticalSlotQueries(queries);
+    return collapseIdenticalSlotQueries(queries, options.filterKey);
   }
 
   type Acc = CollapsedSlotQuery & { preferOutfit1: boolean };
@@ -115,7 +118,7 @@ export function collapseQueriesForRound(
   for (const item of queries) {
     const q = item.query.trim();
     if (!q) continue;
-    const slotKey = item.slot ?? '';
+    const slotKey = JSON.stringify([item.slot, options.filterKey?.(item)]);
     const outfitId = item.outfitId?.trim() || '';
     const isOutfit1 = outfitId === 'outfit_1';
     const existing = bySlot.get(slotKey);
@@ -143,7 +146,10 @@ export function collapseQueriesForRound(
     }
   }
 
-  return [...bySlot.values()].map(({ preferOutfit1: _p, ...rest }) => rest);
+  return [...bySlot.values()].map(({ preferOutfit1, ...rest }) => {
+    void preferOutfit1;
+    return rest;
+  });
 }
 
 export function parseWardrobeSearchSlot(slot?: string): WardrobeSearchSlot | undefined {

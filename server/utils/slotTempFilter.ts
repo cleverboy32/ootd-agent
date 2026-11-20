@@ -1,6 +1,6 @@
 /**
  * 三明治各槽目标适穿区间：与 weather-dressing / 衣橱分析 tempMin·tempMax 同语义（单件适穿）。
- * 硬过滤：单品适穿区间与槽目标区间求交（非中点）。仍注入 query TempSuitable 做软对齐。
+ * 硬过滤：单品适穿区间与槽目标区间求交（非中点）。
  */
 
 import { parseWardrobeSearchSlot, type WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
@@ -36,6 +36,7 @@ export const THICKNESS_TEMP_RANGES = {
   regular_bottom: { min: 12, max: 23 }, // 常规牛仔裤/休闲西裤（与短裤在 24℃ 切开）
   thick_bottom: { min: 4, max: 11 }, // 羊毛西裤/灯芯绒/毛呢裙（与常规下装 12℃ 切开）
   winter_bottom: { min: -8, max: 6 }, // 加绒裤（冷/寒冷可选）
+  layered_cold_bottom: { min: 5, max: 14 }, // 冷档有裤内层时的外裤候选范围
   thermal_bottom_base: { min: -15, max: 4 }, // 薄贴身速干/发热内搭裤（全长外裤内层；非羊羔绒）
   thin_tights: { min: 15, max: 21 }, // 半透微压～薄丝袜
   thick_tights: { min: -8, max: 14 }, // 加厚春秋袜～加绒打底裤（与 SOCKS 厚腿层对齐）
@@ -194,6 +195,7 @@ const TIER_THICKNESS_HINT: Record<ThicknessTier, string> = {
   regular_bottom: '常规牛仔裤/西裤（约12-23℃）',
   thick_bottom: '羊毛西裤/毛呢裙（约4-11℃）',
   winter_bottom: '加绒裤（约-8-6℃）',
+  layered_cold_bottom: '可叠薄秋裤的全长外裤，常规偏厚或偏厚',
   thermal_bottom_base: '薄贴身速干/发热内搭裤（约-15-4℃）',
   thin_tights: '薄～半透丝袜（约15-21℃）',
   thick_tights: '加厚春秋袜～加绒打底裤（约-8-14℃）',
@@ -267,11 +269,14 @@ export function computeFeelsLikeCelsius(
 
 export function resolveSlotTempFilter(
   band: WeatherDressBand,
-  slot?: string | null
+  slot?: string | null,
+  hasInnerBottom = false
 ): TempRange | null {
   if (!slot) return null;
   const parsed = parseWardrobeSearchSlot(slot) ?? (slot as WardrobeSearchSlot);
-  const tier = BAND_SLOT_TIERS[band][parsed];
+  const tier = band === 'cold' && parsed === 'bottom' && hasInnerBottom
+    ? 'layered_cold_bottom'
+    : BAND_SLOT_TIERS[band][parsed];
   if (tier === undefined || tier === null) return null;
   return { ...THICKNESS_TEMP_RANGES[tier] };
 }
@@ -282,7 +287,7 @@ export type WeatherDressResolution = {
   band: WeatherDressBand;
   adjustments: string[];
   planHint: string;
-  slotRange: (slot: string | null | undefined) => TempRange | null;
+  slotRange: (slot: string | null | undefined, hasInnerBottom?: boolean) => TempRange | null;
 };
 
 function buildPlanHintFromBand(
@@ -301,8 +306,15 @@ function buildPlanHintFromBand(
       continue;
     }
     const range = THICKNESS_TEMP_RANGES[tier];
+    if (band === 'cold' && slot === 'bottom') {
+      const layered = THICKNESS_TEMP_RANGES.layered_cold_bottom;
+      lines.push(
+        `- bottom: 开；同套有 inner_bottom 时选常规偏厚或偏厚的全长外裤，裤脚遮踝，给秋裤留空间；候选温区=[${layered.min}, ${layered.max}]。target 与 search_query 描述叠穿、覆盖和厚薄，不写单穿温度。同套无 inner_bottom 时按冬厚外裤，候选温区=[${range.min}, ${range.max}]。`
+      );
+      continue;
+    }
     lines.push(
-      `- ${slot}: 开；层级=${tier}（${TIER_THICKNESS_HINT[tier]}）；适穿℃=[${formatTempBound(range.min)}, ${formatTempBound(range.max)}]（检索 TempSuitable + 区间求交硬过滤）`
+      `- ${slot}: 开；层级=${tier}（${TIER_THICKNESS_HINT[tier]}）；适穿℃=[${formatTempBound(range.min)}, ${formatTempBound(range.max)}]（检索按区间求交过滤）`
     );
   }
 
@@ -336,7 +348,7 @@ export function resolveDressingFromWeather(weather: string): WeatherDressResolut
     band,
     adjustments,
     planHint: buildPlanHintFromBand(tempCelsius, feelsLikeCelsius, band, adjustments),
-    slotRange: (slot) => resolveSlotTempFilter(band, slot),
+    slotRange: (slot, hasInnerBottom) => resolveSlotTempFilter(band, slot, hasInnerBottom),
   };
 }
 

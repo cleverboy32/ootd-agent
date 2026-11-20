@@ -7,6 +7,7 @@ import {
   resolveDressingFromWeather,
   type TempRange,
 } from '@/server/utils/slotTempFilter';
+import { stripEmbeddingTemperatures } from '@/server/utils/embeddingText';
 
 export interface OutfitPlanSlot {
   slot: WardrobeSearchSlot;
@@ -98,18 +99,31 @@ export function alignOutfitPlanTempsToSlotRanges(
   if (!dressing) return plan;
 
   return {
-    outfits: (plan.outfits ?? []).map((outfit) => ({
-      ...outfit,
-      slots: (outfit.slots ?? []).map((slotItem) => {
-        const range = dressing.slotRange(slotItem.slot);
-        if (!range) return slotItem;
-        return {
-          ...slotItem,
-          search_query: alignSearchQueryTempToSlotRange(slotItem.search_query, range),
-          target: alignSearchQueryTempToSlotRange(slotItem.target, range),
-        };
-      }),
-    })),
+    outfits: (plan.outfits ?? []).map((outfit) => {
+      const slots = outfit.slots ?? [];
+      const hasInnerBottom = slots.some((item) =>
+        parseWardrobeSearchSlot(item.slot) === 'inner_bottom' && item.search_query?.trim()
+      );
+      return {
+        ...outfit,
+        slots: slots.map((slotItem) => {
+          if (dressing.band === 'cold' && hasInnerBottom && slotItem.slot === 'bottom') {
+            return {
+              ...slotItem,
+              search_query: stripEmbeddingTemperatures(slotItem.search_query || ''),
+              target: stripEmbeddingTemperatures(slotItem.target || ''),
+            };
+          }
+          const range = dressing.slotRange(slotItem.slot);
+          if (!range) return slotItem;
+          return {
+            ...slotItem,
+            search_query: alignSearchQueryTempToSlotRange(slotItem.search_query, range),
+            target: alignSearchQueryTempToSlotRange(slotItem.target, range),
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -185,9 +199,17 @@ export function expandNoStyleCoverageSlots(
 
   const additions: OutfitPlanSlot[] = [];
   const hasLower = present.has('bottom') || present.has('skirt');
+  const innerBottomRange = dressing?.slotRange('inner_bottom') ?? null;
   if (hasLower) {
     if (!present.has('bottom')) {
-      additions.push(coverageSlotTemplate('bottom', dressing?.slotRange('bottom') ?? null));
+      additions.push(dressing?.band === 'cold' && innerBottomRange
+        ? {
+            slot: 'bottom',
+            target: '能容纳薄贴身秋裤、裤脚遮踝的常规偏厚或偏厚全长外裤',
+            search_query: '全长外穿裤，裤脚遮踝，直筒或微宽松，能叠穿薄贴身秋裤，面料常规偏厚或偏厚，如挺实牛仔、灯芯绒、厚卫裤。',
+            allow_new: true,
+          }
+        : coverageSlotTemplate('bottom', dressing?.slotRange('bottom') ?? null));
     }
     if (!present.has('skirt')) {
       additions.push(coverageSlotTemplate('skirt', dressing?.slotRange('skirt') ?? null));
@@ -199,7 +221,6 @@ export function expandNoStyleCoverageSlots(
     additions.push(coverageSlotTemplate('legwear', legwearRange));
   }
 
-  const innerBottomRange = dressing?.slotRange('inner_bottom') ?? null;
   if (innerBottomRange && !present.has('inner_bottom')) {
     additions.push(coverageSlotTemplate('inner_bottom', innerBottomRange));
   }

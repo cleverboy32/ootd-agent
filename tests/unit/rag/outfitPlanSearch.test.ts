@@ -229,6 +229,20 @@ describe('collapseIdenticalSlotQueries', () => {
 });
 
 describe('collapseQueriesForRound', () => {
+  it('keeps paired and unpaired outer pants in separate searches even for identical queries', () => {
+    const queries = [
+      { outfitId: 'outfit_1', slot: 'bottom', query: '全长通勤裤' },
+      { outfitId: 'outfit_2', slot: 'bottom', query: '全长通勤裤' },
+    ] as const;
+    for (const sharedPoolBySlot of [true, false]) {
+      const groups = collapseQueriesForRound([...queries], {
+        sharedPoolBySlot,
+        filterKey: (query) => query.outfitId === 'outfit_1' ? 'layered_bottom' : '',
+      });
+      assert.deepEqual(groups.map(({ outfitIds }) => outfitIds), [['outfit_1'], ['outfit_2']]);
+    }
+  });
+
   it('无 style sharedPoolBySlot：同槽不同 query 仍合并为 1，canonical 取 outfit_1', () => {
     const collapsed = collapseQueriesForRound(
       [

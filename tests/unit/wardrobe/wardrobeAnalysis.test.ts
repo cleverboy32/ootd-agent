@@ -17,43 +17,28 @@ describe('WARDROBE_ANALYSIS_PROMPT', () => {
     assert.match(WARDROBE_ANALYSIS_PROMPT, /不要写成光滑衬衫/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /不要记成第二种颜色/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /不要写成镶边/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /款式名不决定温度/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /棉服看蓬松/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /不要写成轻薄、轻量或薄壳/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /短袖 T\/Polo.*24-35/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄款长袖打底.*16-23/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /加绒卫衣\/重磅厚毛衣：5-14/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /摇粒绒\/抓绒套头衫.*mainCategory=TOP/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /仅半开襟套头 → TOP/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /OUTERWEAR 与 TOP 分界/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /常规牛仔裤\/休闲西裤.*12-23/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /常规厚度中长连衣裙\/半身裙.*12-23/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /无袖睡裙\/家居睡裙.*24-38/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止自创 12-25/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /全皮板鞋\/德训\/复古跑鞋.*8-30/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /超薄隐形丝袜 5-10D：24-35/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /羊羔绒\/加厚加绒\*\*袜型\*\*腿层/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /半开襟套头归 TOP/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /棉服看衣身的蓬松填充/);
+    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄贴身发热\/德绒内衣/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /SOCKS 与 BOTTOM 分界/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /必须 BOTTOM/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止擅自写成「打底裤\/贴身打底裤」/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄贴身速干\/发热内搭裤.*HEATTECH.*-15-4/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /薄贴身发热\/德绒内衣：-15-4/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /保暖内衣或裤内保暖层必须写明是内搭，不得推荐单穿\/当外层/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /电商\/淘宝模特图几乎总是单穿摆拍/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把光腿神器\/连裤袜\/羊羔绒袜型腿层标成 BOTTOM/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止因「看起来像打底」就标 SOCKS/);
-
     assert.match(WARDROBE_ANALYSIS_PROMPT, /ONE_PIECE 与 BOTTOM 分界/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把半身裙标成 BOTTOM/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止把任何裙装标成 BOTTOM/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止自创更宽档/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /硬折、有型、格纹不等于厚/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /偏薄下装 season 应含夏/);
-    assert.match(WARDROBE_ANALYSIS_PROMPT, /下装不因外套叠穿压低 tempMin/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /宁少勿滥/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /运动训练/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /禁止顺手加「休闲」「百搭」「日常」/);
     assert.match(WARDROBE_ANALYSIS_PROMPT, /也可日常休闲/);
+  });
+
+  it('asks for item-specific estimates with a layered-weather exception for thermal underwear', () => {
+    const temperatureSection = WARDROBE_ANALYSIS_PROMPT.split('11. tempMin、tempMax')[1]
+      .split('补充品类识别：')[0];
+    assert.match(temperatureSection, /普通外裤和裙装按不加额外保暖腿层估/);
+    assert.match(temperatureSection, /某一侧依据不足时该侧填 null/);
+    assert.match(temperatureSection, /秋衣.*秋裤.*tempMin 填 -15，tempMax 填 4.*底层叠穿/);
+    assert.doesNotMatch(temperatureSection, /-?\d+\s*[-–~～至到]\s*-?\d+|"(?:tempMin|tempMax)"\s*:\s*-?\d+/);
   });
 
   it('maps Chinese season and formality onto the stored enums', () => {
@@ -248,7 +233,7 @@ describe('normalizeWardrobeAnalysis', () => {
     assert.equal(normalized?.mainCategory, 'SOCKS');
   });
 
-  it('rewrites prod 发热打底裤 SOCKS into BOTTOM + thermal band', () => {
+  it('corrects 发热打底裤 from SOCKS to BOTTOM using the base-layer range', () => {
     const normalized = normalizeWardrobeAnalysis({
       mainCategory: 'SOCKS',
       subCategory: '发热打底裤',
@@ -268,7 +253,7 @@ describe('normalizeWardrobeAnalysis', () => {
     assert.equal(normalized?.tempMax, 4);
   });
 
-  it('rewrites 大圆领打底衫 TOP into 发热内衣 thermal band', () => {
+  it('recognizes 大圆领打底衫 as 发热内衣 and assigns the base-layer range', () => {
     const normalized = normalizeWardrobeAnalysis({
       mainCategory: 'TOP',
       subCategory: '大圆领长袖打底衫',
@@ -277,8 +262,8 @@ describe('normalizeWardrobeAnalysis', () => {
       colors: ['深灰'],
       tags: ['打底', '修身', '基础款'],
       description: '深灰色长袖打底衫，大圆领露出锁骨，针织弹力面料柔软服帖，版型收身不松垮。',
-      tempMin: 16,
-      tempMax: 23,
+      tempMin: null,
+      tempMax: null,
     });
     assert.equal(normalized?.mainCategory, 'TOP');
     assert.equal(normalized?.subCategory, '发热内衣');
@@ -406,6 +391,56 @@ describe('normalizeWardrobeAnalysis', () => {
     }
   });
 
+  it('distinguishes the fitted base layer in the wardrobe from a regular crew-neck knit', () => {
+    const item = {
+      mainCategory: 'TOP', subCategory: '圆领长袖针织衫',
+      description: '米色混色细针织圆领长袖，衣身贴合身形，领口略宽，下摆平直无收口。',
+      tags: ['基础款', '简约', '内搭'], tempMin: 12, tempMax: 22,
+    };
+    const thermal = normalizeWardrobeAnalysis(item);
+    assert.equal(thermal?.subCategory, '发热内衣');
+    assert.deepEqual([thermal?.tempMin, thermal?.tempMax], [-15, 4]);
+    for (const description of [
+      item.description.replace('领口略宽', '常规圆领'),
+      item.description.replace('下摆平直无收口', '下摆为罗纹收口'),
+    ]) {
+      const regular = normalizeWardrobeAnalysis({ ...item, description });
+      assert.equal(regular?.subCategory, item.subCategory);
+      assert.deepEqual([regular?.tempMin, regular?.tempMax], [12, 22]);
+    }
+  });
+
+  it('recognizes the wardrobe result when the model leaves neckline width unspecified', () => {
+    const item = {
+      mainCategory: 'TOP',
+      subCategory: '长袖圆领T恤',
+      description: '浅米色薄细针织长袖圆领衫，衣身贴合身形，下摆平直无收口。',
+      tags: ['基础款', '简约', '打底'],
+      tempMin: 12,
+      tempMax: 24,
+    };
+    const thermal = normalizeWardrobeAnalysis(item);
+    assert.equal(thermal?.subCategory, '发热内衣');
+    assert.deepEqual([thermal?.tempMin, thermal?.tempMax], [-15, 4]);
+
+    const regular = normalizeWardrobeAnalysis({ ...item, tags: ['基础款', '简约', '内搭'] });
+    assert.equal(regular?.subCategory, item.subCategory);
+    assert.deepEqual([regular?.tempMin, regular?.tempMax], [12, 24]);
+  });
+
+  it('applies the exception to 秋衣 and 秋裤 while keeping outerwear estimates for sportswear', () => {
+    for (const [mainCategory, subCategory, description, expected] of [
+      ['TOP', '秋衣', '薄长袖贴身上衣', [-15, 4]],
+      ['BOTTOM', '秋裤', '薄针织贴身款', [-15, 4]],
+      ['TOP', '速干运动T恤', '短袖排汗面料', [18, 29]],
+      ['BOTTOM', '速干运动长裤', '弹力面料，侧袋和反光条', [18, 29]],
+    ] as const) {
+      const item = normalizeWardrobeAnalysis({ mainCategory, subCategory, description, tempMin: 18, tempMax: 29 });
+      assert.equal(item?.mainCategory, mainCategory);
+      assert.deepEqual([item?.tempMin, item?.tempMax], expected, subCategory);
+    }
+  });
+
   it('coerces mislabeled 半身裙 BOTTOM into ONE_PIECE', () => {
     const normalized = normalizeWardrobeAnalysis({
       mainCategory: 'BOTTOM',
@@ -419,5 +454,7 @@ describe('normalizeWardrobeAnalysis', () => {
       tempMax: 15,
     });
     assert.equal(normalized?.mainCategory, 'ONE_PIECE');
+    assert.equal(normalized?.tempMin, 4);
+    assert.equal(normalized?.tempMax, 15);
   });
 });

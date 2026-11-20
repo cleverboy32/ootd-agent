@@ -138,6 +138,16 @@ describe('resolveSlotTempFilter cold 0–5℃ and freezing <0℃', () => {
     assert.equal(resolveSlotTempFilter('hot', 'inner_bottom'), null);
   });
 
+  it('at 5℃ only widens the outer-pants filter for an outfit with a thermal bottom layer', () => {
+    const dressing = resolveDressingFromWeather('约5℃')!;
+    const pants = [{ tempMin: 8, tempMax: 22 }, { tempMin: 12, tempMax: 24 }];
+    assert.deepEqual(dressing.slotRange('bottom', true), { min: 5, max: 14 });
+    assert.deepEqual(applySlotTemperatureFilter(pants, dressing.slotRange('bottom', true)), pants);
+    assert.deepEqual(applySlotTemperatureFilter(pants, dressing.slotRange('bottom')), []);
+    assert.deepEqual(dressing.slotRange('skirt', true), { min: -8, max: 6 });
+    assert.deepEqual(resolveSlotTempFilter('freezing', 'bottom', true), { min: -8, max: 6 });
+  });
+
   it('freezing keeps three upper slots with winter_outer', () => {
     assert.deepEqual(resolveSlotTempFilter('freezing', 'inner_top'), THICKNESS_TEMP_RANGES.thermal_base);
     assert.deepEqual(resolveSlotTempFilter('freezing', 'top'), THICKNESS_TEMP_RANGES.warm_top);

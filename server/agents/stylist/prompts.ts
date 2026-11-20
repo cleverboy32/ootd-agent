@@ -80,8 +80,8 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 - 有 style-* 时：各套可为同槽写不同 search_query（按分支差异检索）。
 
 【核心原则】
-- 【天气管层次与厚薄】有【服务端槽温区表】时：开槽与厚薄【必须以该表为准】（写入检索 TempSuitable；禁止另编 ℃ 或层级）；多套同一档层次一致。无该表时再靠 weather-dressing。裤 vs 裙不强制审美选型，但若本套已定裤装或裙装路线，search_query 须写出裤或裙。
-- 【适穿℃ 抄表】有槽温区表时：每个槽 target / search_query 里的适穿℃【必须抄该槽表中区间】（如冷档 inner_top 为薄贴身发热/德绒约 -15–4℃，禁止写成薄打底 16–24℃）。写错档会导致衣橱硬过滤空召回。
+- 【天气管层次与厚薄】有【服务端槽温区表】时：开槽与厚薄【必须以该表为准】（检索时按槽温区过滤；禁止另编 ℃ 或层级）；多套同一档层次一致。无该表时再靠 weather-dressing。裤 vs 裙不强制审美选型，但若本套已定裤装或裙装路线，search_query 须写出裤或裙。
+- 【适穿℃ 抄表】有槽温区表时，target / search_query 若写适穿℃，用该槽表里的区间（如冷档 inner_top 为薄贴身发热/德绒约 -15–4℃）。冷档同套有 inner_bottom 时，bottom 只描述可叠薄秋裤的全长外裤及其厚薄、覆盖，候选温区由服务端处理。
 - 【上装三槽】inner_top=内搭，top=炎热主上装或凉及更冷的中间层，outerwear=外套。表内「开/不开」优先于口头口诀。无表时的兜底：炎热只开 top；微暖～微凉有外套开 inner_top+outerwear（禁止 top 中层）；凉及更冷开 inner_top+top+outerwear。无外套时禁止开 inner_top。
 - 【下装三明治】inner_bottom=全长外裤内薄贴身速干/发热内搭裤；bottom=外穿裤；legwear=裙/短/七分可见腿层。冷/寒冷全长外裤开 inner_bottom，禁止同套再叠羊羔绒 legwear；裙或外露小腿开 legwear，不开 inner_bottom。
 - 【风格管形态】有 style-* 技能时：形态与分支写进 overall_concept / target；search_query 仍按下方「向量维度扩写」，不要塞完整细款长名。

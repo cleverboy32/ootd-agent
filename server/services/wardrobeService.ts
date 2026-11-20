@@ -5,6 +5,7 @@ import prismadb from '@/server/db';
 import type { GatekeeperIntent } from '@/server/agents/intent';
 import {
   buildWardrobeDocumentEmbeddingText,
+  stripEmbeddingTemperatures,
   buildWardrobeQueryEmbeddingText,
   type WardrobeQueryEmbeddingContext,
 } from '@/server/utils/embeddingText';
@@ -140,11 +141,14 @@ export async function searchWardrobeItemsByText(
     const embeddingContext: WardrobeQueryEmbeddingContext = {
       slot: options?.slot ?? options?.embedding?.slot,
       intent: options?.intent ?? options?.embedding?.intent,
-      slotTempRange: slotTempRange,
     };
     const textForEmbedding = options?.embedding?.useRawQueryEmbedding
-      ? searchText.trim()
+      ? stripEmbeddingTemperatures(searchText)
       : buildWardrobeQueryEmbeddingText(searchText, embeddingContext);
+    if (!textForEmbedding) {
+      reportDiagnostics({ databaseCandidates: [], thresholdCandidates: [], failureReason: 'empty_query' });
+      return [];
+    }
 
     console.log(`[RAG-SEARCH] Text embedding input: "${textForEmbedding}"`);
 
