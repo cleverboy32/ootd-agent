@@ -50,7 +50,8 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         if (!active) return;
-        // 查库瞬态失败：再试一次；仍失败则只对非访客页回官网，不伪造首页未登录
+        // 查库瞬态失败：再试一次。仍失败时留在当前页，禁止踢回官网——
+        // cookie 仍有效时 proxy 会把 `/` 再重定向到 `/home`，形成 /home↔/ 死循环。
         void ensureSession({ bust: true })
           .then((snapshot) => {
             if (!active) return;
@@ -58,7 +59,9 @@ export function AccessProvider({ children }: { children: ReactNode }) {
           })
           .catch(() => {
             if (!active) return;
-            redirectUnlessGuestAllowed();
+            console.warn(
+              '[AccessProvider] session lookup failed after retry; staying put to avoid redirect loop'
+            );
           });
       });
     return () => {
