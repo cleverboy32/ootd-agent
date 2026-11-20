@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeUsername } from '@/server/auth/credentials';
 import { getLockStatus, registerFailure, resetFailures } from '@/server/auth/lockout';
 import { verifySecret } from '@/server/auth/password';
+import { unsealSecret } from '@/server/auth/transportCrypto';
 import { createSessionToken } from '@/server/auth/session';
 import { setSessionCookie } from '@/server/auth/sessionCookie';
 import prismadb from '@/server/db';
@@ -35,7 +36,12 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as LoginBody | null;
   t = mark('parse_body', t);
   const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
-  const password = typeof body?.password === 'string' ? body.password : '';
+  const sealedPassword = typeof body?.password === 'string' ? body.password : '';
+  const opened = unsealSecret(sealedPassword);
+  if (!opened.ok) {
+    return NextResponse.json({ error: opened.error, code: opened.code }, { status: 400 });
+  }
+  const password = opened.value;
   if (!username || !password) {
     return NextResponse.json(
       { error: '请输入用户名和密码', code: 'VALIDATION_ERROR' },

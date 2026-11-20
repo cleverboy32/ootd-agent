@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeUsername, validateUsername } from '@/server/auth/credentials';
 import { hashSecret, validatePasswordStrength } from '@/server/auth/password';
+import { unsealSecret } from '@/server/auth/transportCrypto';
 import { createSessionToken } from '@/server/auth/session';
 import { setSessionCookie } from '@/server/auth/sessionCookie';
 import prismadb from '@/server/db';
@@ -14,7 +15,11 @@ interface RegisterBody {
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as RegisterBody | null;
   const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
-  const password = typeof body?.password === 'string' ? body.password : '';
+  const opened = unsealSecret(typeof body?.password === 'string' ? body.password : '');
+  if (!opened.ok) {
+    return NextResponse.json({ error: opened.error, code: opened.code }, { status: 400 });
+  }
+  const password = opened.value;
 
   const usernameError = validateUsername(username);
   if (usernameError) {

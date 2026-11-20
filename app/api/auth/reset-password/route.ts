@@ -6,6 +6,7 @@ import {
 } from '@/server/auth/credentials';
 import { getLockStatus, registerFailure, resetFailures } from '@/server/auth/lockout';
 import { hashSecret, validatePasswordStrength, verifySecret } from '@/server/auth/password';
+import { unsealSecret } from '@/server/auth/transportCrypto';
 import { createSessionToken } from '@/server/auth/session';
 import { setSessionCookie } from '@/server/auth/sessionCookie';
 import prismadb from '@/server/db';
@@ -50,7 +51,14 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as ResetPasswordBody | null;
   const username = normalizeUsername(typeof body?.username === 'string' ? body.username : '');
   const method = body?.method === 'recovery' ? 'recovery' : body?.method === 'questions' ? 'questions' : null;
-  const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : '';
+  const openedPassword = unsealSecret(typeof body?.newPassword === 'string' ? body.newPassword : '');
+  if (!openedPassword.ok) {
+    return NextResponse.json(
+      { error: openedPassword.error, code: openedPassword.code },
+      { status: 400 }
+    );
+  }
+  const newPassword = openedPassword.value;
 
   if (!username || !method) {
     return NextResponse.json({ error: '请求参数不完整', code: 'VALIDATION_ERROR' }, { status: 400 });
@@ -85,17 +93,24 @@ export async function POST(req: NextRequest) {
           { status: 403 }
         );
       }
-      const answers = Array.isArray(body?.answers) ? body.answers : [];
-      if (answers.length !== stored.length) {
+      const answersRaw = Array.isArray(body?.answers) ? body.answers : [];
+      if (answersRaw.length !== stored.length) {
         return NextResponse.json(
           { error: '请回答全部密保问题', code: 'VALIDATION_ERROR' },
           { status: 400 }
         );
       }
+      const answers: string[] = [];
+      for (const item of answersRaw) {
+        const opened = unsealSecret(typeof item === 'string' ? item : '');
+        if (!opened.ok) {
+          return NextResponse.json({ error: opened.error, code: opened.code }, { status: 400 });
+        }
+        answers.push(opened.value);
+      }
       let allMatch = true;
       for (let i = 0; i < stored.length; i += 1) {
-        const answer = typeof answers[i] === 'string' ? answers[i] : '';
-        const ok = await verifySecret(normalizeSecurityAnswer(answer), stored[i].answerHash);
+        const ok = await verifySecret(normalizeSecurityAnswer(answers[i]), stored[i].answerHash);
         if (!ok) allMatch = false;
       }
       if (!allMatch) {
@@ -111,9 +126,13 @@ export async function POST(req: NextRequest) {
       }
     } else {
       // recovery：任一未使用恢复码匹配即通过，命中后消费该码
-      const code = normalizeRecoveryCode(
+      const openedCode = unsealSecret(
         typeof body?.recoveryCode === 'string' ? body.recoveryCode : ''
       );
+      if (!openedCode.ok) {
+        return NextResponse.json({ error: openedCode.error, code: openedCode.code }, { status: 400 });
+      }
+      const code = normalizeRecoveryCode(openedCode.value);
       if (!code) {
         return NextResponse.json({ error: '请输入恢复码', code: 'VALIDATION_ERROR' }, { status: 400 });
       }

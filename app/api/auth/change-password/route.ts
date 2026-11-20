@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/server/auth/currentUser';
 import { hashSecret, validatePasswordStrength, verifySecret } from '@/server/auth/password';
+import { unsealSecret } from '@/server/auth/transportCrypto';
 import { createSessionToken } from '@/server/auth/session';
 import { setSessionCookie } from '@/server/auth/sessionCookie';
 import prismadb from '@/server/db';
@@ -18,8 +19,16 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json().catch(() => null)) as ChangePasswordBody | null;
-  const oldPassword = typeof body?.oldPassword === 'string' ? body.oldPassword : '';
-  const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : '';
+  const openedOld = unsealSecret(typeof body?.oldPassword === 'string' ? body.oldPassword : '');
+  const openedNew = unsealSecret(typeof body?.newPassword === 'string' ? body.newPassword : '');
+  if (!openedOld.ok) {
+    return NextResponse.json({ error: openedOld.error, code: openedOld.code }, { status: 400 });
+  }
+  if (!openedNew.ok) {
+    return NextResponse.json({ error: openedNew.error, code: openedNew.code }, { status: 400 });
+  }
+  const oldPassword = openedOld.value;
+  const newPassword = openedNew.value;
 
   const strengthError = validatePasswordStrength(newPassword);
   if (strengthError) {

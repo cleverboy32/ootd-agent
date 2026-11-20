@@ -8,6 +8,7 @@ import {
 } from '@/server/auth/credentials';
 import { getSessionUser } from '@/server/auth/currentUser';
 import { hashSecret } from '@/server/auth/password';
+import { unsealSecret } from '@/server/auth/transportCrypto';
 import prismadb from '@/server/db';
 import { logAuthEvent } from '@/server/logging/authAudit';
 
@@ -69,7 +70,19 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json().catch(() => null)) as SetQuestionsBody | null;
-  const inputs = Array.isArray(body?.questions) ? (body.questions as SecurityQuestionInput[]) : [];
+  const rawInputs = Array.isArray(body?.questions) ? body.questions : [];
+  const inputs: SecurityQuestionInput[] = [];
+  for (const item of rawInputs) {
+    const record = typeof item === 'object' && item !== null ? (item as { question?: unknown; answer?: unknown }) : null;
+    const opened = unsealSecret(typeof record?.answer === 'string' ? record.answer : '');
+    if (!opened.ok) {
+      return NextResponse.json({ error: opened.error, code: opened.code }, { status: 400 });
+    }
+    inputs.push({
+      question: typeof record?.question === 'string' ? record.question : '',
+      answer: opened.value,
+    });
+  }
 
   const validationError = validateSecurityQuestions(inputs, { allowEmptyAnswers: true });
   if (validationError) {
