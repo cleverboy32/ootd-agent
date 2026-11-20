@@ -12,7 +12,10 @@ import { minimaxGenerateImage } from './minimax';
 import { bytedanceMultimodalEmbed, usesByteDanceMultimodalEmbedding } from './bytedance';
 import { isSeedreamImageVendor, seedreamGenerateImage } from './seedream';
 import { throwIfAborted } from '@/server/utils/abort';
+import { appendJsonlEntry } from '@/server/logging/jsonl';
+import { auditLogPath } from '@/server/logging/paths';
 import { recordChatUsage, recordEmbeddingUsage, recordImageUsage } from '@/server/logging/modelUsage';
+import { currentRequestTrace } from '@/server/logging/usageContext';
 import {
   vertexEmbed,
   vertexGenerate,
@@ -72,6 +75,74 @@ function isResponseFormatCompatibilityError(error: unknown): boolean {
   );
 }
 
+function readMessageContent(message: unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+          return (part as { text: string }).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return '';
+}
+
+/** finish_reason=length 时抬输出预算，给正文留额度（reasoning 与 content 共用 max_tokens）。 */
+const EMPTY_CONTENT_RETRY_MAX_TOKENS = 16_384;
+const EMPTY_CONTENT_AUDIT_PATH = auditLogPath('llm-empty-content.jsonl');
+
+function logEmptyContent(completion: {
+  choices?: Array<{ finish_reason?: string | null; message?: unknown }>;
+  usage?: { completion_tokens?: number | null } | null;
+}): void {
+  const choice = completion.choices?.[0];
+  const message = choice?.message as { reasoning_content?: unknown } | undefined;
+  const reasoning = message?.reasoning_content;
+  const reasoningLen =
+    typeof reasoning === 'string'
+      ? reasoning.length
+      : reasoning == null
+        ? 0
+        : String(reasoning).length;
+  console.warn('[LLM] empty message.content', {
+    finish_reason: choice?.finish_reason ?? null,
+    completion_tokens: completion.usage?.completion_tokens ?? null,
+    reasoning_content_len: reasoningLen,
+  });
+}
+
+function recordEmptyContentEvent(entry: {
+  model: string;
+  finishReason: string | null;
+  retryAction: string;
+  recovered: boolean;
+}): void {
+  const identity = currentRequestTrace()?.auditIdentity();
+  console.warn('[LLM] empty-content retry', entry);
+  void appendJsonlEntry(
+    EMPTY_CONTENT_AUDIT_PATH,
+    {
+      timestamp: new Date().toISOString(),
+      ...entry,
+      conversationId: identity?.conversationId,
+      messageId: identity?.messageId,
+      clientId: identity?.clientId,
+    },
+    'LLM_EMPTY_CONTENT'
+  );
+}
+
+type LlmGenerateAttempt = {
+  text: string;
+  finishReason: string | null;
+};
+
 export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGenerateResult> {
   throwIfAborted(options.signal);
   if (getProvider('chat') === 'vertex') {
@@ -80,38 +151,99 @@ export async function llmGenerate(options: LlmGenerateOptions): Promise<LlmGener
 
   const client = getClient('chat');
   const messages = buildMessages(options);
-  const thinkingBody =
-    options.thinking != null ? { thinking: { type: options.thinking } } : {};
-  const base = {
-    model: options.model,
-    temperature: resolveChatTemperature(options.model, options.temperature),
-    messages,
-    ...(options.maxTokens != null ? { max_tokens: options.maxTokens } : {}),
-  };
   const requestOptions = options.signal ? { signal: options.signal } : undefined;
 
-  try {
+  const runOnce = async (
+    thinking: LlmGenerateOptions['thinking'] | undefined,
+    useJsonResponseFormat: boolean,
+    maxTokens?: number
+  ): Promise<LlmGenerateAttempt> => {
+    const thinkingBody =
+      thinking != null ? { thinking: { type: thinking } } : {};
     const completion = await client.chat.completions.create(
       {
-        ...base,
-        response_format: options.jsonSchema ? { type: 'json_object' as const } : undefined,
+        model: options.model,
+        temperature: resolveChatTemperature(options.model, options.temperature),
+        messages,
+        ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
+        response_format:
+          useJsonResponseFormat && options.jsonSchema
+            ? { type: 'json_object' as const }
+            : undefined,
         ...thinkingBody,
       },
       requestOptions
     );
-    const text = completion.choices[0]?.message?.content ?? '';
     await recordChatUsage(options.model, completion.usage);
-    return { text: options.jsonSchema ? extractJsonText(text) : text };
+    const raw = readMessageContent(completion.choices[0]?.message);
+    const finishReason = completion.choices[0]?.finish_reason ?? null;
+    if (!raw.trim()) {
+      logEmptyContent(completion);
+    }
+    return {
+      text: options.jsonSchema ? extractJsonText(raw) : raw,
+      finishReason,
+    };
+  };
+
+  const recoverEmptyContent = async (
+    first: LlmGenerateAttempt,
+    useJsonResponseFormat: boolean
+  ): Promise<string> => {
+    if (first.text.trim()) return first.text;
+
+    // 1) 思考占满输出预算 → 抬 max_tokens 再试（仍开 thinking）
+    if (first.finishReason === 'length') {
+      const bumped = Math.max(options.maxTokens ?? 0, EMPTY_CONTENT_RETRY_MAX_TOKENS);
+      const bumpedAttempt = await runOnce(
+        options.thinking,
+        useJsonResponseFormat,
+        bumped
+      );
+      const recovered = Boolean(bumpedAttempt.text.trim());
+      recordEmptyContentEvent({
+        model: options.model,
+        finishReason: first.finishReason,
+        retryAction: `max_tokens=${bumped}`,
+        recovered,
+      });
+      if (recovered) return bumpedAttempt.text;
+    }
+
+    // 2) content_filter / tool_calls / stop / 未知：关 thinking 再试一轮（均落盘记录）
+    if (options.thinking !== 'disabled') {
+      const disabled = await runOnce(
+        'disabled',
+        useJsonResponseFormat,
+        options.maxTokens
+      );
+      const recovered = Boolean(disabled.text.trim());
+      recordEmptyContentEvent({
+        model: options.model,
+        finishReason: first.finishReason,
+        retryAction: 'thinking_disabled',
+        recovered,
+      });
+      return disabled.text;
+    }
+
+    recordEmptyContentEvent({
+      model: options.model,
+      finishReason: first.finishReason,
+      retryAction: 'none',
+      recovered: false,
+    });
+    return first.text;
+  };
+
+  try {
+    const first = await runOnce(options.thinking, true, options.maxTokens);
+    return { text: await recoverEmptyContent(first, true) };
   } catch (error) {
     if (!options.jsonSchema || !isResponseFormatCompatibilityError(error)) throw error;
     console.warn('[LLM] json_object response_format not supported, retrying without it');
-    const completion = await client.chat.completions.create(
-      { ...base, ...thinkingBody },
-      requestOptions
-    );
-    const text = completion.choices[0]?.message?.content ?? '';
-    await recordChatUsage(options.model, completion.usage);
-    return { text: extractJsonText(text) };
+    const first = await runOnce(options.thinking, false, options.maxTokens);
+    return { text: await recoverEmptyContent(first, false) };
   }
 }
 
