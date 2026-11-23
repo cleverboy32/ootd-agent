@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWardrobeStore } from '@/store/wardrobe-store';
 import { useTaskQueueStore } from '@/store/task-queue-store';
 import { toUserFacingUploadError } from '@/lib/upload-errors';
@@ -17,15 +17,7 @@ export function ImageUploadItem({ id }: ImageUploadItemProps) {
   const retryFile = useWardrobeStore(state => state.retryFile);
   const addTask = useTaskQueueStore(state => state.addTask);
   const resetTask = useTaskQueueStore(state => state.resetTask);
-
-  const file = fileData?.file;
-  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-  const [brokenPreviewUrl, setBrokenPreviewUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!previewUrl) return;
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   useEffect(() => {
     if (fileData?.status === 'queue') {
@@ -34,6 +26,12 @@ export function ImageUploadItem({ id }: ImageUploadItemProps) {
   }, [id, fileData?.status, addTask]);
 
   if (!fileData) return null;
+
+  const previewSrc = !previewFailed
+    ? fileData.previewUrl || fileData.publicUrl || null
+    : fileData.publicUrl && fileData.publicUrl !== fileData.previewUrl
+      ? fileData.publicUrl
+      : null;
 
   const displayError = fileData.error
     ? toUserFacingUploadError(fileData.error)
@@ -61,8 +59,8 @@ export function ImageUploadItem({ id }: ImageUploadItemProps) {
         );
       case 'success':
         return (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-green-500/80">
-            <CheckCircle className="h-10 w-10 text-white" />
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-green-500/40">
+            <CheckCircle className="h-10 w-10 text-white drop-shadow" />
           </div>
         );
       case 'error':
@@ -91,13 +89,14 @@ export function ImageUploadItem({ id }: ImageUploadItemProps) {
 
   return (
     <div className="relative group w-full aspect-square bg-muted rounded-lg overflow-hidden shadow-sm">
-        {previewUrl && previewUrl !== brokenPreviewUrl && (
+        {previewSrc && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={previewUrl}
+            key={previewSrc}
+            src={previewSrc}
             alt={fileData.file.name}
             className="absolute inset-0 h-full w-full object-cover"
-            onError={() => setBrokenPreviewUrl(previewUrl)}
+            onError={() => setPreviewFailed(true)}
           />
         )}
 
@@ -112,11 +111,10 @@ export function ImageUploadItem({ id }: ImageUploadItemProps) {
         </button>
 
         {fileData.status !== 'error' && (
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-5 bg-black/50 text-white text-xs p-1.5 truncate">
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[5] bg-black/50 text-white text-xs p-1.5 truncate">
             {fileData.file.name}
           </div>
         )}
     </div>
   );
 }
-

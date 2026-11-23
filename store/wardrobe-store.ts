@@ -6,6 +6,8 @@ export type UploadStatus = 'queue' | 'uploading' | 'analyzing' | 'success' | 'er
 export interface UploadableFile {
   id: string;
   file: File;
+  /** Stable blob URL created at add time; revoke only when the item leaves the store. */
+  previewUrl: string;
   status: UploadStatus;
   error?: string | null;
   publicUrl?: string | null;
@@ -17,11 +19,15 @@ interface WardrobeState {
   fileIds: string[]; // To maintain insertion order
 
   addFiles: (newFiles: File[]) => void;
-  updateFileStatus: (id:string, updates: Partial<Omit<UploadableFile, 'id' | 'file'>>) => void;
+  updateFileStatus: (id:string, updates: Partial<Omit<UploadableFile, 'id' | 'file' | 'previewUrl'>>) => void;
   removeFile: (id: string) => void;
   retryFile: (id: string) => void;
   clearSuccessful: () => void;
   reset: () => void;
+}
+
+function revokePreview(file?: UploadableFile) {
+  if (file?.previewUrl) URL.revokeObjectURL(file.previewUrl);
 }
 
 export const useWardrobeStore = create<WardrobeState>((set, get) => ({
@@ -38,6 +44,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       newFilesById[id] = {
         id,
         file,
+        previewUrl: URL.createObjectURL(file),
         status: 'queue',
       };
     });
@@ -70,6 +77,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       if (!state.filesById[id]) {
         return state;
       }
+      revokePreview(state.filesById[id]);
       const newFilesById = { ...state.filesById };
       delete newFilesById[id];
       const newFileIds = state.fileIds.filter(fileId => fileId !== id);
@@ -95,6 +103,8 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
         if (file.status !== 'success') {
           newFileIds.push(id);
           newFilesById[id] = file;
+        } else {
+          revokePreview(file);
         }
       });
 
@@ -116,6 +126,8 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
         if (file.status === 'success' || file.status === 'error') {
           newFileIds.push(id);
           newFilesById[id] = file;
+        } else {
+          revokePreview(file);
         }
       });
 
@@ -129,4 +141,3 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     });
   },
 }));
-
