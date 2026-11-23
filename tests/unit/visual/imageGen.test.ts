@@ -299,4 +299,29 @@ describe('buildImagePrompt with Seedream references', () => {
     assert.match(prompt, /Cream Tee/);
     assert.match(prompt, /NEW \/ purchase item/);
   });
+
+  it('lists visible new_item layers when all ids are new_item (三层上装)', () => {
+    const allNew: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        { id: 'new_item', name: '雾蓝打底', layer: 'inner_top', reason: 'a', description: '雾蓝薄发热。' },
+        { id: 'new_item', name: '冷灰卫衣', layer: 'top', reason: 'b', description: '冷灰加绒。' },
+        { id: 'new_item', name: '灰白羽绒服', layer: 'outerwear', reason: 'c', description: '灰白连帽拉链。' },
+        { id: 'new_item', name: '藏蓝牛仔裤', layer: 'bottom', reason: 'd', description: '藏蓝直筒。' },
+        { id: 'new_item', name: '切尔西靴', layer: 'shoes', reason: 'e', description: '黑色及踝。' },
+      ],
+      visual_composition: {
+        model_pose: 'standing',
+        outfit_details: 'layered casual',
+        background: 'street',
+        inner_visibility: 'open',
+      },
+    };
+    const prompt = buildImagePrompt(allNew);
+    assert.doesNotMatch(prompt, /雾蓝打底/);
+    assert.match(prompt, /冷灰卫衣/);
+    assert.match(prompt, /灰白羽绒服/);
+    assert.match(prompt, /藏蓝牛仔裤/);
+    assert.match(prompt, /切尔西靴/);
+  });
 });

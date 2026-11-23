@@ -212,9 +212,10 @@ export function listTextOnlyItems(
   referenceLabels: string[]
 ): Array<{ name: string; layer: string; id: string; description?: string }> {
   const refBlob = referenceLabels.join(' ').toLowerCase();
-  const hiddenInnerId = hiddenInnermostTop(outfit)?.id;
+  // 必须用对象引用：多件 new_item 共享 id="new_item"，按 id 会把整套单品误过滤掉
+  const hiddenInner = hiddenInnermostTop(outfit);
   return outfit.selected_items.filter((item) => {
-    if (item.id === hiddenInnerId) return false;
+    if (item === hiddenInner) return false;
     const name = item.name.trim();
     if (!name) return false;
     if (item.id === 'new_item') {
@@ -570,7 +571,8 @@ function buildCompactTextOnlyPrompt(
   }
   let itemIndex = 0;
   for (const [index, item] of outfit.selected_items.entries()) {
-    if (item.id === hiddenInner?.id) continue;
+    // 对象引用：多件 new_item 共享 id，不能用 id 比较
+    if (item === hiddenInner) continue;
     // collar_only：内搭并入外层句，避免单独编号诱导外露
     if (coverInner && isInnerLayer(item.layer)) continue;
 

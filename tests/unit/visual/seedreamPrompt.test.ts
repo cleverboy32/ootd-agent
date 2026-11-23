@@ -100,6 +100,65 @@ describe('buildModelSubjectDescription', () => {
 });
 
 describe('buildSeedreamImagePrompt', () => {
+  it('lists visible new_item garments when all ids are new_item (三层上装)', () => {
+    // 回归：hiddenInnermostTop 按 id 过滤会把共享 id="new_item" 的整套单品吞掉
+    const allNew: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        {
+          id: 'new_item',
+          name: '雾蓝色薄发热打底衫',
+          layer: 'inner_top',
+          reason: '打底',
+          description: '雾蓝色，薄款发热纤维，小圆领，长袖到手腕，衣长到髋部。',
+        },
+        {
+          id: 'new_item',
+          name: '冷灰色加绒卫衣',
+          layer: 'top',
+          reason: '中层',
+          description: '冷灰色，加绒卫衣面料，圆领，长袖到手腕，衣长到髋部，直筒微宽松。',
+        },
+        {
+          id: 'new_item',
+          name: '灰白色中长羽绒服',
+          layer: 'outerwear',
+          reason: '外套',
+          description: '灰白色，哑光防泼水面料，中长款至大腿中部；连帽，拉链开合。',
+        },
+        {
+          id: 'new_item',
+          name: '藏蓝色加绒直筒牛仔裤',
+          layer: 'bottom',
+          reason: '下装',
+          description: '藏蓝色，加绒牛仔面料，中高腰，直筒裤型，裤长到脚面略盖鞋面。',
+        },
+        {
+          id: 'new_item',
+          name: '黑色加绒切尔西靴',
+          layer: 'shoes',
+          reason: '鞋',
+          description: '黑色，皮面，圆头，及踝短靴，套筒式无绑带。',
+        },
+      ],
+      visual_composition: {
+        model_pose: '站立，双手插在外套口袋里。',
+        outfit_details: '冷灰藏蓝休闲裤装',
+        background: '晴天城市街道，阳光明亮，地面干爽。',
+        inner_visibility: 'open',
+      },
+    };
+    const prompt = buildSeedreamImagePrompt(allNew, undefined, [PERSON_REFERENCE_LABEL], null);
+    assert.match(prompt, /三层上装/);
+    assert.doesNotMatch(prompt, /雾蓝色薄发热打底衫/);
+    assert.match(prompt, /冷灰色/);
+    assert.match(prompt, /灰白色/);
+    assert.match(prompt, /藏蓝色/);
+    assert.match(prompt, /切尔西靴|及踝短靴/);
+    assert.match(prompt, /^1\. /m);
+    assert.match(prompt, /^2\. /m);
+  });
+
   it('keeps the person photo off the garment list', () => {
     const prompt = buildSeedreamImagePrompt(
       outfit,

@@ -68,8 +68,9 @@ export function buildOutfitReferenceInputs(
   const referenceLabels: string[] = [];
   const hiddenInner = hiddenInnermostTop(outfit);
   const hiddenInnerImageUrl = hiddenInner ? ragCache?.get(hiddenInner.id)?.imageUrl : undefined;
+  // 对象引用：多件 new_item 共享 id="new_item"，按 id 会误伤整套可见单品
   const wardrobeItems = outfit.selected_items.filter(
-    (i) => i.id !== 'new_item' && i.id !== hiddenInner?.id
+    (i) => i.id !== 'new_item' && i !== hiddenInner
   );
 
   const resolvedAnchorUrl =
@@ -80,7 +81,7 @@ export function buildOutfitReferenceInputs(
 
   const anchorItem =
     outfit.selected_items.find((i) => i.id === 'new_item') ?? wardrobeItems[0];
-  const anchorIsHiddenInner = Boolean(hiddenInner && anchorItem?.id === hiddenInner.id);
+  const anchorIsHiddenInner = Boolean(hiddenInner && anchorItem === hiddenInner);
 
   const purchaseLabelByUrl = new Map(
     (additionalPurchaseRefs ?? [])
@@ -173,7 +174,7 @@ export function buildImagePrompt(
 ): string {
   const labels = referenceLabels ?? [];
   const hiddenInner = hiddenInnermostTop(outfit);
-  const itemLines = outfit.selected_items.filter((i) => i.id !== hiddenInner?.id).map((i) => {
+  const itemLines = outfit.selected_items.filter((i) => i !== hiddenInner).map((i) => {
     const cached = ragCache?.get(i.id);
     const parts: string[] = [`${i.name} (${i.layer})`];
     if (i.id === 'new_item') parts.push('NEW / purchase item — must be clearly visible');
