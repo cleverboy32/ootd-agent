@@ -1,12 +1,10 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
+import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const PREVIEW_MAX_WIDTH = 420;
-const PREVIEW_GAP = 12;
 
 interface ZoomableOutfitImageProps {
   src: string;
@@ -15,72 +13,93 @@ interface ZoomableOutfitImageProps {
 }
 
 export function ZoomableOutfitImage({ src, alt, className }: ZoomableOutfitImageProps) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const [previewPos, setPreviewPos] = useState<{ left: number; top: number } | null>(null);
+  const [open, setOpen] = useState(false);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
-  const showPreview = useCallback(() => {
-    const el = anchorRef.current;
-    if (!el || typeof window === 'undefined') return;
+  const openLightbox = useCallback(() => setOpen(true), []);
+  const closeLightbox = useCallback(() => setOpen(false), []);
 
-    const rect = el.getBoundingClientRect();
-    const previewWidth = Math.min(PREVIEW_MAX_WIDTH, window.innerWidth * 0.5);
-    const previewHeight = Math.min(PREVIEW_MAX_WIDTH, window.innerHeight * 0.55);
+  useEffect(() => {
+    if (!open) return;
 
-    let left = rect.right + PREVIEW_GAP;
-    if (left + previewWidth > window.innerWidth - PREVIEW_GAP) {
-      left = rect.left - previewWidth - PREVIEW_GAP;
-    }
-    left = Math.max(PREVIEW_GAP, left);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = window.setTimeout(() => closeBtnRef.current?.focus(), 0);
 
-    let top = rect.top + rect.height / 2 - previewHeight / 2;
-    top = Math.max(PREVIEW_GAP, Math.min(top, window.innerHeight - previewHeight - PREVIEW_GAP));
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
 
-    setPreviewPos({ left, top });
-  }, []);
-
-  const hidePreview = useCallback(() => setPreviewPos(null), []);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
 
   return (
     <>
-      <span
-        ref={anchorRef}
-        className="relative inline-block my-3 max-w-[200px] align-middle"
-        onMouseEnter={showPreview}
-        onMouseLeave={hidePreview}
-        onFocus={showPreview}
-        onBlur={hidePreview}
+      <button
+        type="button"
+        onClick={openLightbox}
+        aria-label={`放大查看：${alt}`}
+        className={cn(
+          'relative my-3 inline-block max-w-[200px] align-middle border-0 bg-transparent p-0 text-left',
+          'rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
+        )}
       >
         <Image
           src={src}
-          alt={alt}
+          alt=""
           width={200}
           height={200}
           unoptimized
-          tabIndex={0}
           className={cn(
-            'h-auto w-full rounded-xl border border-border/10 cursor-zoom-in outline-none',
-            'transition-shadow hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary/40',
+            'h-auto w-full rounded-xl border border-border/10 cursor-zoom-in',
+            'transition-shadow hover:shadow-md',
             className
           )}
         />
-      </span>
+      </button>
 
-      {previewPos &&
+      {open &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-[200] animate-in fade-in-0 zoom-in-95 duration-150"
-            style={{ left: previewPos.left, top: previewPos.top }}
-            aria-hidden
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 animate-in fade-in-0 duration-150"
+            onClick={closeLightbox}
           >
-            <Image
-              src={src}
-              alt=""
-              width={PREVIEW_MAX_WIDTH}
-              height={PREVIEW_MAX_WIDTH}
-              unoptimized
-              className="max-h-[min(420px,55vh)] w-auto max-w-[min(420px,50vw)] rounded-xl border border-border/50 bg-background shadow-2xl"
-            />
+            <span id={titleId} className="sr-only">
+              {alt}
+            </span>
+            <button
+              ref={closeBtnRef}
+              type="button"
+              onClick={closeLightbox}
+              aria-label="关闭全屏预览"
+              className="absolute right-4 top-4 z-[1] rounded-full bg-black/50 p-2 text-white transition-colors hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            >
+              <X className="h-5 w-5" aria-hidden />
+            </button>
+            <div
+              className="relative flex max-h-full max-w-full items-center justify-center"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- fullscreen natural sizing */}
+              <img
+                src={src}
+                alt={alt}
+                className="max-h-[min(100vh-2rem,100dvh-2rem)] max-w-[min(100vw-2rem,100dvw-2rem)] object-contain"
+              />
+            </div>
           </div>,
           document.body
         )}
