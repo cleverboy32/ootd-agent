@@ -36,6 +36,7 @@ const DEFAULT_PROFILE: UserProfileResult = {
 function buildIntent(partial: Partial<GatekeeperIntent> | undefined): GatekeeperIntent {
   return {
     weather: partial?.weather ?? '',
+    weatherConditions: partial?.weatherConditions,
     city: partial?.city ?? '',
     city_role: partial?.city_role ?? '',
     occasion: partial?.occasion ?? '日常出行',

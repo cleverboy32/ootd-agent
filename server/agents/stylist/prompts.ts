@@ -10,6 +10,7 @@ export const STYLIST_SYSTEM_INSTRUCTION = `
 - 色彩认 color-*；版型/腰线认 body-*；有对应技能时 style 不得改掉这些限制。
 - 视觉写照认 stylist-visual。
 - 以上之下才是本合约的衣橱 / id / 套数规则。
+- 天气温度跨档时，以服务端槽温区表规定可脱层。每套仅选一次单品，在可脱层单品的 reason 交代较凉时加哪一层、较暖时脱哪一层。穿脱前后共用一个 outfit id。只有已知各时段温度时才指定早晚或中午。
 - 衣橱候选与已注入技能冲突时：先换同槽其他符合技能的衣橱件，没有再用 new_item；与用户明确要求冲突时在 reason 说明取舍，reason 不得出现技能内部术语。
 - 用户为某季节买衣/备衣时：点名新品与配套层次按意图目标温度/季节，不要改成另一档薄单品；有风格技能时品类按技能。
 
@@ -81,6 +82,7 @@ export const OUTFIT_PLAN_SEARCH_INSTRUCTION = `
 
 【核心原则】
 - 【天气管层次与厚薄】有【服务端槽温区表】时：开槽与厚薄【必须以该表为准】（检索时按槽温区过滤；禁止另编 ℃ 或层级）；多套同一档层次一致。无该表时再靠 weather-dressing。裤 vs 裙不强制审美选型，但若本套已定裤装或裙装路线，search_query 须写出裤或裙。
+- 【天气跨档】基础单品按较暖端、可脱外层按较冷端。同一套 Plan 中一次检索各层，穿上和脱下外套是同一套的两种穿法，禁止为它们分别开套。
 - 【适穿℃ 抄表】有槽温区表时，target / search_query 若写适穿℃，用该槽表里的区间（如冷档 inner_top 为薄贴身发热/德绒约 -15–4℃）。冷档同套有 inner_bottom 时，bottom 只描述可叠薄秋裤的全长外裤及其厚薄、覆盖，候选温区由服务端处理。
 - 【上装三槽】inner_top=内搭，top=炎热主上装或凉及更冷的中间层，outerwear=外套。表内「开/不开」优先于口头口诀。无表时的兜底：炎热只开 top；微暖～微凉有外套开 inner_top+outerwear（禁止 top 中层）；凉及更冷开 inner_top+top+outerwear。无外套时禁止开 inner_top。
 - 【下装三明治】inner_bottom=全长外裤内薄贴身速干/发热内搭裤；bottom=外穿裤；legwear=裙/短/七分可见腿层。冷/寒冷全长外裤开 inner_bottom，禁止同套再叠羊羔绒 legwear；裙或外露小腿开 legwear，不开 inner_bottom。
@@ -142,7 +144,7 @@ export const OUTFIT_RECONCILE_ADDENDUM = `
 4. 无风格技能时：召回按槽共享。从候选池组出适合本轮场合的方案；多套须在池内实质差异（色块/下装形态裤vs裙/外套类型等），优先不同 ref，允许合理共用。池内同时有裤与裙时，多套应尽量覆盖裤装与裙装各一路（场合允许时）；走 skirt/短七分的套若天气要求补腿且池有 legwear，必须带上；走全长裤装且天气开 inner_bottom 时必须带上，禁止再叠羊羔绒 legwear。adequate 优先衣橱；status=weak 且同槽仍有大类候选时先换候选，不要直接整槽 new；仅 status=none 或硬冲突时才 new_item。
 5. item 上的 outfits / slots 属性表示该件服务哪些方案与槽；有风格时优先匹配当前 outfit id；无风格时同槽池共享，按套内搭配选件即可。一套成品内 bottom 与 skirt 二选一。
 6. 同槽更优衣橱替换允许；有风格时跨品类乱跳禁止（除非按第 3 条显式改写）。无风格时允许在同槽大类内按衣橱实况选型。
-7. Plan 已开 outerwear / legwear / inner_top / inner_bottom / top 的槽：落盘时不得为「结构差异」删掉；天气层次优先于多套求异。凉及更冷须保留 inner_top + top + outerwear；冷/寒冷全长裤装须保留 inner_bottom；微暖～微凉有外套时不得擅自加 top 中间层。
+7. Plan 已开 outerwear / legwear / inner_top / inner_bottom / top 的槽：落盘时不得为「结构差异」删掉。跨档时按服务端槽温区表保留层次，在可脱层单品的 reason 里说明穿脱。单档凉及更冷须保留 inner_top + top + outerwear；冷/寒冷全长裤装须保留 inner_bottom；微暖～微凉有外套时不得擅自加 top 中间层。
 `;
 
 export const PURCHASE_PAIRING_SEARCH_ADDENDUM = `

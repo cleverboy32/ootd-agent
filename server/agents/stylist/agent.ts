@@ -207,7 +207,7 @@ function intentWithSandwichWeather(
   const axis = buildPurchaseSandwichWeather(purchaseAnchors.map((item) => item.summary));
   if (!axis) return intent;
   console.log(`[STYLIST_AGENT] purchase sandwich weather axis: ${axis}`);
-  return { ...intent, weather: axis };
+  return { ...intent, weather: axis, weatherConditions: undefined };
 }
 
 export type WardrobeSearchAuditContext = {
@@ -266,7 +266,7 @@ ${REVISION_SEARCH_ADDENDUM}
     : '';
 
   const slotTempHint =
-    resolveDressingFromWeather(sandwichIntent.weather ?? '')?.planHint ?? null;
+    resolveDressingFromWeather(sandwichIntent)?.planHint ?? null;
   const slotTempBlock = slotTempHint ? `\n${slotTempHint}\n` : '';
 
   const prompt = `
@@ -344,7 +344,7 @@ ${diversityBlock}
       console.log(`[STYLIST_AGENT] No-style plan truncated ${before} → 1 retrieval skeleton`);
     }
     const beforeSlots = plan.outfits[0]?.slots?.length ?? 0;
-    const expanded = expandNoStyleCoverageSlots(plan, sandwichIntent.weather ?? '');
+    const expanded = expandNoStyleCoverageSlots(plan, sandwichIntent);
     plan.outfits = expanded.outfits;
     const afterSlots = plan.outfits[0]?.slots?.length ?? 0;
     if (afterSlots > beforeSlots) {
@@ -355,7 +355,7 @@ ${diversityBlock}
   }
 
   // 适穿℃ 与槽温区表对齐（避免冷档 inner_top 仍写 16-24 导致硬过滤空召回）
-  const aligned = alignOutfitPlanTempsToSlotRanges(plan, sandwichIntent.weather ?? '');
+  const aligned = alignOutfitPlanTempsToSlotRanges(plan, sandwichIntent);
   plan.outfits = aligned.outfits;
 
   let queries = flattenOutfitPlanToQueries(plan);
@@ -585,6 +585,7 @@ export async function callStylistAgent(
 
   const purchaseAnchors = isPurchasePairingIntent(intent) ? listPurchaseAnchors(intent) : [];
   const sandwichIntent = intentWithSandwichWeather(intent, purchaseAnchors);
+  const slotTempHint = resolveDressingFromWeather(sandwichIntent)?.planHint;
   const previousCache = options.previousStylistCache;
   const revisionOutfitId = intent.selected_outfit_id?.trim() || 'outfit_1';
   const previousOutfit =
@@ -794,7 +795,7 @@ ${JSON.stringify(outfitPlan, null, 2)}
 - 场合: ${intent.occasion}
 - 风格偏好: ${intent.style_preference}
 - 特殊要求: ${intent.special_requests || '无'}
-${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
+${slotTempHint ? `\n${slotTempHint}\n` : ''}${skillBlock}${planBlock}${anchorBlock}${revisionBlock}${newItemDiversityBlock}
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '按 Plan 分槽召回'})】
 ${
   wardrobeXml ||

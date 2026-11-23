@@ -1,6 +1,6 @@
 import { Content, Part } from '@google/genai';
 import { takePurchaseUploadUrls } from '@/lib/purchaseUploads';
-import { enrichWeather } from '@/server/services/amapWeatherService';
+import { formatWeatherSnapshot, lookupWeatherSnapshot } from '@/server/services/amapWeatherService';
 import {
   AnchorItemImageData,
   AnchorItemInfo,
@@ -273,19 +273,28 @@ export async function enrichIntentWeather(
 
   const city = resolveWeatherCity(intent, ctx);
   console.log(`[WEATHER] Fetching weather — city="${city || '(ip fallback)'}" ip="${ctx.clientIp || '-'}"`);
-  const weather = await enrichWeather({
+  const snapshot = await lookupWeatherSnapshot({
     city: city || undefined,
     ip: ctx.clientIp,
   });
-  if (weather) console.log(`[WEATHER] Result: ${weather}`);
-  else console.log('[WEATHER] No weather data returned');
-
-  if (!weather) return intent;
+  if (!snapshot) {
+    console.log('[WEATHER] No weather data returned');
+    return intent;
+  }
+  const weather = formatWeatherSnapshot(snapshot);
+  console.log(`[WEATHER] Result: ${weather}`);
+  const temperature = snapshot.temperature ? Number(snapshot.temperature) : NaN;
+  const humidity = snapshot.humidity ? Number(snapshot.humidity) : NaN;
 
   return {
     ...intent,
     city: city || intent.city,
     weather,
+    weatherConditions: {
+      temperature: Number.isFinite(temperature) ? { min: temperature, max: temperature } : undefined,
+      windPower: snapshot.windPower,
+      humidity: Number.isFinite(humidity) ? humidity : undefined,
+    },
   };
 }
 

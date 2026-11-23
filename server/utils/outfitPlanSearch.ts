@@ -8,6 +8,7 @@ import {
   type TempRange,
 } from '@/server/utils/slotTempFilter';
 import { stripEmbeddingTemperatures } from '@/server/utils/embeddingText';
+import type { WeatherInput } from '@/server/utils/weatherInput';
 
 export interface OutfitPlanSlot {
   slot: WardrobeSearchSlot;
@@ -93,7 +94,7 @@ export function alignSearchQueryTempToSlotRange(
 /** 按 weather 定档后的槽温区，改写 plan 各槽 search_query / target 中的适穿℃ */
 export function alignOutfitPlanTempsToSlotRanges(
   plan: OutfitPlanResult,
-  weather: string
+  weather: WeatherInput
 ): OutfitPlanResult {
   const dressing = resolveDressingFromWeather(weather);
   if (!dressing) return plan;
@@ -184,7 +185,7 @@ function coverageSlotTemplate(
  */
 export function expandNoStyleCoverageSlots(
   plan: OutfitPlanResult,
-  weather: string
+  weather: WeatherInput
 ): OutfitPlanResult {
   const outfits = plan.outfits ?? [];
   if (outfits.length === 0) return plan;

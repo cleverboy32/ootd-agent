@@ -5,7 +5,7 @@
 
 import type { Content } from '@google/genai';
 import { itemFitsTemperature } from '@/server/utils/ragSeasonFilter';
-import { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
+import { formatWeatherRange, type WeatherTemperatureRange } from '@/server/utils/weatherInput';
 
 export type TempRangeBounds = { tempMin: number | null; tempMax: number | null };
 
@@ -17,15 +17,18 @@ export const WEATHER_MISMATCH_HARD_REFUSE =
 
 export function buildWeatherMismatchOfferReply(options: {
   itemLabel: string;
-  weatherCelsius: number;
+  weatherCelsius: number | WeatherTemperatureRange;
   source: 'wardrobe' | 'special_requests';
 }): string {
   const where =
     options.source === 'special_requests'
       ? `你特别要求的「${options.itemLabel}」`
       : `衣橱里的「${options.itemLabel}」`;
+  const range = typeof options.weatherCelsius === 'number'
+    ? `${options.weatherCelsius}℃`
+    : formatWeatherRange(options.weatherCelsius);
   return (
-    `${where}和今天约 ${options.weatherCelsius}℃ 的体感不太匹配，硬搭容易不舒适也不好看。` +
+    `${where}和今天约 ${range} 的天气不太匹配，硬搭容易不舒适也不好看。` +
     `要不要我${WEATHER_MISMATCH_OFFER_MARKER}？` +
     `如果仍坚持必须用这件，也请直接说，我会按原则说明无法继续搭配。`
   );
@@ -113,10 +116,6 @@ export function buildPurchaseSandwichWeather(summaries: string[]): string | null
   if (mids.length === 0) return null;
   const mid = Math.round(mids.reduce((a, b) => a + b, 0) / mids.length);
   return `约${mid}℃（按待购单品适穿温度）`;
-}
-
-export function parseWeatherCelsiusOrNull(weather: string): number | null {
-  return parseTemperatureCelsius(weather);
 }
 
 /** special_requests 里是否像在硬点名单品（而非纯颜色/气质微调） */

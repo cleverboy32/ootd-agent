@@ -287,8 +287,7 @@ export async function performRagSearch(
     name.startsWith('style-')
   );
   const sharedPoolBySlot = !hasStyleSkill;
-  const weather = logContext?.intent?.weather?.trim() ?? '';
-  const dressing = resolveDressingFromWeather(weather);
+  const dressing = resolveDressingFromWeather(logContext?.intent ?? '');
   const outfitsWithInnerBottom = new Set(
     queries.filter((item) => parseWardrobeSearchSlot(item.slot) === 'inner_bottom')
       .map((item) => item.outfitId)
@@ -319,10 +318,8 @@ export async function performRagSearch(
     }
 
     if (dressing) {
-      const adj =
-        dressing.adjustments.length > 0 ? `；${dressing.adjustments.join('；')}` : '';
       console.log(
-        `[RAG_HANDLER] Slot temp-range filter active: ambient≈${dressing.tempCelsius}℃ feelsLike≈${dressing.feelsLikeCelsius}℃ band=${dressing.band}${adj}`
+        `[RAG_HANDLER] Slot temp-range filter active: temperature=${dressing.dressingRange.min}–${dressing.dressingRange.max}℃ baseBand=${dressing.baseBand} protectionBand=${dressing.band}`
       );
     }
 
@@ -435,7 +432,7 @@ export async function performRagSearch(
         seasonFilter: {
           dressingClimate: '',
           targetSeasons: [],
-          isWarmWeather: dressing !== null ? dressing.feelsLikeCelsius >= 23 : false,
+          isWarmWeather: (dressing?.dressingRange.max ?? -Infinity) >= 23,
           strictColdActivity: false,
         },
         skillNames: logContext?.skillNames,

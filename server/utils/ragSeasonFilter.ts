@@ -6,10 +6,8 @@ import {
 } from '@/server/agents/intent';
 import type { WardrobeSearchResult } from '@/server/services/wardrobeService';
 import type { WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
-import {
-  computeFeelsLikeCelsius,
-  parseTemperatureCelsius,
-} from '@/server/utils/slotTempFilter';
+import { applySlotTemperatureFilter } from '@/server/utils/slotTempFilter';
+import { getDressingTemperature, type WeatherInput } from '@/server/utils/weatherInput';
 
 export { parseTemperatureCelsius } from '@/server/utils/slotTempFilter';
 
@@ -60,11 +58,8 @@ export function inferClimateFromWeather(weather: string): DressingClimate | '' {
   const normalized = weather.trim();
   if (!normalized) return '';
 
-  const temp = parseTemperatureCelsius(normalized);
-  if (temp !== null) {
-    const { feelsLikeCelsius } = computeFeelsLikeCelsius(normalized, temp);
-    return climateFromParsedTemperature(feelsLikeCelsius);
-  }
+  const range = getDressingTemperature(normalized);
+  if (range) return climateFromParsedTemperature(range.max);
 
   if (/冬|寒冷|下雪|保暖|冷/i.test(normalized)) return 'cold';
   if (/夏|炎热|热/i.test(normalized)) return 'warm';
@@ -93,12 +88,8 @@ function inferClimateFromActivity(intent: GatekeeperIntent, userMessage?: string
   const activityText = buildActivityText(intent, userMessage);
   if (!STRICT_COLD_ACTIVITY_HINT.test(activityText)) return '';
 
-  const weatherText = intent.weather?.trim() ?? '';
-  const temp = weatherText ? parseTemperatureCelsius(weatherText) : null;
-  if (temp !== null) {
-    const { feelsLikeCelsius } = computeFeelsLikeCelsius(weatherText, temp);
-    if (feelsLikeCelsius >= WARM_MIN_CELSIUS) return '';
-  }
+  const range = getDressingTemperature(intent);
+  if (range && range.max >= WARM_MIN_CELSIUS) return '';
 
   return 'cold';
 }
@@ -120,15 +111,10 @@ export function computeDressingClimate(
 ): DressingClimate | '' {
   const fromAnchor = inferDressingClimateFromAnchor(intent);
   const weatherText = intent.weather?.trim() ?? '';
-  const parsedTemp = weatherText ? parseTemperatureCelsius(weatherText) : null;
-  const fromWeatherTemp =
-    parsedTemp !== null
-      ? climateFromParsedTemperature(
-          computeFeelsLikeCelsius(weatherText, parsedTemp).feelsLikeCelsius
-        )
-      : '';
+  const range = getDressingTemperature(intent);
+  const fromWeatherTemp = range ? climateFromParsedTemperature(range.max) : '';
   const fromWeatherKeyword =
-    weatherText && parsedTemp === null ? inferClimateFromWeather(weatherText) : '';
+    weatherText && !range ? inferClimateFromWeather(weatherText) : '';
   const fromActivity = inferClimateFromActivity(intent, userMessage);
 
   if (fromWeatherTemp) {
@@ -410,15 +396,13 @@ export function applyTemperatureFilter<T extends { tempMin?: number | null; temp
 /** 锚点候选：从 weather 文本解析温度后过滤；无温度则原样返回。 */
 export function filterAnchorCandidatesByWeather<
   T extends { tempMin?: number | null; tempMax?: number | null },
->(results: T[], weather?: string): T[] {
-  const weatherText = weather?.trim() ?? '';
-  const temperature = parseTemperatureCelsius(weatherText);
-  if (temperature === null) return results;
-  const { feelsLikeCelsius } = computeFeelsLikeCelsius(weatherText, temperature);
-  const filtered = applyTemperatureFilter(results, feelsLikeCelsius);
+>(results: T[], weather: WeatherInput = ''): T[] {
+  const range = getDressingTemperature(weather);
+  if (!range) return results;
+  const filtered = applySlotTemperatureFilter(results, range);
   if (filtered.length !== results.length) {
     console.log(
-      `[WARDROBE_RESOLVER] temperature filter feelsLike ${feelsLikeCelsius}℃ (raw ${temperature}℃): ${results.length} → ${filtered.length}`
+      `[WARDROBE_RESOLVER] temperature filter ${range.min}–${range.max}℃: ${results.length} → ${filtered.length}`
     );
   }
   return filtered;

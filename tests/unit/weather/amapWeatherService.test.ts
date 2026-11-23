@@ -1,5 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { DEFAULT_GATEKEEPER_INTENT } from '@/server/agents/intent/typeDefs';
+import { enrichIntentWeather } from '@/server/agents/intent/utils';
+import { resolveDressingFromWeather } from '@/server/utils/slotTempFilter';
 import {
   buildWeatherCacheKey,
   clearWeatherCache,
@@ -149,6 +152,30 @@ describe('enrichWeather', () => {
     assert.match(summary, /多云/);
     assert.match(summary, /14℃/);
     assert.match(summary, /西北风/);
+  });
+
+  it('carries the structured readings into outfit planning', async () => {
+    mockFetch(() => ({
+      city: '杭州',
+      weather: '阴',
+      temperature: 11.5,
+      wind_direction: '北风',
+      wind_power: '4–5级',
+      humidity: 80,
+    }));
+
+    const intent = await enrichIntentWeather(
+      { ...DEFAULT_GATEKEEPER_INTENT, city: '杭州' },
+      {}
+    );
+    assert.deepEqual(intent.weatherConditions, {
+      temperature: { min: 11.5, max: 11.5 },
+      windPower: '4–5级',
+      humidity: 80,
+    });
+    const dressing = resolveDressingFromWeather(intent);
+    assert.equal(dressing?.band, 'cool');
+    assert.match(dressing?.planHint ?? '', /防风/);
   });
 
   it('falls back to IP → city → weather', async () => {

@@ -23,12 +23,12 @@ import {
   buildWeatherMismatchOfferReply,
   historyHasWeatherMismatchOffer,
   isWeatherMismatchInsist,
-  itemConflictsWithWeatherCelsius,
-  parseWeatherCelsiusOrNull,
   resolveItemTempRange,
   specialRequestsLooksLikeHardGarmentConstraint,
   WEATHER_MISMATCH_HARD_REFUSE,
 } from '@/server/utils/weatherAnchorFit';
+import { itemOverlapsTempRange } from '@/server/utils/slotTempFilter';
+import { formatWeatherRange, getDressingTemperature, type WeatherTemperatureRange } from '@/server/utils/weatherInput';
 
 // ─── Reply builders ────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ function blockWeatherMismatch(
   intent: GatekeeperIntent,
   options: {
     itemLabel: string;
-    weatherCelsius: number;
+    weatherCelsius: WeatherTemperatureRange;
     source: 'wardrobe' | 'special_requests';
     userText: string;
     history?: Content[];
@@ -138,7 +138,7 @@ function blockWeatherMismatch(
     };
   }
   console.log(
-    `[GATEKEEPER] weather mismatch — offer swap (${options.source}, ${options.weatherCelsius}℃)`
+    `[GATEKEEPER] weather mismatch — offer swap (${options.source}, ${formatWeatherRange(options.weatherCelsius)})`
   );
   return {
     is_complete: false,
@@ -154,8 +154,8 @@ function blockWeatherMismatch(
 
 /** 衣橱锚点或 special_requests 硬约束 vs 实况气温；冲突则短路 */
 function maybeBlockWeatherUnfitGarment(ctx: FinalizeContext): GatekeeperFinalizeResult | null {
-  const weatherCelsius = parseWeatherCelsiusOrNull(ctx.intent.weather || '');
-  if (weatherCelsius === null) return null;
+  const weatherCelsius = getDressingTemperature(ctx.intent);
+  if (!weatherCelsius) return null;
 
   const userText = ctx.currentMessageText?.trim() ?? '';
   const special = ctx.intent.special_requests?.trim() ?? '';
@@ -169,7 +169,7 @@ function maybeBlockWeatherUnfitGarment(ctx: FinalizeContext): GatekeeperFinalize
         ctx.intent.anchor_item_summary ||
         ctx.wardrobeAnchorTemp.label,
     });
-    if (range && itemConflictsWithWeatherCelsius(range, weatherCelsius)) {
+    if (range && !itemOverlapsTempRange(range, weatherCelsius)) {
       return blockWeatherMismatch(ctx.intent, {
         itemLabel: ctx.wardrobeAnchorTemp.label || ctx.intent.anchor_item_summary || '该单品',
         weatherCelsius,
@@ -182,7 +182,7 @@ function maybeBlockWeatherUnfitGarment(ctx: FinalizeContext): GatekeeperFinalize
 
   if (specialRequestsLooksLikeHardGarmentConstraint(special)) {
     const range = resolveItemTempRange({ textFallback: special });
-    if (range && itemConflictsWithWeatherCelsius(range, weatherCelsius)) {
+    if (range && !itemOverlapsTempRange(range, weatherCelsius)) {
       const labelMatch = special.match(/[「『]?([\u4e00-\u9fffA-Za-z0-9]{2,16}(?:裙|裤|衫|外套|鞋|靴|衣))[」』]?/);
       return blockWeatherMismatch(ctx.intent, {
         itemLabel: labelMatch?.[1] || special.slice(0, 24),

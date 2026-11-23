@@ -8,6 +8,7 @@ import {
   applySlotTemperatureFilter,
   resolveDressingFromWeather,
 } from '@/server/utils/slotTempFilter';
+import type { WeatherInput } from '@/server/utils/weatherInput';
 import type {
   AnchorSlot,
   WardrobeAnchorCandidate,
@@ -56,7 +57,7 @@ export async function resolveWardrobeAnchor(
   /** Gatekeeper LLM 直接生成的精简检索词，优先使用 */
   llmSearchQuery?: string,
   /** 实况天气文本；有可解析温度时丢掉不适穿候选 */
-  weather?: string
+  weather: WeatherInput = ''
 ): Promise<WardrobeResolverResult> {
   const query = (llmSearchQuery?.trim() || summary.trim());
   if (!query || !userId) {
@@ -89,7 +90,7 @@ export async function resolveWardrobeAnchor(
 
   const searchSlot = effectiveSlot as WardrobeSearchSlot;
   const slotTempRange =
-    resolveDressingFromWeather(weather?.trim() ?? '')?.slotRange(searchSlot) ?? null;
+    resolveDressingFromWeather(weather)?.slotRange(searchSlot) ?? null;
   const searchOptions = {
     slot: searchSlot,
     ...(slotTempRange ? { slotTempRange } : {}),
@@ -116,7 +117,7 @@ export async function resolveWardrobeAnchor(
   const temperatureFit = applySlotTemperatureFilter(matched, slotTempRange);
   if (matched.length > 0 && temperatureFit.length === 0) {
     console.warn(
-      `[WARDROBE_RESOLVER] All ${matched.length} candidates filtered by slotTempRange weather="${(weather ?? '').slice(0, 40)}"`
+      `[WARDROBE_RESOLVER] All ${matched.length} candidates filtered by slotTempRange weather="${(typeof weather === 'string' ? weather : weather.weather).slice(0, 40)}"`
     );
     return { status: 'not_found' };
   }

@@ -202,7 +202,7 @@ export async function callGatekeeperAgent(
         intent.anchor_item_summary,
         intent.anchor_slot || undefined,
         intent.wardrobe_search_query,
-        intent.weather
+        intent
       );
     }
 

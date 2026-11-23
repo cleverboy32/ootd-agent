@@ -157,7 +157,7 @@ export function isLocalOrPrivateIp(ip: string | undefined): boolean {
   return false;
 }
 
-function formatWeatherSnapshot(snapshot: WeatherSnapshot): string {
+export function formatWeatherSnapshot(snapshot: WeatherSnapshot): string {
   const city = snapshot.city?.trim() || '当地';
   const weather = snapshot.weather?.trim() || '未知';
   const temperature = snapshot.temperature?.trim() || '';
@@ -311,26 +311,34 @@ export async function resolveLocationByIp(ip: string): Promise<AmapLocation | nu
   return { city, adcode: '' };
 }
 
-export async function enrichWeather(opts: {
+export async function lookupWeatherSnapshot(opts: {
   city?: string;
   ip?: string;
-}): Promise<string> {
+}): Promise<WeatherSnapshot | null> {
   try {
     if (opts.city?.trim()) {
       const snapshot = await fetchWeatherByCity(opts.city);
-      if (snapshot) return formatWeatherSnapshot(snapshot);
+      if (snapshot) return snapshot;
     }
 
     if (opts.ip && !isLocalOrPrivateIp(opts.ip)) {
       const location = await resolveLocationByIp(opts.ip);
       if (location?.city) {
         const snapshot = await fetchWeatherByCity(location.city);
-        if (snapshot) return formatWeatherSnapshot(snapshot);
+        if (snapshot) return snapshot;
       }
     }
   } catch (error) {
     console.warn('[UAPI_WEATHER] enrichWeather failed:', error);
   }
 
-  return '';
+  return null;
+}
+
+export async function enrichWeather(opts: {
+  city?: string;
+  ip?: string;
+}): Promise<string> {
+  const snapshot = await lookupWeatherSnapshot(opts);
+  return snapshot ? formatWeatherSnapshot(snapshot) : '';
 }

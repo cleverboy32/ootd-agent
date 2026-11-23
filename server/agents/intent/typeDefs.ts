@@ -1,4 +1,5 @@
 import { Content } from '@google/genai';
+import type { WeatherConditions } from '@/server/utils/weatherInput';
 
 // ─── Request Types ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ export interface AnchorItemInfo {
 
 export interface GatekeeperIntent {
   weather: string;
+  weatherConditions?: WeatherConditions;
   city?: string;
   /**
    * city 的语义角色：home 常住所在地可落档；travel 旅游/出行目的地不落档；空表示无城市或不适用。

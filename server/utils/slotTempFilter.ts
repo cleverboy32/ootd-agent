@@ -4,6 +4,15 @@
  */
 
 import { parseWardrobeSearchSlot, type WardrobeSearchSlot } from '@/server/utils/ragSearchSlots';
+import {
+  formatWeatherRange,
+  getDressingTemperature,
+  readWeatherConditions,
+  selectDressingTemperature,
+  type WeatherConditions,
+  type WeatherInput,
+  type WeatherTemperatureRange,
+} from '@/server/utils/weatherInput';
 
 /** 环境气温档（与 weather-dressing 中文名：炎热/微暖/舒适/微凉/凉/冷/寒冷） */
 export type WeatherDressBand =
@@ -210,61 +219,31 @@ function formatTempBound(value: number | null): string {
   return value === null ? '不限' : `${value}`;
 }
 
-/**
- * 从 weather 文本解析 ℃。支持单值与区间（取中点）。
- * 例：18℃、约18-22℃、15～20度
- */
+/** 旧的单值调用口径；定档与选品使用完整区间。 */
 export function parseTemperatureCelsius(weather: string): number | null {
-  const normalized = weather.trim();
-  if (!normalized) return null;
-
-  const range = normalized.match(
-    /(-?\d+)\s*(?:℃|°\s*c|度)?\s*[~～\-—–至到]\s*(-?\d+)\s*(?:℃|°\s*c|度)?/i
-  );
-  if (range) {
-    const a = Number.parseInt(range[1], 10);
-    const b = Number.parseInt(range[2], 10);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-    return Math.round((a + b) / 2);
-  }
-
-  const single = normalized.match(/(-?\d+)\s*(?:℃|°\s*c|度)/i);
-  if (!single) return null;
-  const value = Number.parseInt(single[1], 10);
-  return Number.isFinite(value) ? value : null;
+  const range = getDressingTemperature(weather);
+  if (!range) return null;
+  return range.min === range.max ? range.min : Math.round((range.min + range.max) / 2);
 }
 
-/** 风力 ≥4 级（明确 ≤3 级不算）→ 体感 −3；湿度>75% 且原气温<10℃ → 体感 −4 */
-export function computeFeelsLikeCelsius(
-  weather: string,
-  tempCelsius: number
-): { feelsLikeCelsius: number; adjustments: string[] } {
-  const adjustments: string[] = [];
-  let feelsLikeCelsius = tempCelsius;
-
-  const weakWind =
-    /[≤<]=?\s*3\s*级|3\s*级以下|低于\s*4\s*级|小于\s*4\s*级|风力\s*[≤<]=?\s*3/.test(weather);
-  if (!weakWind) {
-    const windLevel = weather.match(/(\d+)\s*级/);
-    if (windLevel) {
-      const level = Number.parseInt(windLevel[1], 10);
-      if (Number.isFinite(level) && level >= 4) {
-        feelsLikeCelsius -= 3;
-        adjustments.push('风力≥4:-3℃');
-      }
-    }
+function weatherProtectionHints(conditions: WeatherConditions, range: WeatherTemperatureRange): string[] {
+  const hints: string[] = [];
+  const windPower = conditions.windPower?.trim() ?? '';
+  const levels = windPower.match(/\d+/g)?.map(Number) ?? [];
+  const maxWindLevel = Math.max(0, ...levels) - (/^<(?![=])/.test(windPower) ? 1 : 0);
+  if (maxWindLevel >= 4) {
+    hints.push(range.min < 18
+      ? '有较强风，已有外层优先选防风、可穿脱的款式'
+      : '有较强风，优先选抗风且透气的款式，层数按温度');
   }
-
-  const humidity = weather.match(/湿度\s*[：:]?\s*(\d+)\s*%/);
-  if (humidity) {
-    const pct = Number.parseInt(humidity[1], 10);
-    if (Number.isFinite(pct) && pct > 75 && tempCelsius < 10) {
-      feelsLikeCelsius -= 4;
-      adjustments.push('湿冷(湿度>75%且<10℃):-4℃');
-    }
+  const humidity = conditions.humidity ?? 0;
+  if (humidity > 75 && range.min < 10) {
+    hints.push('冷时湿度较高，外层优先防风，遇雨雪注意防湿');
   }
-
-  return { feelsLikeCelsius, adjustments };
+  if (humidity >= 80 && range.max >= 26) {
+    hints.push('暖时湿度较高，优先透气速干面料');
+  }
+  return hints;
 }
 
 export function resolveSlotTempFilter(
@@ -272,33 +251,57 @@ export function resolveSlotTempFilter(
   slot?: string | null,
   hasInnerBottom = false
 ): TempRange | null {
+  const tier = resolveSlotTier(BAND_SLOT_TIERS[band], band, slot, hasInnerBottom);
+  return tier ? { ...THICKNESS_TEMP_RANGES[tier] } : null;
+}
+
+function resolveSlotTier(
+  tiers: SlotTierMap,
+  band: WeatherDressBand,
+  slot?: string | null,
+  hasInnerBottom = false
+): ThicknessTier | null {
   if (!slot) return null;
   const parsed = parseWardrobeSearchSlot(slot) ?? (slot as WardrobeSearchSlot);
-  const tier = band === 'cold' && parsed === 'bottom' && hasInnerBottom
+  return band === 'cold' && parsed === 'bottom' && hasInnerBottom
     ? 'layered_cold_bottom'
-    : BAND_SLOT_TIERS[band][parsed];
-  if (tier === undefined || tier === null) return null;
-  return { ...THICKNESS_TEMP_RANGES[tier] };
+    : tiers[parsed] ?? null;
 }
 
 export type WeatherDressResolution = {
-  tempCelsius: number;
-  feelsLikeCelsius: number;
+  temperatureRange: WeatherTemperatureRange;
+  dressingRange: WeatherTemperatureRange;
   band: WeatherDressBand;
-  adjustments: string[];
+  baseBand: WeatherDressBand;
   planHint: string;
   slotRange: (slot: string | null | undefined, hasInnerBottom?: boolean) => TempRange | null;
 };
 
-function buildPlanHintFromBand(
-  tempCelsius: number,
-  feelsLikeCelsius: number,
-  band: WeatherDressBand,
-  adjustments: string[]
+function getDressSlotTiers(band: WeatherDressBand, baseBand: WeatherDressBand, min: number): SlotTierMap {
+  const protection = BAND_SLOT_TIERS[band];
+  if (band === baseBand) return protection;
+
+  const base = BAND_SLOT_TIERS[baseBand];
+  const transition = band === 'cool' && min >= 10;
+  return {
+    ...protection,
+    inner_top: base.inner_top ?? base.top,
+    top: transition ? null : protection.top,
+    outerwear: transition ? 'mid_outer' : protection.outerwear,
+    bottom: protection.inner_bottom ? protection.bottom : base.bottom,
+    skirt: base.skirt,
+  };
+}
+
+function buildPlanHint(
+  conditions: WeatherConditions,
+  resolution: Omit<WeatherDressResolution, 'planHint'>,
+  tiers: SlotTierMap
 ): string {
+  const { temperatureRange, dressingRange, band, baseBand } = resolution;
   const lines: string[] = [];
   for (const slot of PLAN_HINT_SLOTS) {
-    const tier = BAND_SLOT_TIERS[band][slot];
+    const tier = tiers[slot];
     if (tier === undefined || tier === null) {
       if (WEATHER_GATE_SLOTS.has(slot)) {
         lines.push(`- ${slot}: 本档不开（禁止写入 plan slots）`);
@@ -318,38 +321,46 @@ function buildPlanHintFromBand(
     );
   }
 
-  const feelLine =
-    adjustments.length > 0
-      ? `气温约 ${tempCelsius}℃ → 体感约 ${feelsLikeCelsius}℃（${adjustments.join('；')}）→ 档=${band}`
-      : `气温约 ${tempCelsius}℃ → 档=${band}`;
+  const label = conditions.apparentTemperature === dressingRange ? '体感' : '气温';
+  const bandLine = band === baseBand
+    ? `${label}约 ${formatWeatherRange(dressingRange)} → 档=${band}`
+    : `${label}约 ${formatWeatherRange(dressingRange)} → 较暖档=${baseBand}，较冷档=${band}`;
+  const protection = weatherProtectionHints(conditions, temperatureRange);
 
   return [
     '【服务端槽温区表 — 只管天气层次/厚薄】',
-    feelLine,
+    bandLine,
+    ...(band !== baseBand
+      ? [`跨档只设计同一套单品的穿脱方式。按 ${dressingRange.max}℃ 选脱掉可脱层后仍能独立穿的基础上衣和下装，按 ${dressingRange.min}℃ 选防护层。在可脱层单品的 reason 写明什么时候加、什么时候脱，穿脱方式不占用独立 outfit id。`]
+      : []),
+    ...(protection.length ? [`天气防护：${protection.join('；')}。`] : []),
     ...lines,
     '规则：标注「开」的天气槽（上装层次、下装厚薄、裤内层、腿层、鞋温区）须遵守；标注「不开」的上装/裤内层/腿层槽禁止开。成品一套内 bottom（裤）与 skirt（裙装）二选一。全长加绒/滑雪等外裤用 inner_bottom（薄速干/发热内搭裤），禁止再叠羊羔绒 legwear；裙装/短裤/七分裤等外露小腿用 legwear，不开 inner_bottom。无 style 检索骨架可为召回池同时开 bottom+skirt（及表内 inner_bottom/legwear）。shoes 本表只管厚薄温区，槽仍须开。accessory 不在本表：按场合/风格照常可开。target 与 search_query 厚薄用词须与层级一致；禁止自编另一套 ℃。',
   ].join('\n');
 }
 
 /**
- * 唯一天气定档入口：解析 ℃ → 体感修正 → 档 → 槽温区 / Plan hint。
+ * 按适用天气区间的两端定基础穿法和防护层。
  * weather 无法解析 ℃ 时返回 null。
  */
-export function resolveDressingFromWeather(weather: string): WeatherDressResolution | null {
-  const tempCelsius = parseTemperatureCelsius(weather);
-  if (tempCelsius === null) return null;
-
-  const { feelsLikeCelsius, adjustments } = computeFeelsLikeCelsius(weather, tempCelsius);
-  const band = resolveWeatherDressBand(feelsLikeCelsius);
-
-  return {
-    tempCelsius,
-    feelsLikeCelsius,
+export function resolveDressingFromWeather(weather: WeatherInput): WeatherDressResolution | null {
+  const conditions = readWeatherConditions(weather);
+  const dressingRange = selectDressingTemperature(conditions);
+  if (!dressingRange) return null;
+  const band = resolveWeatherDressBand(dressingRange.min);
+  const baseBand = resolveWeatherDressBand(dressingRange.max);
+  const tiers = getDressSlotTiers(band, baseBand, dressingRange.min);
+  const resolution: Omit<WeatherDressResolution, 'planHint'> = {
+    temperatureRange: conditions.temperature ?? dressingRange,
+    dressingRange,
     band,
-    adjustments,
-    planHint: buildPlanHintFromBand(tempCelsius, feelsLikeCelsius, band, adjustments),
-    slotRange: (slot, hasInnerBottom) => resolveSlotTempFilter(band, slot, hasInnerBottom),
+    baseBand,
+    slotRange: (slot, hasInnerBottom) => {
+      const tier = resolveSlotTier(tiers, band, slot, hasInnerBottom);
+      return tier ? { ...THICKNESS_TEMP_RANGES[tier] } : null;
+    },
   };
+  return { ...resolution, planHint: buildPlanHint(conditions, resolution, tiers) };
 }
 
 

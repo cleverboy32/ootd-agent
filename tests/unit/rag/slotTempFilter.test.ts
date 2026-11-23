@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 import {
   applySlotTemperatureFilter,
   calendarSeasonTempHint,
-  computeFeelsLikeCelsius,
   itemOverlapsTempRange,
   itemTempMidpoint,
   parseTemperatureCelsius,
@@ -12,6 +11,7 @@ import {
   resolveWeatherDressBand,
   THICKNESS_TEMP_RANGES,
 } from '@/server/utils/slotTempFilter';
+import { readWeatherConditions } from '@/server/utils/weatherInput';
 
 describe('parseTemperatureCelsius', () => {
   it('parses single celsius', () => {
@@ -22,6 +22,18 @@ describe('parseTemperatureCelsius', () => {
   it('parses range as midpoint', () => {
     assert.equal(parseTemperatureCelsius('约15-20℃'), 18);
     assert.equal(parseTemperatureCelsius('0～8℃'), 4);
+  });
+
+  it('keeps signed decimals and separates wind, temperature spread, and apparent temperature', () => {
+    assert.equal(parseTemperatureCelsius('约15.5℃'), 15.5);
+    assert.equal(parseTemperatureCelsius('-0.5℃'), -0.5);
+    assert.equal(parseTemperatureCelsius('11℃ 北风4–5级'), 11);
+    assert.equal(parseTemperatureCelsius('北风4–5级'), null);
+    const conditions = readWeatherConditions('气温 -5.5–-2℃，温差3.5℃，体感 -8–-3℃，风力4–5级，湿度80%');
+    assert.deepEqual(conditions.temperature, { min: -5.5, max: -2 });
+    assert.deepEqual(conditions.apparentTemperature, { min: -8, max: -3 });
+    assert.equal(conditions.windPower, '4–5级');
+    assert.equal(conditions.humidity, 80);
   });
 
   it('rejects unknown weather placeholders', () => {
@@ -258,36 +270,51 @@ describe('applySlotTemperatureFilter', () => {
   });
 });
 
-describe('computeFeelsLikeCelsius / resolveDressingFromWeather', () => {
-  it('wind ≥4 lowers feelsLike by 3 and can shift band', () => {
-    const { feelsLikeCelsius, adjustments } = computeFeelsLikeCelsius('阴 10℃ 北风5级', 10);
-    assert.equal(feelsLikeCelsius, 7);
-    assert.ok(adjustments.some((a) => a.includes('风力')));
-    const resolved = resolveDressingFromWeather('阴 10℃ 北风5级');
-    assert.ok(resolved);
-    assert.equal(resolved!.tempCelsius, 10);
-    assert.equal(resolved!.feelsLikeCelsius, 7);
-    assert.equal(resolved!.band, 'cool');
-    assert.match(resolved!.planHint, /体感约 7℃/);
+describe('weather protection and cross-band dressing', () => {
+  it('keeps the measured band in strong wind, with a wind protection hint', () => {
+    const resolved = resolveDressingFromWeather('11℃ 北风4–5级')!;
+    assert.deepEqual(resolved.dressingRange, { min: 11, max: 11 });
+    assert.equal(resolved.band, 'cool');
+    assert.match(resolved.planHint, /防风/);
+    assert.equal(resolveDressingFromWeather('30℃ 东风4级')?.band, 'hot');
+    assert.doesNotMatch(resolveDressingFromWeather('10℃ 东北风≤3级')!.planHint, /天气防护/);
   });
 
-  it('explicit ≤3级 does not apply wind adjustment', () => {
-    const { feelsLikeCelsius, adjustments } = computeFeelsLikeCelsius('晴 10℃ 东北风≤3级', 10);
-    assert.equal(feelsLikeCelsius, 10);
-    assert.equal(adjustments.length, 0);
+  it('uses humidity for protection and fabric selection without shifting bands', () => {
+    const cold = resolveDressingFromWeather('9℃ 湿度80%')!;
+    const warm = resolveDressingFromWeather('29℃ 湿度85%')!;
+    assert.equal(cold.band, 'cool');
+    assert.match(cold.planHint, /防湿/);
+    assert.equal(warm.band, 'hot');
+    assert.match(warm.planHint, /透气速干/);
   });
 
-  it('humid cold: humidity>75% and temp<10 lowers by 4', () => {
-    const { feelsLikeCelsius, adjustments } = computeFeelsLikeCelsius('阴 8℃ 湿度80%', 8);
-    assert.equal(feelsLikeCelsius, 4);
-    assert.ok(adjustments.some((a) => a.includes('湿冷')));
-    const resolved = resolveDressingFromWeather('阴 8℃ 湿度80%');
-    assert.equal(resolved!.band, 'cold');
+  it('uses apparent temperatures for the matching time span and keeps ambient measurements available', () => {
+    const resolved = resolveDressingFromWeather({
+      weather: '9℃',
+      weatherConditions: {
+        temperature: { min: 10, max: 18 },
+        apparentTemperature: { min: 8, max: 16 },
+        windPower: '5级',
+        humidity: 80,
+      },
+    })!;
+    assert.deepEqual(resolved.temperatureRange, { min: 10, max: 18 });
+    assert.deepEqual(resolved.dressingRange, { min: 8, max: 16 });
+    assert.match(resolved.planHint, /体感约 8–16℃/);
+    assert.deepEqual(resolveDressingFromWeather('气温10–18℃，当前体感8℃')?.dressingRange, { min: 10, max: 18 });
   });
 
-  it('humid warm does not apply humid-cold rule', () => {
-    const { feelsLikeCelsius } = computeFeelsLikeCelsius('闷热 26℃ 湿度85%', 26);
-    assert.equal(feelsLikeCelsius, 26);
+  it('uses one set of slots for a warm base and a detachable outer layer at 10–18℃', () => {
+    const resolved = resolveDressingFromWeather('温度10–18℃')!;
+    assert.equal(resolved.band, 'cool');
+    assert.equal(resolved.baseBand, 'comfort');
+    assert.deepEqual(resolved.slotRange('inner_top'), THICKNESS_TEMP_RANGES.thin_top_long);
+    assert.deepEqual(resolved.slotRange('outerwear'), THICKNESS_TEMP_RANGES.mid_outer);
+    assert.deepEqual(resolved.slotRange('bottom'), THICKNESS_TEMP_RANGES.regular_bottom);
+    assert.equal(resolved.slotRange('top'), null);
+    assert.equal(resolved.slotRange('inner_bottom'), null);
+    assert.match(resolved.planHint, /同一套单品.*18℃.*10℃.*穿脱方式不占用独立 outfit id/);
   });
 });
 
