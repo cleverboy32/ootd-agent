@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm db:generate && NODE_OPTIONS='--max-old-space-size=8192'  next dev",
+    "db:tunnel": "bash scripts/ensure-db-tunnel.sh",
+    "dev": "pnpm db:tunnel && pnpm db:generate && NODE_OPTIONS='--max-old-space-size=8192'  next dev",
     "build": "NODE_OPTIONS='--max-old-space-size=8192' next build",
     "start": "next start",
     "lint": "eslint && tsc --noEmit",
