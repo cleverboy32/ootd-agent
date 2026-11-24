@@ -641,7 +641,7 @@ export async function callStylistAgent(
     )
   );
   const skillBlock = buildSkillBlocks(skillNames);
-  if (options.evalWardrobeItems && options.evalWardrobeItems.length > 0) {
+  if (options.evalWardrobeItems !== undefined) {
     console.log(
       `[STYLIST_AGENT] Eval wardrobe inject: ${options.evalWardrobeItems.length} items (skip RAG)`
     );
@@ -799,9 +799,11 @@ ${slotTempHint ? `\n${slotTempHint}\n` : ''}${skillBlock}${planBlock}${anchorBlo
 【用户衣橱单品列表 (RAG 检索结果 — ${isRevision ? '本轮替换槽位候选' : '按 Plan 分槽召回'})】
 ${
   wardrobeXml ||
-  (isRevision && previousCache
-    ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item，且须贴合 Plan)*'
-    : '*(用户衣橱为空或未召回；按 Plan target 用 new_item 兑现)*')
+  (options.evalWardrobeItems?.length === 0
+    ? '*(本次空衣橱评测：所有单品的 id 填 new_item。按服务端槽温区表组织层级和厚薄。)*'
+    : isRevision && previousCache
+      ? '*(微调模式：本轮未召回新候选；未改动槽位复用上一轮衣橱单品 id；若必须换品且无候选则用 new_item，且须贴合 Plan)*'
+      : '*(用户衣橱为空或未召回；按 Plan target 用 new_item 兑现)*')
 }
 `;
 

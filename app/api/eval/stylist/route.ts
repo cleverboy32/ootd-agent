@@ -76,10 +76,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const wardrobeItems = Array.isArray(body.wardrobeItems) ? body.wardrobeItems : [];
-  if (wardrobeItems.length === 0) {
-    return Response.json({ error: 'wardrobeItems is required (mock wardrobe)' }, { status: 400 });
+  if (!Array.isArray(body?.wardrobeItems)) {
+    return Response.json({ error: 'wardrobeItems must be an array' }, { status: 400 });
   }
+  const wardrobeItems = body.wardrobeItems;
 
   const userMessage = (body.user_message ?? '').trim() || '帮我搭一套今天的日常穿搭';
   const intent = buildIntent(body.intent);

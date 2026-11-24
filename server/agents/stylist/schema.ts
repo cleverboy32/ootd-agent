@@ -81,7 +81,7 @@ export interface StylistAgentOptions {
   /** 已识别的上传单品图，附在选品调用里。 */
   uploadGarmentParts?: import('@google/genai').Part[];
   /**
-   * 评测用：跳过用户衣橱 RAG，把固定候选集直接注入 Prompt。
+   * 评测用：跳过用户衣橱 RAG，直接使用给定候选。空数组表示空衣橱。
    * 见 server/agents/stylist/evalWardrobe.ts
    */
   evalWardrobeItems?: import('./evalWardrobe').EvalWardrobeItem[];
