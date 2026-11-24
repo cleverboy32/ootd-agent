@@ -117,11 +117,14 @@ export const stylistSchema: Schema = {
                   description:
                     '穿搭层级，只能是：top（炎热主上装；或凉～寒冷的保暖中间层）| inner_top（有外套时的内搭；微暖～微凉无中间层时上装标此层；凉及更冷为最里薄贴身打底）| outerwear（外套）| inner_bottom（全长外裤内的薄贴身速干/发热内搭裤）| bottom（外穿裤）| skirt（半身裙/连衣裙等所有裙装）| legwear（打底袜/长筒袜/连裤袜/羊羔绒袜型打底等可见腿层）| shoes | accessory（包/首饰/帽等，不含腿部保暖）。开衫、毛衣、衬衫若本套没有外套，必须标 top，禁止标 inner_top。微暖～微凉有外套时禁止再标一层 top 中间层；凉及更冷须可有 top 中间层。一套内 bottom 与 skirt 二选一。全长加绒/滑雪裤用 inner_bottom，禁止再叠羊羔绒 legwear；裙/短/七分外露小腿用 legwear，不开 inner_bottom。',
                 },
-                reason: { type: Type.STRING, description: '选用此单品的理由：场合、天气或风格。不写领、门襟、袖这些结构。' },
+                reason: {
+                  type: Type.STRING,
+                  description: '指出这件单品用什么特点满足本轮相关的要求，如天气、场合、风格或用户点名的条件，以及它在整套中的作用。天气跨档时按单品说明何时加穿、脱下或单穿。不罗列领、门襟、袖等无关结构。',
+                },
                 description: {
                   type: Type.STRING,
                   description:
-                    '新品必填一句外观，供后续出图照抄：颜色、材质，以及肉眼可见的结构止点。上装写领型、袖型与袖长止点（袖口落到腕/肘/上臂哪一段）、衣长止点（腰/髋/臀）；下装写裤型或裙型与下摆止点（膝/小腿中/踝）；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带。禁止只写行话（如只写「窄袖」「直筒」却不写袖口或下摆落在哪）。用户否定上一版气质或品类时，禁止只改 name，description 必须写出可区分的外形差异。衣橱单品填空字符串。',
+                    '新品必填一句外观，供后续出图照抄：颜色、材质，以及肉眼可见的结构止点。厚薄影响选品时，写明面料厚薄或保暖结构。上装写领型、袖型与袖长止点（袖口落到腕/肘/上臂哪一段）、衣长止点（腰/髋/臀）；下装写裤型或裙型与下摆止点（膝/小腿中/踝）；鞋写鞋头、鞋面、鞋底、跟高、有无松紧带或绑带。禁止只写行话（如只写「窄袖」「直筒」却不写袖口或下摆落在哪）。用户否定上一版气质或品类时，禁止只改 name，description 必须写出可区分的外形差异。衣橱单品填空字符串。',
                 },
               },
               required: ['id', 'name', 'layer', 'reason', 'description'],
@@ -131,7 +134,7 @@ export const stylistSchema: Schema = {
             type: Type.OBJECT,
             properties: {
               model_pose: { type: Type.STRING, description: '只用中文写姿态和神态：站立或行走、双手位置、视线。禁止写发色、发型、刘海、五官、脸型、年龄、身材、眼镜和人物设定。' },
-              outfit_details: { type: Type.STRING, description: '只用中文写 selected_items 已有单品的材质、色彩与廓形，须与各件 description 一致。每件须写可出图的止点：袖长、衣长、裙长或裤长落到身体的哪一段；禁止只写行话不写止点。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
+              outfit_details: { type: Type.STRING, description: '只用中文写 selected_items 已有单品的材质、色彩与廓形。保留可见单品决定选用的厚薄或保暖结构，须与各件 description 一致。每件须写可出图的止点：袖长、衣长、裙长或裤长落到身体的哪一段；禁止只写行话不写止点。禁止出现清单外的服装、配饰或装备，佩戴位置也只能落在已选单品上。' },
               background: { type: Type.STRING, description: '只用中文写场景与光线。禁止写人物外形。' },
               inner_visibility: {
                 type: Type.STRING,

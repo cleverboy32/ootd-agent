@@ -284,6 +284,30 @@ describe('buildSeedreamImagePrompt', () => {
     assert.ok(prompt.length <= 300);
   });
 
+  it('preserves new and wardrobe garment thickness when only the coat has a photo', () => {
+    const layered: StylistOutfit = {
+      ...outfit,
+      selected_items: [
+        {
+          id: 'new_item', name: '白色长袖打底衫', layer: 'inner_top',
+          description: '薄款棉针织，长袖到手腕，衣长到髋。',
+          reason: '早晚10℃搭风衣，中午18℃可以单穿。',
+        },
+        { id: 'coat', name: '卡其风衣', layer: 'outerwear', reason: '挡风' },
+        { id: 'pants', name: '直筒牛仔裤', layer: 'bottom', reason: '长裤' },
+      ],
+    };
+    const ragCache = new Map([
+      ['pants', { id: 'pants', description: '深蓝中厚牛仔布，裤脚遮住脚踝。' } as never],
+    ]);
+    for (const labels of [[], ['卡其风衣 (outerwear)']]) {
+      const prompt = buildSeedreamImagePrompt(layered, ragCache, labels);
+      assert.match(prompt, /薄款棉针织/);
+      assert.match(prompt, /深蓝中厚牛仔布/);
+      assert.doesNotMatch(prompt, /10℃|18℃/);
+    }
+  });
+
   it('injects full wardrobe descriptions so front pleats are not lost to label truncation', () => {
     const pantsOutfit: StylistOutfit = {
       ...outfit,

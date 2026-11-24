@@ -383,6 +383,7 @@ function oneClause(text: string, maxLen = 36): string {
  */
 function buildShortReferencePrompt(
   outfit: StylistOutfit,
+  ragCache: Map<string, ClothingItem> | undefined,
   referenceLabels: string[],
   garmentLabels: string[],
   hasPersonReference: boolean,
@@ -418,7 +419,7 @@ function buildShortReferencePrompt(
     const worn = clothingRefs
       .map((ref) => `图${ref.fig}${referenceDisplayName(ref.label)}`)
       .join('、');
-    lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。`);
+    lines.push(`${worn}原样穿上，不改裤型、袖型、领和长短。保持面料厚薄和蓬松度。`);
   }
 
   if (hiddenInner) {
@@ -429,7 +430,9 @@ function buildShortReferencePrompt(
   if (textOnly.length > 0) {
     const bits = textOnly.map((item) => {
       const name = item.name.trim();
-      const desc = disambiguateImageGarmentTerms(item.description?.trim() ?? '');
+      const desc = disambiguateImageGarmentTerms(
+        item.description?.trim() || ragCache?.get(item.id)?.description?.trim() || ''
+      );
       if (isTextOnlySmallJewelry(name, item.layer)) {
         return smallJewelryTextOnlyAppearance(name, desc);
       }
@@ -437,6 +440,7 @@ function buildShortReferencePrompt(
       return desc.startsWith(name) ? desc : `${name}，${desc}`;
     });
     lines.push(`没有照片的单品：${bits.join('；')}。`);
+    lines.push('无图服装按描述还原面料厚薄与保暖结构。');
   }
 
   const textOnlyOutfit: StylistOutfit = {
@@ -662,6 +666,7 @@ export function buildSeedreamImagePrompt(
   if (garmentLabels.length > 0) {
     return buildShortReferencePrompt(
       outfit,
+      ragCache,
       referenceLabels,
       garmentLabels,
       hasPersonReference,
@@ -676,6 +681,6 @@ export const SEEDREAM_SYSTEM_INSTRUCTION = [
   '真实摄影街拍穿搭图，禁止插画/3D。',
   '图1只取脸与身材；脸、五官、肤色与真实肤质须与图1一致，保留毛孔与轻微瑕疵，禁止磨皮、匀肤、美白、网红伪素颜、美颜改五官、换脸、整容变形、改头身比或拉长腿。',
   '正常两只手、两只脚，禁止多余肢体或手臂分叉。',
-  '有图单品跟参考图；没有参考图的单品以穿着描述为准，衣长裙长袖长必须与描述一致。',
+  '有图单品跟参考图；没有参考图的单品以穿着描述为准，衣长裙长袖长和面料厚薄必须与描述一致。',
   '配饰小尺寸点缀，禁止巨物化。',
 ].join('');

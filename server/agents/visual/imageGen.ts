@@ -186,7 +186,7 @@ export function buildImagePrompt(
 
   const lines = [
     'Fashion editorial photography, photorealistic, highly detailed fabric textures.',
-    'CRITICAL GARMENT FIDELITY: Every item must match its exact silhouette, hemline length, and fit as described. Do NOT alter proportions or lengths.',
+    'CRITICAL GARMENT FIDELITY: Preserve the exact silhouette, hemline length, fit, fabric thickness, and loft. Follow each item’s reference photo when present and its appearance description otherwise.',
   ];
 
   if (outfitHasAccessory(outfit, ragCache)) {
