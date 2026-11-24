@@ -188,6 +188,45 @@ describe('normalizeOutfitGarmentLayers', () => {
 });
 
 describe('alignStylistItemsWithWardrobe layer', () => {
+  for (const { name, category, keepOuterwear } of [
+    { name: '立领拉链夹克', category: 'OUTERWEAR', keepOuterwear: true },
+    { name: '针织开衫', category: 'TOP', keepOuterwear: true },
+    { name: '圆领套头卫衣', category: 'TOP', keepOuterwear: false },
+  ] as const) {
+    it(`aligns wardrobe layers for an inner top and ${name}`, () => {
+      const result: StylistResult = {
+        outfits: [{
+          id: 'outfit_1',
+          overall_concept: '两层上装',
+          selected_items: [
+            { id: 'shirt', name: '薄针织衫', layer: 'inner_top', reason: '基础内搭' },
+            { id: 'outer', name, layer: 'outerwear', reason: '外搭挡风' },
+          ],
+          visual_composition: {
+            model_pose: '站立',
+            outfit_details: '薄针织衫叠穿',
+            background: '街头',
+            inner_visibility: 'collar_only',
+          },
+        }],
+      };
+      const cache = new Map([
+        ['shirt', { subCategory: '针织翻领衬衫', mainCategory: 'TOP' as const, description: null }],
+        ['outer', { subCategory: name, mainCategory: category, description: null }],
+      ]);
+
+      alignStylistItemsWithWardrobe(result, cache);
+
+      const outfit = result.outfits[0];
+      assert.deepEqual(
+        outfit.selected_items.map((item) => item.layer),
+        keepOuterwear ? ['inner_top', 'outerwear'] : ['top', 'top']
+      );
+      assert.equal(outfit.selected_items[0].name, '针织翻领衬衫');
+      assert.equal(outfit.visual_composition.inner_visibility, keepOuterwear ? 'collar_only' : 'open');
+    });
+  }
+
   it('rewrites a zip knit jacket marked as inner_top back to outerwear', () => {
     const result: StylistResult = {
       outfits: [

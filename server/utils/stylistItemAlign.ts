@@ -100,8 +100,20 @@ function isOuterwearLayer(layer: string): boolean {
 }
 
 function isInnerTopLayer(layer: string): boolean {
-  const key = layerKey(layer);
-  return key === 'inner_top' || key === 'inner' || key.includes('inner');
+  return /^inner(?:[_ -]?top)?$/.test(layerKey(layer));
+}
+
+const OPEN_FRONT_TOP = /开衫|外套|夹克|\b(?:cardigan|overshirt|shacket|jacket)\b/i;
+
+function resolveWardrobeLayer(
+  item: Pick<ClothingItem, 'mainCategory' | 'subCategory'>,
+  proposedLayer: string
+): string | undefined {
+  const defaultLayer = layerForMainCategory(item.mainCategory);
+  if (defaultLayer !== 'top') return defaultLayer;
+  if (isInnerTopLayer(proposedLayer)) return 'inner_top';
+  if (isOuterwearLayer(proposedLayer) && OPEN_FRONT_TOP.test(item.subCategory)) return 'outerwear';
+  return defaultLayer;
 }
 
 /**
@@ -127,7 +139,7 @@ export function normalizeOutfitGarmentLayers(result: StylistResult): void {
 }
 
 /**
- * 用衣橱元数据强制对齐 Stylist 输出的 name 与 layer，并修正明显品类冲突的文案。
+ * 对齐衣橱单品名称和品类，保留兼容的上装穿搭角色。
  */
 export function alignStylistItemsWithWardrobe(
   result: StylistResult,
@@ -144,7 +156,7 @@ export function alignStylistItemsWithWardrobe(
       const nameChanged = Boolean(oldName) && oldName.toLowerCase() !== newName.toLowerCase();
 
       item.name = newName;
-      const layer = layerForMainCategory(cached.mainCategory);
+      const layer = resolveWardrobeLayer(cached, item.layer);
       if (layer) item.layer = layer;
 
       if (nameChanged) {
